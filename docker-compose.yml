@@ -1,0 +1,15 @@
+services:
+  testforge:
+    build: .
+    image: testforge:latest
+    ports:
+      - "8000:8000"
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      TF_ARTIFACTS: /app/artifacts
+      TF_MCP_ARGS: '-y @playwright/mcp@latest --headless --isolated --caps=vision'
+    volumes:
+      - testforge-data:/app/artifacts
+    restart: unless-stopped
+volumes:
+  testforge-data:

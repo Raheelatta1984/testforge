@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: testforge
+    runtime: docker
+    plan: free
+    autoDeploy: true
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: TF_ARTIFACTS
+        value: /app/artifacts

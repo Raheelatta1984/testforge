@@ -1,0 +1,8 @@
+fastapi==0.115.6
+uvicorn==0.34.0
+sqlalchemy==2.0.36
+playwright==1.49.1
+anthropic==0.42.0
+python-multipart==0.0.20
+websockets==14.1
+mcp==1.2.0
