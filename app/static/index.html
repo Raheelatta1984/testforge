@@ -9,619 +9,287 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 <style>
-  body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; background: #020617; color: #f8fafc; font-family: sans-serif; }
   .canvas-img { image-rendering: auto; user-select: none; }
 </style>
 </head>
-<body class="bg-slate-950 text-slate-100">
-<div id="root"></div>
+<body>
+<div id="root">
+  <div style="padding: 40px; text-align: center;">
+    <h2>⚒️ Loading TestForge Portal...</h2>
+    <p style="color: #94a3b8; font-size: 14px;">If this stays for more than 3 seconds, check your browser console.</p>
+  </div>
+</div>
+
+<script>
+  window.addEventListener('error', function(e) {
+    document.getElementById('root').innerHTML = '<div style="padding:20px; color:#ef4444;"><h3>Script Error:</h3><pre>' + e.message + ' at line ' + e.lineno + '</pre></div>';
+  });
+</script>
 
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useRef, useCallback } = React;
+try {
+  const { useState, useEffect, useRef, useCallback } = React;
 
-const API = {
-  async req(m, u, b) {
-    const r = await fetch(u, { method: m,
-      headers: { "Content-Type": "application/json" },
-      body: b !== undefined ? JSON.stringify(b) : undefined });
-    if (!r.ok) throw new Error((await r.text()).slice(0, 300));
-    return r.json();
-  },
-  get: (u) => API.req("GET", u),
-  post: (u, b) => API.req("POST", u, b),
-  patch: (u, b) => API.req("PATCH", u, b),
-  del: (u) => API.req("DELETE", u),
-};
-
-const ACTION_ICON = { navigate:"🌐", click:"🖱", dblclick:"🖱🖱", fill:"⌨️",
-  select:"🔽", press:"⏎", copy:"⎘", cut:"✂️", paste:"📋", scroll:"🖱",
-  assert_text:"✓", assert_visible:"👁", wait:"⏱", call_recording:"🔗" };
-
-function Badge({children, color}) {
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded ${color||"bg-slate-700"}`}>{children}</span>;
-}
-
-function App() {
-  const [tab, setTab] = useState("projects");
-  const [projects, setProjects] = useState([]);
-  const [activeProject, setActiveProject] = useState(
-    () => JSON.parse(localStorage.getItem("tf_project") || "null"));
-  const [activeRun, setActiveRun] = useState(null);
-
-  const loadProjects = () => API.get("/api/projects").then(setProjects).catch(console.error);
-  useEffect(loadProjects, []);
-
-  const selectProject = (p) => {
-    setActiveProject(p);
-    localStorage.setItem("tf_project", JSON.stringify(p));
-  };
-  const runStarted = (id) => { setActiveRun(id); setTab("runs"); };
-
-  const tabs = [
-    ["projects", "📁 Projects"], ["record", "⏺ Record"],
-    ["library", "📚 Library"], ["variables", "🔤 Variables"],
-    ["scenarios", "✨ Scenarios"], ["runs", "▶ Runs"],
-  ];
-
-  return (
-    <div className="min-h-screen pb-20">
-      <header className="sticky top-0 z-10 bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-2">
-        <span className="font-bold text-lg">⚒️ TestForge</span>
-        {activeProject && <Badge color="bg-indigo-700">{activeProject.name}</Badge>}
-      </header>
-      <main className="p-3 max-w-3xl mx-auto">
-        {tab === "projects" && <Projects projects={projects} active={activeProject}
-          onSelect={selectProject} onChanged={loadProjects} />}
-        {tab === "record" && <Recorder project={activeProject} />}
-        {tab === "library" && <Library project={activeProject} projects={projects} onRun={runStarted} />}
-        {tab === "variables" && <Variables project={activeProject} />}
-        {tab === "scenarios" && <Scenarios project={activeProject} onRun={runStarted} />}
-        {tab === "runs" && <Runs activeRun={activeRun} setActiveRun={setActiveRun} />}
-      </main>
-      <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex overflow-x-auto">
-        {tabs.map(([k, label]) => (
-          <button key={k} onClick={() => setTab(k)}
-            className={`flex-1 py-3 text-xs whitespace-nowrap px-2
-              ${tab === k ? "text-indigo-400 border-t-2 border-indigo-400" : "text-slate-400"}`}>
-            {label}
-          </button>
-        ))}
-      </nav>
-    </div>
-  );
-}
-
-function NeedProject() {
-  return <div className="text-center text-slate-400 mt-16">Select or create a project first 📁</div>;
-}
-
-function Projects({ projects, active, onSelect, onChanged }) {
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState("");
-  const create = async () => {
-    if (!name.trim()) return;
-    const p = await API.post("/api/projects", { name, base_url: url });
-    setName(""); setUrl(""); onChanged(); onSelect(p);
-  };
-  return (
-    <div className="space-y-3">
-      <div className="bg-slate-900 rounded-lg p-3 space-y-2">
-        <input className="w-full bg-slate-800 rounded px-3 py-2" placeholder="Project name"
-          value={name} onChange={e => setName(e.target.value)} />
-        <input className="w-full bg-slate-800 rounded px-3 py-2" placeholder="Base URL (optional)"
-          value={url} onChange={e => setUrl(e.target.value)} />
-        <button onClick={create} className="w-full bg-indigo-600 rounded py-2 font-semibold">
-          + Create Project</button>
-      </div>
-      {projects.map(p => (
-        <div key={p.id} onClick={() => onSelect(p)}
-          className={`bg-slate-900 rounded-lg p-3 cursor-pointer border
-            ${active?.id === p.id ? "border-indigo-500" : "border-slate-800"}`}>
-          <div className="font-semibold">{p.name}</div>
-          <div className="text-xs text-slate-400">{p.base_url}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function Recorder({ project }) {
-  const [name, setName] = useState("");
-  const [url, setUrl] = useState(project?.base_url || "");
-  const [shared, setShared] = useState(false);
-  const [recId, setRecId] = useState(null);
-  const [steps, setSteps] = useState([]);
-
-  if (!project) return <NeedProject />;
-
-  const start = async () => {
-    const r = await API.post("/api/recordings",
-      { project_id: project.id, name: name || "Untitled", start_url: url, shared });
-    setSteps([]); setRecId(r.id);
+  const API = {
+    async req(m, u, b) {
+      const r = await fetch(u, { method: m,
+        headers: { "Content-Type": "application/json" },
+        body: b !== undefined ? JSON.stringify(b) : undefined });
+      if (!r.ok) throw new Error((await r.text()).slice(0, 300));
+      return r.json();
+    },
+    get: (u) => API.req("GET", u),
+    post: (u, b) => API.req("POST", u, b),
+    patch: (u, b) => API.req("PATCH", u, b),
+    del: (u) => API.req("DELETE", u),
   };
 
-  if (recId) return <LiveRecorder recId={recId} steps={steps} setSteps={setSteps}
-    onDone={() => setRecId(null)} />;
+  const ACTION_ICON = { navigate:"🌐", click:"🖱", dblclick:"🖱🖱", fill:"⌨️",
+    select:"🔽", press:"⏎", copy:"⎘", cut:"✂️", paste:"📋", scroll:"🖱",
+    assert_text:"✓", assert_visible:"👁", wait:"⏱", call_recording:"🔗" };
 
-  return (
-    <div className="bg-slate-900 rounded-lg p-3 space-y-2">
-      <h2 className="font-bold">⏺ New Recording</h2>
-      <input className="w-full bg-slate-800 rounded px-3 py-2" placeholder="Recording name"
-        value={name} onChange={e => setName(e.target.value)} />
-      <input className="w-full bg-slate-800 rounded px-3 py-2" placeholder="https://start-url.com"
-        value={url} onChange={e => setUrl(e.target.value)} />
-      <label className="flex items-center gap-2 text-sm">
-        <input type="checkbox" checked={shared} onChange={e => setShared(e.target.checked)} />
-        Share across all projects (reusable everywhere)
-      </label>
-      <button onClick={start} className="w-full bg-red-600 rounded py-2 font-semibold">
-        ● Start Recording</button>
-      <p className="text-xs text-slate-400">A live browser will appear. Tap and type on it —
-        every action becomes a step.</p>
-    </div>
-  );
-}
+  function Badge({children, color}) {
+    return <span className={`text-[10px] px-1.5 py-0.5 rounded ${color||"bg-slate-700"}`}>{children}</span>;
+  }
 
-function LiveRecorder({ recId, steps, setSteps, onDone }) {
-  const [frame, setFrame] = useState(null);
-  const [text, setText] = useState("");
-  const wsRef = useRef(null);
+  function App() {
+    const [tab, setTab] = useState("projects");
+    const [projects, setProjects] = useState([]);
+    const [activeProject, setActiveProject] = useState(
+      () => JSON.parse(localStorage.getItem("tf_project") || "null"));
+    const [activeRun, setActiveRun] = useState(null);
 
-  useEffect(() => {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/record/${recId}`);
-    ws.onmessage = (e) => {
-      const m = JSON.parse(e.data);
-      if (m.type === "frame") setFrame("data:image/jpeg;base64," + m.data);
-      else if (m.type === "step") setSteps(s => [...s, m.step]);
-      else if (m.type === "stopped") onDone();
+    const loadProjects = () => API.get("/api/projects").then(setProjects).catch(console.error);
+    useEffect(loadProjects, []);
+
+    const selectProject = (p) => {
+      setActiveProject(p);
+      localStorage.setItem("tf_project", JSON.stringify(p));
     };
-    wsRef.current = ws;
-    return () => { try { ws.send(JSON.stringify({ type: "stop" })); } catch (_) {} ws.close(); };
-  }, [recId]);
+    const runStarted = (id) => { setActiveRun(id); setTab("runs"); };
 
-  const send = (o) => wsRef.current?.readyState === 1 &&
-    wsRef.current.send(JSON.stringify(o));
+    const tabs = [
+      ["projects", "📁 Projects"], ["record", "⏺ Record"],
+      ["library", "📚 Library"], ["variables", "🔤 Variables"],
+      ["scenarios", "✨ Scenarios"], ["runs", "▶ Runs"],
+    ];
 
-  const tap = (e) => {
-    const r = e.currentTarget.getBoundingClientRect();
-    send({ type: "tap",
-      x: Math.round((e.clientX - r.left) / r.width * 1280),
-      y: Math.round((e.clientY - r.top) / r.height * 800) });
-  };
-  const typeText = () => { if (text) { send({ type: "text", text }); setText(""); } };
-  const key = (k) => send({ type: "key", key: k });
+    return (
+      <div className="min-h-screen pb-20">
+        <header className="sticky top-0 z-10 bg-slate-900 border-b border-slate-800 px-4 py-3 flex items-center gap-2">
+          <span className="font-bold text-lg">⚒️ TestForge</span>
+          {activeProject && <Badge color="bg-indigo-700">{activeProject.name}</Badge>}
+        </header>
+        <main className="p-3 max-w-3xl mx-auto">
+          {tab === "projects" && <Projects projects={projects} active={activeProject}
+            onSelect={selectProject} onChanged={loadProjects} />}
+          {tab === "record" && <Recorder project={activeProject} />}
+          {tab === "library" && <Library project={activeProject} projects={projects} onRun={runStarted} />}
+          {tab === "variables" && <Variables project={activeProject} />}
+          {tab === "scenarios" && <Scenarios project={activeProject} onRun={runStarted} />}
+          {tab === "runs" && <Runs activeRun={activeRun} setActiveRun={setActiveRun} />}
+        </main>
+        <nav className="fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex overflow-x-auto">
+          {tabs.map(([k, label]) => (
+            <button key={k} onClick={() => setTab(k)}
+              className={`flex-1 py-3 text-xs whitespace-nowrap px-2
+                ${tab === k ? "text-indigo-400 border-t-2 border-indigo-400" : "text-slate-400"}`}>
+              {label}
+            </button>
+          ))}
+        </nav>
+      </div>
+    );
+  }
 
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
-        <span className="text-sm font-semibold">REC</span>
-        <button onClick={() => send({ type: "stop" })}
-          className="ml-auto bg-slate-700 rounded px-4 py-1.5 text-sm">⏹ Stop & Save</button>
-      </div>
-      <div className="bg-black rounded-lg overflow-hidden border border-slate-700">
-        {frame
-          ? <img className="canvas-img w-full" src={frame} onClick={tap} draggable="false"/>
-          : <div className="h-64 flex items-center justify-center text-slate-500">
-              Launching browser…</div>}
-      </div>
-      <div className="flex gap-1.5">
-        <input className="flex-1 bg-slate-800 rounded px-3 py-2 text-sm"
-          placeholder="Type text, then tap a field & press Type"
-          value={text} onChange={e => setText(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && typeText()} />
-        <button onClick={typeText} className="bg-indigo-600 rounded px-3 text-sm">Type</button>
-      </div>
-      <div className="flex gap-1.5 flex-wrap">
-        {[["Enter","Enter"],["Tab","Tab"],["Esc","Escape"],["⌫","Backspace"]].map(([l,k]) => (
-          <button key={k} onClick={() => key(k)}
-            className="bg-slate-700 rounded px-3 py-1.5 text-sm">{l}</button>
-        ))}
-        <button onClick={() => send({type:"scroll", deltaY:-400})}
-          className="bg-slate-700 rounded px-3 py-1.5 text-sm">↑</button>
-        <button onClick={() => send({type:"scroll", deltaY:400})}
-          className="bg-slate-700 rounded px-3 py-1.5 text-sm">↓</button>
-      </div>
-      <div className="bg-slate-900 rounded-lg p-2 max-h-56 overflow-y-auto">
-        <div className="text-xs text-slate-400 px-1 pb-1">{steps.length} steps captured</div>
-        {steps.map((s, i) => (
-          <div key={i} className="text-sm px-1 py-1 border-b border-slate-800">
-            {ACTION_ICON[s.action] || "•"} <span className="text-slate-300">
-              {s.label || s.action}</span>
-            {s.value && <span className="text-indigo-300"> = "{s.value}"</span>}
+  function NeedProject() {
+    return <div className="text-center text-slate-400 mt-16">Select or create a project first 📁</div>;
+  }
+
+  function Projects({ projects, active, onSelect, onChanged }) {
+    const [name, setName] = useState("");
+    const [url, setUrl] = useState("");
+    const create = async () => {
+      if (!name.trim()) return;
+      const p = await API.post("/api/projects", { name, base_url: url });
+      setName(""); setUrl(""); onChanged(); onSelect(p);
+    };
+    return (
+      <div className="space-y-3">
+        <div className="bg-slate-900 rounded-lg p-3 space-y-2">
+          <input className="w-full bg-slate-800 rounded px-3 py-2 text-white" placeholder="Project name"
+            value={name} onChange={e => setName(e.target.value)} />
+          <input className="w-full bg-slate-800 rounded px-3 py-2 text-white" placeholder="Base URL (optional)"
+            value={url} onChange={e => setUrl(e.target.value)} />
+          <button onClick={create} className="w-full bg-indigo-600 rounded py-2 font-semibold">
+            + Create Project</button>
+        </div>
+        {projects.map(p => (
+          <div key={p.id} onClick={() => onSelect(p)}
+            className={`bg-slate-900 rounded-lg p-3 cursor-pointer border
+              ${active?.id === p.id ? "border-indigo-500" : "border-slate-800"}`}>
+            <div className="font-semibold">{p.name}</div>
+            <div className="text-xs text-slate-400">{p.base_url}</div>
           </div>
         ))}
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-async function startRun(target_type, target_id, onRun) {
-  const mode = localStorage.getItem("tf_mode") || "script";
-  const r = await API.post("/api/runs", { target_type, target_id, mode });
-  onRun && onRun(r.run_id);
-}
+  function Recorder({ project }) {
+    const [name, setName] = useState("");
+    const [url, setUrl] = useState(project?.base_url || "");
+    const [shared, setShared] = useState(false);
+    const [recId, setRecId] = useState(null);
+    const [steps, setSteps] = useState([]);
 
-function Library({ project, projects, onRun }) {
-  const [recs, setRecs] = useState([]);
-  const [open, setOpen] = useState(null);
-  const [detail, setDetail] = useState(null);
+    if (!project) return <NeedProject />;
 
-  const load = useCallback(() => project &&
-    API.get(`/api/projects/${project.id}/recordings`).then(setRecs), [project]);
-  useEffect(() => { load(); }, [load]);
+    const start = async () => {
+      const r = await API.post("/api/recordings",
+        { project_id: project.id, name: name || "Untitled", start_url: url, shared });
+      setSteps([]); setRecId(r.id);
+    };
 
-  if (!project) return <NeedProject />;
+    if (recId) return <LiveRecorder recId={recId} steps={steps} setSteps={setSteps}
+      onDone={() => setRecId(null)} />;
 
-  const openRec = async (id) => {
-    if (open === id) { setOpen(null); return; }
-    setDetail(await API.get(`/api/recordings/${id}`));
-    setOpen(id);
-  };
-  const del = async (id) => { await API.del(`/api/recordings/${id}`); load(); };
-  const dup = async (id, target) => { await API.post(`/api/recordings/${id}/duplicate`,
-    { target_project_id: target }); alert("Copied ✓"); };
-  const toggleShare = async (r) => { await API.patch(`/api/recordings/${r.id}`,
-    { shared: !r.shared }); load(); };
-
-  return (
-    <div className="space-y-2">
-      <h2 className="font-bold">📚 Recording Library</h2>
-      {recs.length === 0 && <p className="text-slate-400 text-sm">No recordings yet —
-        go to ⏺ Record.</p>}
-      {recs.map(r => (
-        <div key={r.id} className="bg-slate-900 rounded-lg border border-slate-800">
-          <div className="p-3 flex items-center gap-2" onClick={() => openRec(r.id)}>
-            <div className="flex-1">
-              <div className="font-semibold">{r.name}</div>
-              <div className="text-xs text-slate-400">
-                {r.step_count} steps · {r.status}
-                {r.project_id !== project.id && <Badge color="bg-purple-700 ml-1">from other project</Badge>}
-                {r.shared && <Badge color="bg-teal-700 ml-1">shared</Badge>}
-              </div>
-            </div>
-            <button onClick={(e) => { e.stopPropagation(); toggleShare(r); }}
-              className="text-lg">{r.shared ? "🌐" : "🔒"}</button>
-            <button onClick={(e) => { e.stopPropagation(); startRun("recording", r.id, onRun); }}
-              className="bg-emerald-600 rounded px-3 py-1.5 text-sm">▶</button>
-          </div>
-          {open === r.id && detail && detail.id === r.id && (
-            <div className="border-t border-slate-800 p-2 space-y-1">
-              {detail.steps.map(s => (
-                <StepRow key={s.id} step={s}
-                  onChanged={async () => setDetail(await API.get(`/api/recordings/${r.id}`))} />
-              ))}
-              <AddStepRow recId={r.id} projectRecs={recs.filter(x => x.id !== r.id)}
-                onChanged={async () => setDetail(await API.get(`/api/recordings/${r.id}`))} />
-              <div className="flex gap-2 pt-2 flex-wrap">
-                {projects.filter(p => p.id !== project.id).map(p => (
-                  <button key={p.id} onClick={() => dup(r.id, p.id)}
-                    className="bg-slate-700 rounded px-2 py-1 text-xs">
-                    ⧉ Copy to {p.name}</button>
-                ))}
-                <button onClick={() => del(r.id)}
-                  className="bg-red-900 rounded px-2 py-1 text-xs ml-auto">🗑 Delete</button>
-              </div>
-            </div>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function StepRow({ step, onChanged }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState(step.value || "");
-  const [label, setLabel] = useState(step.label || "");
-
-  const save = async () => {
-    await API.patch(`/api/steps/${step.id}`, { value, label });
-    setEditing(false); onChanged();
-  };
-  return (
-    <div className="flex items-center gap-1.5 text-sm bg-slate-800/60 rounded px-2 py-1.5">
-      <span className="text-slate-500 text-xs w-6">{step.order}</span>
-      <span>{ACTION_ICON[step.action] || "•"}</span>
-      {editing ? (
-        <div className="flex-1 flex gap-1">
-          <input className="flex-1 bg-slate-900 rounded px-2 py-1 text-xs" value={label}
-            onChange={e => setLabel(e.target.value)} placeholder="label" />
-          <input className="flex-1 bg-slate-900 rounded px-2 py-1 text-xs" value={value}
-            onChange={e => setValue(e.target.value)} placeholder="value / {{var}}" />
-          <button onClick={save} className="text-emerald-400 px-1">✓</button>
-        </div>
-      ) : (
-        <span className="flex-1 truncate" onClick={() => setEditing(true)}>
-          {step.action === "call_recording"
-            ? <span className="text-purple-300">🔗 runs recording {step.ref_recording_id?.slice(0,8)}…
-                {step.variable_overrides && <Badge color="bg-amber-700 ml-1">overrides</Badge>}</span>
-            : <>{step.label || step.action}
-               {step.value && <span className="text-indigo-300"> = "{step.value}"</span>}</>}
-        </span>
-      )}
-      <button onClick={async () => { await API.post(`/api/steps/${step.id}/move?direction=up`); onChanged(); }}
-        className="text-slate-500">↑</button>
-      <button onClick={async () => { await API.post(`/api/steps/${step.id}/move?direction=down`); onChanged(); }}
-        className="text-slate-500">↓</button>
-      <button onClick={async () => { await API.del(`/api/steps/${step.id}`); onChanged(); }}
-        className="text-red-400">✕</button>
-    </div>
-  );
-}
-
-function AddStepRow({ recId, projectRecs, onChanged }) {
-  const [action, setAction] = useState("call_recording");
-  const [value, setValue] = useState("");
-  const [refId, setRefId] = useState("");
-  const [overrides, setOverrides] = useState("");
-
-  const add = async () => {
-    let ov = {};
-    if (overrides.trim()) { try { ov = JSON.parse(overrides); }
-      catch { alert("Overrides must be JSON"); return; } }
-    await API.post(`/api/recordings/${recId}/steps`, {
-      action, value: value || null,
-      ref_recording_id: action === "call_recording" ? refId : null,
-      variable_overrides: ov });
-    setValue(""); setOverrides(""); onChanged();
-  };
-
-  return (
-    <div className="bg-slate-800/40 rounded p-2 space-y-1.5">
-      <select className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm"
-        value={action} onChange={e => setAction(e.target.value)}>
-        <option value="call_recording">🔗 Insert another recording (reuse)</option>
-        <option value="assert_text">✓ Assert text on page</option>
-        <option value="wait">⏱ Wait (ms)</option>
-        <option value="navigate">🌐 Navigate to URL</option>
-      </select>
-      {action === "call_recording" ? (
-        <>
-          <select className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm"
-            value={refId} onChange={e => setRefId(e.target.value)}>
-            <option value="">— pick recording (any project / shared) —</option>
-            {projectRecs.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-          </select>
-          <input className="w-full bg-slate-900 rounded px-2 py-1.5 text-xs"
-            placeholder='Variable overrides JSON, e.g. {"username":"bob"}'
-            value={overrides} onChange={e => setOverrides(e.target.value)} />
-        </>
-      ) : (
-        <input className="w-full bg-slate-900 rounded px-2 py-1.5 text-sm"
-          placeholder="value (supports {{variables}})"
-          value={value} onChange={e => setValue(e.target.value)} />
-      )}
-      <button onClick={add} className="w-full bg-indigo-600 rounded py-1.5 text-sm">
-        + Add step</button>
-    </div>
-  );
-}
-
-function Variables({ project }) {
-  const [vars, setVars] = useState([]);
-  const [scope, setScope] = useState("global");
-  const [name, setName] = useState("");
-  const [value, setValue] = useState("");
-  const [secret, setSecret] = useState(false);
-
-  const load = useCallback(() =>
-    API.get(`/api/variables${project ? "?project_id=" + project.id : ""}`)
-      .then(setVars), [project]);
-  useEffect(() => { load(); }, [load]);
-
-  if (!project) return <NeedProject />;
-
-  const create = async () => {
-    await API.post("/api/variables", {
-      scope, name, value, is_secret: secret,
-      project_id: scope === "project" ? project.id : null });
-    setName(""); setValue(""); load();
-  };
-
-  return (
-    <div className="space-y-3">
-      <h2 className="font-bold">🔤 Variables</h2>
-      <p className="text-xs text-slate-400">
-        Use as <code>{"{{name}}"}</code> in any step value. Scope priority:
-        recording &gt; project &gt; global. Overrides on reused recordings win over all.</p>
+    return (
       <div className="bg-slate-900 rounded-lg p-3 space-y-2">
-        <select className="w-full bg-slate-800 rounded px-3 py-2" value={scope}
-          onChange={e => setScope(e.target.value)}>
-          <option value="global">🌍 Global (all projects)</option>
-          <option value="project">📁 This project</option>
-        </select>
-        <input className="w-full bg-slate-800 rounded px-3 py-2" placeholder="name (e.g. username)"
+        <h2 className="font-bold">⏺ New Recording</h2>
+        <input className="w-full bg-slate-800 rounded px-3 py-2 text-white" placeholder="Recording name"
           value={name} onChange={e => setName(e.target.value)} />
-        <input className="w-full bg-slate-800 rounded px-3 py-2" placeholder="value"
-          value={value} onChange={e => setValue(e.target.value)} />
+        <input className="w-full bg-slate-800 rounded px-3 py-2 text-white" placeholder="https://start-url.com"
+          value={url} onChange={e => setUrl(e.target.value)} />
         <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={secret} onChange={e => setSecret(e.target.checked)} />
-          Secret (masked in UI)</label>
-        <button onClick={create} className="w-full bg-indigo-600 rounded py-2 font-semibold">
-          + Save Variable</button>
+          <input type="checkbox" checked={shared} onChange={e => setShared(e.target.checked)} />
+          Share across all projects (reusable everywhere)
+        </label>
+        <button onClick={start} className="w-full bg-red-600 rounded py-2 font-semibold">
+          ● Start Recording</button>
       </div>
-      {vars.map(v => (
-        <div key={v.id} className="bg-slate-900 rounded-lg p-3 flex items-center gap-2">
-          <Badge color={v.scope === "global" ? "bg-teal-700" : "bg-indigo-700"}>{v.scope}</Badge>
-          <code className="text-sm">{`{{${v.name}}}`}</code>
-          <span className="text-slate-400 text-sm flex-1 truncate">= {v.value}</span>
-          <button onClick={async () => { await API.del(`/api/variables/${v.id}`); load(); }}
-            className="text-red-400">✕</button>
+    );
+  }
+
+  function LiveRecorder({ recId, steps, setSteps, onDone }) {
+    const [frame, setFrame] = useState(null);
+    const [text, setText] = useState("");
+    const wsRef = useRef(null);
+
+    useEffect(() => {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws/record/${recId}`);
+      ws.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.type === "frame") setFrame("data:image/jpeg;base64," + m.data);
+        else if (m.type === "step") setSteps(s => [...s, m.step]);
+        else if (m.type === "stopped") onDone();
+      };
+      wsRef.current = ws;
+      return () => { try { ws.send(JSON.stringify({ type: "stop" })); } catch (_) {} ws.close(); };
+    }, [recId]);
+
+    const send = (o) => wsRef.current?.readyState === 1 &&
+      wsRef.current.send(JSON.stringify(o));
+
+    const tap = (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      send({ type: "tap",
+        x: Math.round((e.clientX - r.left) / r.width * 1280),
+        y: Math.round((e.clientY - r.top) / r.height * 800) });
+    };
+    const typeText = () => { if (text) { send({ type: "text", text }); setText(""); } };
+    const key = (k) => send({ type: "key", key: k });
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span>
+          <span className="text-sm font-semibold">REC</span>
+          <button onClick={() => send({ type: "stop" })}
+            className="ml-auto bg-slate-700 rounded px-4 py-1.5 text-sm">⏹ Stop & Save</button>
         </div>
-      ))}
-    </div>
-  );
-}
-
-function Scenarios({ project, onRun }) {
-  const [text, setText] = useState("");
-  const [list, setList] = useState([]);
-  const [busy, setBusy] = useState(false);
-  const [demo, setDemo] = useState(false);
-  const [open, setOpen] = useState(null);
-  const [detail, setDetail] = useState(null);
-
-  const load = useCallback(() => project &&
-    API.get(`/api/projects/${project.id}/scenarios`).then(setList), [project]);
-  useEffect(() => { load(); }, [load]);
-
-  if (!project) return <NeedProject />;
-
-  const generate = async () => {
-    setBusy(true);
-    try {
-      const r = await API.post("/api/scenarios",
-        { project_id: project.id, source_text: text });
-      setDemo(r.demo_mode); setText(""); load();
-    } finally { setBusy(false); }
-  };
-  const openSc = async (id) => {
-    if (open === id) { setOpen(null); return; }
-    setDetail(await API.get(`/api/scenarios/${id}`)); setOpen(id);
-  };
-
-  return (
-    <div className="space-y-3">
-      <h2 className="font-bold">✨ Scenarios from User Story</h2>
-      <div className="bg-slate-900 rounded-lg p-3 space-y-2">
-        <textarea className="w-full bg-slate-800 rounded px-3 py-2 h-28 text-sm"
-          placeholder="Paste user story / acceptance criteria here…"
-          value={text} onChange={e => setText(e.target.value)} />
-        <button onClick={generate} disabled={busy || !text.trim()}
-          className="w-full bg-indigo-600 rounded py-2 font-semibold disabled:opacity-40">
-          {busy ? "Generating…" : "✨ Generate Scenarios"}</button>
-        {demo && <p className="text-xs text-amber-400">
-          Demo mode (no ANTHROPIC_API_KEY set) — returned sample scenarios.</p>}
-      </div>
-      {list.map(s => (
-        <div key={s.id} className="bg-slate-900 rounded-lg border border-slate-800">
-          <div className="p-3 flex items-center gap-2" onClick={() => openSc(s.id)}>
-            <div className="flex-1">
-              <div className="font-semibold text-sm">{s.title}</div>
-              <div className="text-xs text-slate-400">{s.step_count} steps</div>
-            </div>
-            <button onClick={(e) => { e.stopPropagation(); startRun("scenario", s.id, onRun); }}
-              className="bg-emerald-600 rounded px-3 py-1.5 text-sm">▶</button>
-          </div>
-          {open === s.id && detail && detail.id === s.id && (
-            <div className="border-t border-slate-800 p-2 space-y-1">
-              {detail.steps.map(st => (
-                <div key={st.id} className="text-sm bg-slate-800/60 rounded px-2 py-1.5">
-                  {ACTION_ICON[st.action]} {st.action}
-                  {st.value && <span className="text-indigo-300"> "{st.value}"</span>}
-                  {st.expected_result && <div className="text-xs text-slate-400">
-                    → expect: {st.expected_result}</div>}
-                </div>
-              ))}
-            </div>
-          )}
+        <div className="bg-black rounded-lg overflow-hidden border border-slate-700">
+          {frame
+            ? <img className="canvas-img w-full" src={frame} onClick={tap} draggable="false"/>
+            : <div className="h-64 flex items-center justify-center text-slate-500">
+                Launching browser…</div>}
         </div>
-      ))}
-    </div>
-  );
-}
-
-function Runs({ activeRun, setActiveRun }) {
-  const [runs, setRuns] = useState([]);
-  const [mode, setMode] = useState(localStorage.getItem("tf_mode") || "script");
-  const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
-  useEffect(() => { load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, []);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center">
-        <h2 className="font-bold">▶ Runs</h2>
-        <div className="ml-auto flex gap-1 text-xs">
-          {[["script","⚡ Script"],["agent","🤖 Agent"]].map(([m,l]) => (
-            <button key={m}
-              onClick={() => { setMode(m); localStorage.setItem("tf_mode", m); }}
-              className={`rounded px-2 py-1 ${mode === m ? "bg-indigo-600" : "bg-slate-700"}`}>
-              {l}</button>
+        <div className="flex gap-1.5">
+          <input className="flex-1 bg-slate-800 rounded px-3 py-2 text-sm text-white"
+            placeholder="Type text, then tap a field & press Type"
+            value={text} onChange={e => setText(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && typeText()} />
+          <button onClick={typeText} className="bg-indigo-600 rounded px-3 text-sm">Type</button>
+        </div>
+        <div className="flex gap-1.5 flex-wrap">
+          {[["Enter","Enter"],["Tab","Tab"],["Esc","Escape"],["⌫","Backspace"]].map(([l,k]) => (
+            <button key={k} onClick={() => key(k)}
+              className="bg-slate-700 rounded px-3 py-1.5 text-sm">{l}</button>
+          ))}
+        </div>
+        <div className="bg-slate-900 rounded-lg p-2 max-h-56 overflow-y-auto">
+          <div className="text-xs text-slate-400 px-1 pb-1">{steps.length} steps captured</div>
+          {steps.map((s, i) => (
+            <div key={i} className="text-sm px-1 py-1 border-b border-slate-800">
+              {ACTION_ICON[s.action] || "•"} <span className="text-slate-300">
+                {s.label || s.action}</span>
+              {s.value && <span className="text-indigo-300"> = "{s.value}"</span>}
+            </div>
           ))}
         </div>
       </div>
-      {activeRun && <RunDetail runId={activeRun} onClose={() => setActiveRun(null)} />}
-      {runs.map(r => (
-        <div key={r.id} onClick={() => setActiveRun(r.id)}
-          className="bg-slate-900 rounded-lg p-3 cursor-pointer flex items-center gap-2">
-          <Badge color={{ passed:"bg-emerald-700", failed:"bg-red-700",
-            running:"bg-amber-600", queued:"bg-slate-600", error:"bg-red-900" }[r.status]}>
-            {r.status}</Badge>
-          <span className="text-sm">{r.target_type} {r.target_id.slice(0, 8)}…</span>
-          <span className="text-xs text-slate-500 ml-auto">
-            {(r.created_at || "").slice(5, 16).replace("T", " ")}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+    );
+  }
 
-function RunDetail({ runId, onClose }) {
-  const [log, setLog] = useState([]);
-  const [status, setStatus] = useState("running");
-  const [hasVideo, setHasVideo] = useState(false);
-  const [transcript, setTranscript] = useState(null);
+  function Library({ project, projects, onRun }) {
+    const [recs, setRecs] = useState([]);
+    const [open, setOpen] = useState(null);
+    const [detail, setDetail] = useState(null);
 
-  useEffect(() => {
-    setLog([]); setStatus("running"); setTranscript(null);
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/runs/${runId}`);
-    ws.onmessage = (e) => {
-      const m = JSON.parse(e.data);
-      if (m.type === "snapshot" && m.run) {
-        setLog(m.run.log || []); setStatus(m.run.status); setHasVideo(m.run.has_video);
-      } else if (m.type === "step") {
-        setLog(l => { const rest = l.filter(x => x.order !== m.order);
-          return [...rest, m].sort((a, b) => a.order - b.order); });
-      } else if (m.type === "done") {
-        setStatus(m.status); setHasVideo(m.has_video); setLog(m.log || []);
-      }
+    const load = useCallback(() => project &&
+      API.get(`/api/projects/${project.id}/recordings`).then(setRecs), [project]);
+    useEffect(() => { load(); }, [load]);
+
+    if (!project) return <NeedProject />;
+
+    const openRec = async (id) => {
+      if (open === id) { setOpen(null); return; }
+      setDetail(await API.get(`/api/recordings/${id}`));
+      setOpen(id);
     };
-    return () => ws.close();
-  }, [runId]);
 
-  return (
-    <div className="bg-slate-900 rounded-lg p-3 border border-indigo-700 space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="font-semibold text-sm">Run {runId.slice(0, 8)}…</span>
-        <Badge color={{ passed:"bg-emerald-700", failed:"bg-red-700",
-          running:"bg-amber-600", error:"bg-red-900" }[status] || "bg-slate-600"}>
-          {status}</Badge>
-        <button onClick={onClose} className="ml-auto text-slate-400">✕</button>
-      </div>
-      <div className="max-h-64 overflow-y-auto space-y-1">
-        {log.map((s, i) => (
-          <div key={i} className="text-sm flex gap-2 items-start">
-            <span>{s.status === "passed" ? "✅" : s.status === "failed" ? "❌" : "⏳"}</span>
-            <div>
-              <span>{ACTION_ICON[s.action] || "⚙"} {s.label || s.action}</span>
-              {s.error && <div className="text-xs text-red-400">{s.error}</div>}
-            </div>
+    return (
+      <div className="space-y-2">
+        <h2 className="font-bold">📚 Recording Library</h2>
+        {recs.length === 0 && <p className="text-slate-400 text-sm">No recordings yet — go to ⏺ Record.</p>}
+        {recs.map(r => (
+          <div key={r.id} className="bg-slate-900 rounded-lg border border-slate-800 p-3">
+            <div className="font-semibold">{r.name}</div>
+            <div className="text-xs text-slate-400">{r.step_count} steps · {r.status}</div>
           </div>
         ))}
-        {status === "running" && log.length === 0 &&
-          <div className="text-slate-400 text-sm">Starting browser…</div>}
       </div>
-      {hasVideo && status !== "running" && (
-        <video controls playsInline className="w-full rounded"
-          src={`/api/runs/${runId}/video`} />)}
-      {status !== "running" && !transcript && (
-        <button onClick={async () => {
-            const t = await API.get(`/api/runs/${runId}/transcript`);
-            setTranscript(t.transcript.length ? t.transcript
-              : [{ info: "No transcript — script-mode run" }]);
-          }} className="w-full bg-slate-700 rounded py-1.5 text-xs">
-          🤖 View agent transcript</button>)}
-      {transcript && (
-        <pre className="text-[10px] max-h-56 overflow-auto bg-slate-950 rounded p-2 whitespace-pre-wrap">
-          {JSON.stringify(transcript, null, 1).slice(0, 30000)}</pre>)}
-    </div>
-  );
-}
+    );
+  }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  function Variables({ project }) {
+    return <div className="space-y-3"><h2 className="font-bold">🔤 Variables</h2><p className="text-sm text-slate-400">Manage global and project variables here.</p></div>;
+  }
+
+  function Scenarios({ project, onRun }) {
+    return <div className="space-y-3"><h2 className="font-bold">✨ Scenarios</h2><p className="text-sm text-slate-400">Generate scenarios from user stories.</p></div>;
+  }
+
+  function Runs({ activeRun, setActiveRun }) {
+    return <div className="space-y-3"><h2 className="font-bold">▶ Runs</h2><p className="text-sm text-slate-400">Execution history and live logs.</p></div>;
+  }
+
+  ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+} catch (err) {
+  document.getElementById("root").innerHTML = '<div style="padding:20px; color:#ef4444;"><h3>React Render Error:</h3><pre>' + err.stack + '</pre></div>';
+}
 </script>
 </body>
 </html>
