@@ -1,11 +1,19 @@
-services:
-  - type: web
-    name: testforge
-    runtime: docker
-    plan: free
-    autoDeploy: true
-    envVars:
-      - key: ANTHROPIC_API_KEY
+# Exported from Render on 2026-07-25T17:15:06Z
+version: "1"
+projects:
+- name: My project
+  environments:
+  - name: Production
+    services:
+    - type: web
+      name: UI-Test-Forge
+      runtime: docker
+      repo: https://github.com/Raheelatta1984/testforge
+      plan: free
+      envVars:
+      - key: API_Key
         sync: false
-      - key: TF_ARTIFACTS
-        value: /app/artifacts
+      region: singapore
+      dockerContext: .
+      dockerfilePath: ./Dockerfile
+      autoDeployTrigger: commit
