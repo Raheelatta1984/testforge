@@ -12,11 +12,11 @@ try:
     from app.recorder import RecorderSession, ACTIVE
     from app.executor import execute_run
 except Exception as e:
-    print("CRITICAL IMPORT ERROR IN main.py:")
+    print("CRITICAL IMPORT ERROR")
     traceback.print_exc()
     raise e
 
-# --- 2. APP INITIALIZATION ---
+# --- 2. APP INITIALIZATION (MUST BE AT TOP) ---
 app = FastAPI(title="TestForge AI Enterprise")
 init_db()
 
@@ -27,7 +27,7 @@ async def emit_run(run_id: str, evt: dict):
         try: q.put_nowait(evt)
         except asyncio.QueueFull: pass
 
-# --- 3. SERIALIZERS ---
+# --- 3. HELPER FUNCTIONS ---
 def proj_dict(p): return {"id": p.id, "name": p.name, "base_url": p.base_url}
 def step_dict(s):
     return {"id": s.id, "order": s.order, "action": s.action,
@@ -56,7 +56,7 @@ def run_dict(r, db=None):
             "baseline": baseline, "error": r.error, "has_video": bool(r.video_path),
             "created_at": str(r.created_at), "finished_at": str(r.finished_at)}
 
-# --- 4. ENDPOINTS ---
+# --- 4. API ENDPOINTS ---
 
 @app.get("/api/projects")
 def list_projects():
@@ -168,6 +168,7 @@ def patch_variable(vid: str, body: dict):
     db = SessionLocal()
     try:
         v = db.get(Variable, vid)
+        if not v: raise HTTPException(404)
         if "value" in body: v.value = body["value"]
         db.commit()
         return var_dict(v)
