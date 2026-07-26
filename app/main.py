@@ -41,10 +41,16 @@ def var_dict(v):
     return {"id": v.id, "scope": v.scope, "project_id": v.project_id,
             "recording_id": v.recording_id, "name": v.name,
             "value": "••••••" if v.is_secret else v.value, "is_secret": v.is_secret}
-def run_dict(r):
+
+def run_dict(r, db=None):
+    baseline = []
+    if r.target_type == "recording" and db:
+        rec = db.get(Recording, r.target_id)
+        if rec and rec.steps:
+            baseline = [step_dict(s) for s in rec.steps]
     return {"id": r.id, "target_type": r.target_type, "target_id": r.target_id,
             "mode": r.mode, "status": r.status, "log": r.log or [],
-            "error": r.error, "has_video": bool(r.video_path),
+            "baseline": baseline, "error": r.error, "has_video": bool(r.video_path),
             "created_at": str(r.created_at), "finished_at": str(r.finished_at)}
 
 class ProjectCreate(BaseModel): name: str; base_url: str = ""
@@ -69,7 +75,7 @@ def create_project(body: ProjectCreate):
 
 @app.post("/api/ai/rephrase")
 async def ai_rephrase(body: dict):
-    return {"rephrased": f"Given environment is ready, When user executes action, Then system validates expected results."}
+    return {"rephrased": f"Given test setup is complete, When user executes action, Then system validates expected results."}
 
 @app.post("/api/ai/suggest-variables")
 def ai_suggest_variables(body: dict):
@@ -108,16 +114,14 @@ def get_recording(rid: str):
         return rec_dict(r, with_steps=True)
     finally: db.close()
 
-class RecordingPatch(BaseModel): name: str | None = None; shared: bool | None = None
-
 @app.patch("/api/recordings/{rid}")
-def patch_recording(rid: str, body: RecordingPatch):
+def patch_recording(rid: str, body: dict):
     db = SessionLocal()
     try:
         r = db.get(Recording, rid)
         if not r: raise HTTPException(404)
-        if body.name is not None: r.name = body.name
-        if body.shared is not None: r.shared = body.shared
+        if "name" in body: r.name = body["name"]
+        if "shared" in body: r.shared = body["shared"]
         db.commit()
         return rec_dict(r)
     finally: db.close()
@@ -129,29 +133,6 @@ def delete_recording(rid: str):
         r = db.get(Recording, rid)
         if r: db.delete(r); db.commit()
         return {"ok": True}
-    finally: db.close()
-
-@app.get("/api/recordings/{rid}/export/{fmt}")
-def export_recording(rid: str, fmt: str):
-    db = SessionLocal()
-    try:
-        r = db.get(Recording, rid)
-        if not r: raise HTTPException(404)
-        steps = r.steps
-        if fmt == "jenkins":
-            feature = f"Feature: {r.name}\n  Scenario: Automated UI flow\n    Given I launch URL '{r.start_url}'\n"
-            for s in steps:
-                val = s.value or ""
-                if s.action == "click": feature += f"    When I click element '{s.label or s.action}'\n"
-                elif s.action == "fill": feature += f"    And I enter '{val}' into '{s.label or s.action}'\n"
-            feature += "    Then test completes successfully\n"
-            return PlainTextResponse(feature, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={r.name}.feature"})
-        elif fmt == "csv":
-            output = io.StringIO(); writer = csv.writer(output)
-            writer.writerow(["Order", "Action", "Selector", "Value", "Label"])
-            for s in steps: writer.writerow([s.order, s.action, (s.selector or {}).get("primary", ""), s.value or "", s.label or ""])
-            return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={r.name}.csv"})
-        raise HTTPException(400, "Invalid format")
     finally: db.close()
 
 @app.get("/api/runs/screenshot/{run_id}/{filename}")
@@ -175,10 +156,8 @@ def run_status(run_id: str):
     try:
         r = db.get(Run, run_id)
         if not r: raise HTTPException(404)
-        return run_dict(r)
+        return run_dict(r, db)
     finally: db.close()
-
-class VariableCreate(BaseModel): scope: str; project_id: str | None = None; recording_id: str | None = None; name: str; value: str = ""; is_secret: bool = False
 
 @app.get("/api/variables")
 def list_variables(project_id: str | None = None):
@@ -189,7 +168,6 @@ def list_variables(project_id: str | None = None):
         result = []
         for v in q.all():
             vd = var_dict(v)
-            # Find associated recordings using this variable name
             recs = db.query(Recording).all()
             vd["associated_recordings"] = [r.name for r in recs if any(v.name in (step.value or "") for step in r.steps)]
             result.append(vd)
@@ -197,23 +175,21 @@ def list_variables(project_id: str | None = None):
     finally: db.close()
 
 @app.post("/api/variables")
-def create_variable(body: VariableCreate):
+def create_variable(body: dict):
     db = SessionLocal()
     try:
-        v = Variable(**body.dict())
+        v = Variable(**body)
         db.add(v); db.commit(); db.refresh(v)
         return var_dict(v)
     finally: db.close()
 
-class VariablePatch(BaseModel): value: str | None = None
-
 @app.patch("/api/variables/{vid}")
-def patch_variable(vid: str, body: VariablePatch):
+def patch_variable(vid: str, body: dict):
     db = SessionLocal()
     try:
         v = db.get(Variable, vid)
         if not v: raise HTTPException(404)
-        if body.value is not None: v.value = body.value
+        if "value" in body: v.value = body["value"]
         db.commit()
         return var_dict(v)
     finally: db.close()
@@ -227,13 +203,11 @@ def delete_variable(vid: str):
         return {"ok": True}
     finally: db.close()
 
-# GitHub Sync Bundle Export (Organized by date and time)
 @app.get("/api/sync/github-bundle")
 def github_sync_bundle():
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     zip_filename = f"github_logs_{timestamp}.zip"
     zip_path = f"{ARTIFACTS}/{zip_filename}"
-    
     with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
         runs_dir = f"{ARTIFACTS}/runs"
         if os.path.exists(runs_dir):
@@ -242,7 +216,6 @@ def github_sync_bundle():
                     full_path = os.path.join(root, file)
                     rel_path = os.path.relpath(full_path, ARTIFACTS)
                     zipf.write(full_path, arcname=f"github-logs/{timestamp}/{rel_path}")
-
     return FileResponse(zip_path, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={zip_filename}"})
 
 class RunCreate(BaseModel): target_type: str; target_id: str; mode: str = "script"
@@ -267,14 +240,16 @@ def start_run(body: RunCreate):
 @app.get("/api/runs")
 def list_runs():
     db = SessionLocal()
-    try: return [run_dict(r) for r in db.query(Run).order_by(Run.created_at.desc()).limit(50).all()]
+    try:
+        db_runs = db.query(Run).order_by(Run.created_at.desc()).limit(50).all()
+        return [run_dict(r, db) for r in db_runs]
     finally: db.close()
 
 @app.websocket("/ws/runs/{run_id}")
 async def ws_run(ws: WebSocket, run_id: str):
     await ws.accept()
     db = SessionLocal()
-    r = db.get(Run, run_id); snapshot = run_dict(r) if r else None
+    r = db.get(Run, run_id); snapshot = run_dict(r, db) if r else None
     db.close()
     await ws.send_json({"type": "snapshot", "run": snapshot})
     q: asyncio.Queue = asyncio.Queue(maxsize=150)
