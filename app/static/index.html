@@ -9,17 +9,16 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <style>
   body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; background: #020617; color: #f8fafc; font-family: sans-serif; }
-  .canvas-img { image-rendering: auto; user-select: none; transition: transform 0.2s; }
-  .progress-bar { transition: width 0.5s ease-in-out; }
-  /* Custom scrollbar for mobile */
+  .canvas-img { image-rendering: auto; user-select: none; transition: transform 0.1s ease; }
   ::-webkit-scrollbar { width: 4px; height: 4px; }
   ::-webkit-scrollbar-track { background: #0f172a; }
   ::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+  .progress-fill { transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
 </style>
 </head>
 <body>
 <div id="root">
-  <div style="padding: 40px; text-align: center;"><h2>⚡ Loading TestForge AI Enterprise...</h2></div>
+  <div style="padding: 40px; text-align: center;"><h2>⚡ Initializing TestForge AI Enterprise...</h2></div>
 </div>
 
 <script>
@@ -42,24 +41,20 @@ const API = {
 
 const ACTION_ICON = { navigate:"🌐", click:"🖱", fill:"⌨️", press:"⏎", assert_text:"✓", call_recording:"🔗" };
 
-function Badge(props) {
-  return e('span', { className: `text-[10px] px-1.5 py-0.5 rounded ${props.color || "bg-slate-700"}` }, props.children);
+function Badge({children, color}) {
+  return e('span', { className: `text-[10px] px-1.5 py-0.5 rounded ${color || "bg-slate-700"}` }, children);
 }
 
-// 🎙️ Voice & AI Rephrase Input
 function AiInput(props) {
   const [listening, setListening] = useState(false);
   const startVoice = () => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) { alert("Voice not supported."); return; }
-    const rec = new SpeechRecognition();
+    const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
     rec.onstart = () => setListening(true);
     rec.onend = () => setListening(false);
     rec.onresult = (ev) => props.onChange({ target: { value: (props.value || "") + " " + ev.results[0][0].transcript } });
     rec.start();
   };
   const rephrase = async () => {
-    if (!props.value) return;
     const res = await API.post("/api/ai/rephrase", { text: props.value });
     props.onChange({ target: { value: res.rephrased } });
   };
@@ -79,36 +74,32 @@ function App() {
   const [activeRunId, setActiveRunId] = useState(null);
   const [resumeRecId, setResumeRecId] = useState(null);
 
-  const loadProjects = () => API.get("/api/projects").then(setProjects).catch(console.error);
+  const loadProjects = () => API.get("/api/projects").then(setProjects);
   useEffect(() => { loadProjects(); }, []);
 
-  const selectProject = (p) => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); };
-
   const startRunAndSwitch = async (type, id) => {
-    try {
-      const res = await API.post("/api/runs", { target_type: type, target_id: id });
-      setActiveRunId(res.run_id);
-      setTab("runs");
-    } catch(err) { alert("Execution Error: " + err.message); }
+    const res = await API.post("/api/runs", { target_type: type, target_id: id });
+    setActiveRunId(res.run_id);
+    setTab("runs");
   };
 
   const tabs = [
     ["projects", "📁 Projects"], ["variables", "🔤 Variables"],
-    ["record", "⏺ AI Record"], ["library", "📚 Library Tree"],
-    ["runs", "▶ Live Execution"], ["comparison", "⚖️ Logs"],
-    ["artifacts", "🎥 Artifacts"], ["github", "🐙 Sync"]
+    ["record", "⏺ AI Record"], ["library", "📚 Tree"],
+    ["runs", "▶ Execution"], ["comparison", "⚖️ Logs"],
+    ["artifacts", "🎥 Media"], ["github", "🐙 Sync"]
   ];
 
   return e('div', { className: "min-h-screen pb-24" },
-    e('header', { className: "sticky top-0 z-30 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center gap-2" },
+    e('header', { className: "sticky top-0 z-30 bg-slate-900/90 backdrop-blur border-b border-slate-800 px-4 py-3 flex items-center gap-2" },
       e('span', { className: "font-bold text-lg text-indigo-400" }, "⚡ TestForge AI"),
       activeProject && e(Badge, { color: "bg-indigo-700" }, activeProject.name)
     ),
-    e('main', { className: "p-3 max-w-4xl mx-auto" },
-      tab === "projects" && e(Projects, { projects, active: activeProject, onSelect: selectProject, onChanged: loadProjects }),
+    e('main', { className: "p-3 max-w-5xl mx-auto" },
+      tab === "projects" && e(Projects, { projects, active: activeProject, onSelect: p => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); }, onChanged: loadProjects }),
       tab === "variables" && e(Variables, { project: activeProject }),
       tab === "record" && e(Recorder, { project: activeProject, resumeId: resumeRecId, onDone: () => { setResumeRecId(null); setTab("library"); } }),
-      tab === "library" && e(Library, { project: activeProject, projects, onRun: startRunAndSwitch, onResume: (id) => { setResumeRecId(id); setTab("record"); } }),
+      tab === "library" && e(Library, { project: activeProject, onRun: startRunAndSwitch, onResume: (id) => { setResumeRecId(id); setTab("record"); } }),
       tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId }),
       tab === "comparison" && e(ComparisonLogs, { project: activeProject }),
       tab === "artifacts" && e(Artifacts, { project: activeProject }),
@@ -116,10 +107,7 @@ function App() {
     ),
     e('nav', { className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex overflow-x-auto z-40" },
       tabs.map(([k, label]) =>
-        e('button', {
-          key: k, onClick: () => setTab(k),
-          className: `flex-1 py-4 text-[10px] uppercase tracking-wider whitespace-nowrap px-4 ${tab === k ? "text-indigo-400 border-t-2 border-indigo-400 font-bold bg-slate-800/50" : "text-slate-500"}`
-        }, label)
+        e('button', { key: k, onClick: () => setTab(k), className: `flex-1 py-4 text-[10px] uppercase whitespace-nowrap px-4 ${tab === k ? "text-indigo-400 border-t-2 border-indigo-400 font-bold bg-slate-800/50" : "text-slate-500"}` }, label)
       )
     )
   );
@@ -128,28 +116,13 @@ function App() {
 function Projects({ projects, active, onSelect, onChanged }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
-  const create = async () => {
-    if (!name.trim()) return;
-    const p = await API.post("/api/projects", { name, base_url: url });
-    setName(""); setUrl(""); onChanged(); onSelect(p);
-  };
   return e('div', { className: "space-y-4" },
-    e('div', { className: "bg-slate-900 rounded-xl p-4 border border-slate-800 shadow-xl" },
-      e('h2', { className: "font-bold text-indigo-300 mb-3" }, "📁 New Project"),
-      e('div', { className: "space-y-2" },
-        e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-white text-sm", placeholder: "Project Name", value: name, onChange: e => setName(e.target.value) }),
-        e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-white text-sm", placeholder: "Base URL (e.g. https://google.com)", value: url, onChange: e => setUrl(e.target.value) }),
-        e('button', { onClick: create, className: "w-full bg-indigo-600 py-3 rounded-lg font-bold shadow-lg shadow-indigo-900/20" }, "Create Project")
-      )
+    e('div', { className: "bg-slate-900 rounded-xl p-4 border border-slate-800" },
+      e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-2 mb-2", placeholder: "Project Name", value: name, onChange: e => setName(e.target.value) }),
+      e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-2 mb-2", placeholder: "Base URL", value: url, onChange: e => setUrl(e.target.value) }),
+      e('button', { onClick: async () => { await API.post("/api/projects", { name, base_url: url }); setName(""); setUrl(""); onChanged(); }, className: "w-full bg-indigo-600 py-2 rounded-lg font-bold" }, "Create Project")
     ),
-    e('div', { className: "grid grid-cols-1 gap-2" },
-      projects.map(p =>
-        e('div', { key: p.id, onClick: () => onSelect(p), className: `p-4 rounded-xl border transition-all ${active?.id === p.id ? "border-indigo-500 bg-indigo-500/5" : "border-slate-800 bg-slate-900"}` },
-          e('div', { className: "font-bold" }, p.name),
-          e('div', { className: "text-xs text-slate-500 truncate" }, p.base_url)
-        )
-      )
-    )
+    projects.map(p => e('div', { key: p.id, onClick: () => onSelect(p), className: `p-4 rounded-xl border ${active?.id === p.id ? "border-indigo-500 bg-indigo-500/5" : "border-slate-800 bg-slate-900"}` }, e('div', { className: "font-bold" }, p.name), e('div', { className: "text-xs text-slate-500" }, p.base_url)))
   );
 }
 
@@ -157,84 +130,47 @@ function Variables({ project }) {
   const [vars, setVars] = useState([]);
   const [name, setName] = useState("");
   const [val, setVal] = useState("");
-  const load = () => { if (!project) return; API.get(`/api/variables?project_id=${project.id}`).then(setVars); };
+  const load = () => project && API.get(`/api/variables?project_id=${project.id}`).then(setVars);
   useEffect(() => { load(); }, [project]);
-
-  if (!project) return e('div', {className: "text-center py-20 text-slate-500"}, "Select a project to manage variables.");
-
-  const add = async () => {
-    if (!name.trim()) return;
-    await API.post("/api/variables", { scope: "project", project_id: project.id, name, value: val });
-    setName(""); setVal(""); load();
-  };
-
-  return e('div', { className: "space-y-4" },
-    e('h2', { className: "font-bold text-lg" }, "🔤 Project Variables"),
-    e('div', { className: "bg-slate-900 rounded-xl p-4 border border-slate-800" },
-      e('div', { className: "space-y-2" },
-        e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-2 text-sm", placeholder: "Var Name", value: name, onChange: e => setName(e.target.value) }),
-        e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-2 text-sm", placeholder: "Value", value: val, onChange: e => setVal(e.target.value) }),
-        e('button', { onClick: add, className: "w-full bg-indigo-600 py-2 rounded-lg font-bold" }, "Add Variable")
-      )
+  if (!project) return e('div', {className:"py-20 text-center text-slate-500"}, "Select project first.");
+  return e('div', { className: "space-y-3" },
+    e('div', { className: "bg-slate-900 p-4 rounded-xl border border-slate-800" },
+      e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 mb-2", placeholder: "Variable Name", value: name, onChange: e => setName(e.target.value) }),
+      e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 mb-2", placeholder: "Value", value: val, onChange: e => setVal(e.target.value) }),
+      e('button', { onClick: async () => { await API.post("/api/variables", { scope: "project", project_id: project.id, name, value: val }); setName(""); setVal(""); load(); }, className: "w-full bg-indigo-600 py-2 rounded font-bold" }, "Add Variable")
     ),
-    vars.map(v =>
-      e('div', { key: v.id, className: "bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between" },
-        e('div', {}, e('code', { className: "text-indigo-400 font-bold" }, `{{${v.name}}}`), e('div', { className: "text-slate-400 text-sm" }, v.value)),
-        e('div', { className: "flex gap-2" },
-          (v.associated_recordings || []).map((r, i) => e(Badge, { key: i, color: "bg-slate-800 text-indigo-300" }, r)),
-          e('button', { onClick: async () => { await API.del(`/api/variables/${v.id}`); load(); }, className: "text-red-500" }, "✕")
-        )
-      )
-    )
+    vars.map(v => e('div', { key: v.id, className: "bg-slate-900 p-3 rounded-lg border border-slate-800 flex justify-between" }, e('div', {}, e('code', {className:"text-indigo-400"}, `{{${v.name}}}`), e('div', {className:"text-xs text-slate-400"}, v.value)), e('button', { onClick: async () => { await API.del(`/api/variables/${v.id}`); load(); }, className: "text-red-500" }, "✕")))
   );
 }
 
 function Recorder({ project, resumeId, onDone }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState(project?.base_url || "");
+  const [mode, setMode] = useState("browser");
   const [recId, setRecId] = useState(resumeId || null);
-  const [steps, setSteps] = useState([]);
-  const [lib, setLib] = useState([]);
-
-  const loadLib = () => { if (project) API.get(`/api/projects/${project.id}/recordings`).then(setLib); };
-  useEffect(() => { loadLib(); }, [project]);
-
-  if (!project) return e('div', {className: "text-center py-20 text-slate-500"}, "Select a project to record.");
-
-  const start = async () => {
-    const r = await API.post("/api/recordings", { project_id: project.id, name: name || "AI Session", start_url: url });
-    setRecId(r.id);
-  };
-
-  if (recId) return e(LiveRecorder, { recId, project, steps, setSteps, onDone: () => { setRecId(null); onDone(); } });
-
+  if (!project) return e('div', {className:"py-20 text-center text-slate-500"}, "Select project first.");
+  if (recId) return e(LiveRecorder, { recId, project, onDone: () => { setRecId(null); onDone(); } });
   return e('div', { className: "space-y-4" },
     e('div', { className: "bg-slate-900 p-5 rounded-xl border border-slate-800 shadow-2xl" },
-      e('h2', { className: "font-bold text-indigo-400 mb-4" }, "⏺ Launch AI Recorder"),
-      e('div', { className: "space-y-3" },
-        e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-3", placeholder: "Recording Name", value: name, onChange: e => setName(e.target.value) }),
-        e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-3", placeholder: "Start URL", value: url, onChange: e => setUrl(e.target.value) }),
-        e('button', { onClick: start, className: "w-full bg-red-600 hover:bg-red-500 py-4 rounded-xl font-bold transition-all" }, "Launch Cloud Browser")
-      )
-    ),
-    e('div', { className: "bg-slate-900 rounded-xl border border-slate-800 overflow-hidden" },
-      e('div', { className: "p-3 bg-slate-800/50 font-bold text-xs uppercase text-slate-400" }, "Quick Resume Library"),
-      lib.map(r => e('div', { key: r.id, onClick: () => setRecId(r.id), className: "p-3 border-b border-slate-800 flex justify-between items-center cursor-pointer hover:bg-slate-800" }, 
-        e('span', {className: "text-sm"}, r.name), e('span', {className: "text-indigo-500"}, "Resume ➔")
-      ))
+      e('h2', { className: "font-bold text-indigo-400 mb-4" }, "⏺ AI-Powered Multi-Mode Recorder"),
+      e('select', { className: "w-full bg-slate-800 rounded-lg px-4 py-2 mb-3 text-sm", value: mode, onChange: e => setMode(e.target.value) },
+        e('option', { value: "browser" }, "🌐 Web Browser (Chrome)"),
+        e('option', { value: "desktop" }, "🖥️ Desktop App (Virtual Display)")
+      ),
+      e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-3 mb-3", placeholder: "Recording Name", value: name, onChange: e => setName(e.target.value) }),
+      e(AiInput, { className: "w-full bg-slate-800 rounded-lg px-4 py-3 mb-4", placeholder: "Start URL / Command", value: url, onChange: e => setUrl(e.target.value) }),
+      e('button', { onClick: async () => { const r = await API.post("/api/recordings", { project_id: project.id, name, start_url: url }); setRecId(r.id); }, className: "w-full bg-red-600 py-4 rounded-xl font-bold" }, "Start Recording")
     )
   );
 }
 
-function LiveRecorder({ recId, project, steps, setSteps, onDone }) {
+function LiveRecorder({ recId, project, onDone }) {
   const [frame, setFrame] = useState(null);
   const [zoom, setZoom] = useState(1);
-  const [text, setText] = useState("");
+  const [steps, setSteps] = useState([]);
   const wsRef = useRef(null);
-
   useEffect(() => {
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${proto}://${location.host}/ws/record/${recId}`);
+    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/record/${recId}`);
     ws.onmessage = (ev) => {
       const m = JSON.parse(ev.data);
       if (m.type === "frame") setFrame("data:image/jpeg;base64," + m.data);
@@ -242,72 +178,45 @@ function LiveRecorder({ recId, project, steps, setSteps, onDone }) {
       else if (m.type === "stopped") onDone();
     };
     wsRef.current = ws;
-    return () => { try { ws.send(JSON.stringify({type:"stop"})); } catch(ex){} ws.close(); };
+    return () => ws.close();
   }, [recId]);
-
-  const send = (o) => { if (wsRef.current?.readyState === 1) wsRef.current.send(JSON.stringify(o)); };
-  const tap = (evt) => {
-    const r = evt.currentTarget.getBoundingClientRect();
-    const x = (evt.clientX - r.left) / zoom;
-    const y = (evt.clientY - r.top) / zoom;
-    send({ type: "tap", x: Math.round(x / r.width * 1280), y: Math.round(y / r.height * 800) });
-  };
-
-  return e('div', { className: "fixed inset-0 z-50 bg-slate-950 flex flex-col p-2" },
-    e('div', { className: "flex items-center gap-3 bg-slate-900 p-3 rounded-t-xl" },
+  const send = (o) => wsRef.current?.send(JSON.stringify(o));
+  return e('div', { className: "fixed inset-0 z-50 bg-slate-950 flex flex-col" },
+    e('div', { className: "flex items-center gap-2 bg-slate-900 p-3" },
       e('div', { className: "w-3 h-3 rounded-full bg-red-500 animate-pulse" }),
-      e('span', { className: "font-bold text-sm" }, "AI RECORDER ACTIVE"),
+      e('span', { className: "font-bold text-xs" }, "AI RECORDER ACTIVE"),
       e('div', { className: "ml-auto flex gap-2" },
-        e('button', { onClick: () => setZoom(z => Math.max(0.5, z - 0.1)), className: "bg-slate-800 px-3 py-1 rounded" }, "🔍-"),
-        e('button', { onClick: () => setZoom(z => Math.min(2, z + 0.1)), className: "bg-slate-800 px-3 py-1 rounded" }, "🔍+"),
-        e('button', { onClick: () => send({type:"stop"}), className: "bg-red-600 px-4 py-1 rounded font-bold" }, "STOP & SAVE")
+        e('button', { onClick: () => setZoom(z => z + 0.1), className: "bg-slate-800 px-3 py-1 rounded" }, "+"),
+        e('button', { onClick: () => setZoom(z => z - 0.1), className: "bg-slate-800 px-3 py-1 rounded" }, "-"),
+        e('button', { onClick: () => send({type:"stop"}), className: "bg-red-600 px-4 py-1 rounded font-bold" }, "SAVE")
       )
     ),
-    e('div', { className: "flex-1 bg-black relative overflow-auto border-x border-slate-800 shadow-inner" },
-      frame ? e('img', { className: "canvas-img", style: { transform: `scale(${zoom})`, transformOrigin: "0 0" }, src: frame, onClick: tap })
-            : e('div', { className: "absolute inset-0 flex items-center justify-center text-slate-600" }, "Booting Browser Environment...")
+    e('div', { className: "flex-1 bg-black overflow-auto relative" },
+      frame && e('img', { className: "canvas-img origin-top-left", style: { transform: `scale(${zoom})` }, src: frame, onClick: (evt) => {
+        const r = evt.target.getBoundingClientRect();
+        send({ type: "tap", x: Math.round((evt.clientX - r.left)/zoom / r.width * 1280), y: Math.round((evt.clientY - r.top)/zoom / r.height * 800) });
+      }})
     ),
-    e('div', { className: "bg-slate-900 p-3 rounded-b-xl space-y-2" },
-      e('div', { className: "flex gap-2" },
-        e('input', { className: "flex-1 bg-slate-800 rounded-lg px-4 py-2 text-sm", placeholder: "Type value...", value: text, onChange: e => setText(e.target.value) }),
-        e('button', { onClick: () => { if (text) { send({type:"text", text}); setText(""); } }, className: "bg-indigo-600 px-6 py-2 rounded-lg font-bold" }, "Type")
-      ),
-      e('div', { className: "h-24 overflow-y-auto bg-slate-950 rounded p-2 text-[10px] font-mono text-slate-400" },
-        steps.map((s, i) => e('div', { key: i, className: "border-b border-slate-900 py-1" }, `[${s.order}] ${s.action.toUpperCase()} -> ${s.label}`))
-      )
+    e('div', { className: "bg-slate-900 p-2 h-32 overflow-y-auto text-[10px] font-mono" },
+      steps.map((s, i) => e('div', { key: i, className: "border-b border-slate-800 py-1" }, `${s.order}. ${s.action} -> ${s.label}`))
     )
   );
 }
 
 function Library({ project, onRun, onResume }) {
   const [recs, setRecs] = useState([]);
-  const load = () => { if (project) API.get(`/api/projects/${project.id}/recordings`).then(setRecs); };
+  const load = () => project && API.get(`/api/projects/${project.id}/recordings`).then(setRecs);
   useEffect(() => { load(); }, [project]);
-
-  if (!project) return e('div', {className: "text-center py-20 text-slate-500"}, "Select project first.");
-
-  const toggleShare = async (id, cur) => { await API.patch(`/api/recordings/${id}`, { shared: !cur }); load(); };
-
-  return e('div', { className: "space-y-4" },
-    e('h2', { className: "font-bold text-lg" }, "📚 Recording Library Tree"),
-    recs.filter(r => !r.parent_id).map(r =>
-      e('div', { key: r.id, className: "bg-slate-900 rounded-xl border border-slate-800 overflow-hidden shadow-lg" },
-        e('div', { className: "p-4 flex justify-between items-center bg-slate-800/30" },
-          e('div', {}, e('div', { className: "font-bold text-indigo-300" }, `🌳 ${r.name}`), e('div', { className: "text-[10px] text-slate-500 uppercase" }, `${r.step_count} steps`)),
-          e('div', { className: "flex gap-2" },
-            e('button', { onClick: () => onResume(r.id), className: "bg-slate-800 p-2 rounded text-xs" }, "✏️"),
-            e('button', { onClick: () => onRun("recording", r.id), className: "bg-emerald-600 px-4 py-2 rounded-lg text-xs font-bold" }, "RUN"),
-            e('button', { onClick: () => toggleShare(r.id, r.shared), className: `p-2 rounded text-xs ${r.shared ? 'bg-indigo-600' : 'bg-slate-700 opacity-50'}` }, "🌐")
-          )
-        ),
-        recs.filter(c => c.parent_id === r.id).map(c => 
-          e('div', { key: c.id, className: "ml-6 p-3 border-l-2 border-slate-800 flex justify-between items-center" },
-            e('span', { className: "text-sm text-slate-300" }, `↳ 📂 ${c.name}`),
-            e('button', { onClick: () => onRun("recording", c.id), className: "text-xs text-indigo-400 font-bold" }, "RUN CHUNK")
-          )
-        )
+  if (!project) return e(NeedProject);
+  return e('div', { className: "space-y-3" },
+    e('h2', { className: "font-bold" }, "📚 Recording Library"),
+    recs.map(r => e('div', { key: r.id, className: "bg-slate-900 p-4 rounded-xl border border-slate-800 flex justify-between items-center" },
+      e('div', {}, e('div', {className:"font-bold text-indigo-300"}, r.name), e('div', {className:"text-xs text-slate-500"}, `${r.step_count} steps`)),
+      e('div', {className:"flex gap-2"},
+        e('button', { onClick: () => onResume(r.id), className: "bg-slate-800 px-3 py-1 rounded text-xs" }, "Edit"),
+        e('button', { onClick: () => onRun("recording", r.id), className: "bg-emerald-600 px-3 py-1 rounded text-xs font-bold" }, "RUN")
       )
-    )
+    ))
   );
 }
 
@@ -316,20 +225,22 @@ function Runs({ runId, setRunId }) {
   const [activeLog, setActiveLog] = useState(null);
   const [execFrame, setExecFrame] = useState(null);
   const [percent, setPercent] = useState(0);
+  const [zoom, setZoom] = useState(1);
 
-  const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
+  const load = () => API.get("/api/runs").then(setRuns);
+  useEffect(() => { load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, []);
 
   useEffect(() => {
     if (runId) {
-      setExecFrame(null); setPercent(0);
-      const proto = location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${location.host}/ws/runs/${runId}`);
+      const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/runs/${runId}`);
       ws.onmessage = (ev) => {
         const m = JSON.parse(ev.data);
-        if (m.type === "snapshot" && m.run) { setActiveLog(m.run); setPercent(m.run.status === "passed" ? 100 : 0); }
+        if (m.type === "snapshot" && m.run) setActiveLog(m.run);
         else if (m.type === "frame") setExecFrame("data:image/jpeg;base64," + m.data);
-        else if (m.type === "step") { setActiveLog(prev => ({...prev, log: [...(prev?.log || []).filter(x => x.order !== m.order), m]})); setPercent(m.percent || 0); }
+        else if (m.type === "step") { 
+          setActiveLog(p => ({...p, log: [...(p?.log || []).filter(x => x.order !== m.order), m]})); 
+          setPercent(m.percent || 0);
+        }
         else if (m.type === "done") { load(); setPercent(100); }
       };
       return () => ws.close();
@@ -337,63 +248,40 @@ function Runs({ runId, setRunId }) {
   }, [runId]);
 
   return e('div', { className: "space-y-4" },
-    runId && activeLog && e('div', { className: "bg-slate-900 border-2 border-indigo-500 rounded-2xl overflow-hidden shadow-2xl" },
-      e('div', { className: "p-4 bg-indigo-500/10 flex justify-between items-center" },
-        e('div', {}, e('div', { className: "font-bold text-indigo-300" }, "LIVE EXECUTION JOURNEY"), e('div', { className: "text-[10px] text-slate-500 uppercase" }, `ID: ${runId.slice(0,8)}`)),
-        e('button', { onClick: () => setRunId(null), className: "bg-slate-800 px-3 py-1 rounded-lg text-xs" }, "CLOSE")
-      ),
-      e('div', { className: "p-4 space-y-4" },
-        e('div', { className: "w-full bg-slate-800 rounded-full h-3 overflow-hidden shadow-inner" }, e('div', { className: "bg-indigo-500 h-full progress-bar shadow-[0_0_15px_rgba(99,102,241,0.5)]", style: { width: `${percent}%` } })),
-        e('div', { className: "bg-black aspect-video rounded-xl border border-slate-800 flex items-center justify-center overflow-hidden" },
-          execFrame ? e('img', { className: "w-full h-full object-contain", src: execFrame }) : e('div', { className: "text-slate-600 animate-pulse text-xs uppercase" }, "Warming up execution environment...")
-        ),
-        e('div', { className: "space-y-2 max-h-60 overflow-y-auto pr-2" },
-          (activeLog.log || []).sort((a,b) => b.order - a.order).map((s, i) =>
-            e('div', { key: i, className: "p-3 bg-slate-950 rounded-xl border border-slate-800 flex gap-3" },
-              e('div', { className: "text-lg" }, s.status === "passed" ? "✅" : s.status === "failed" ? "❌" : "⏳"),
-              e('div', { className: "flex-1" }, 
-                e('div', { className: "font-bold text-xs" }, `Step ${s.order}: ${s.action}`),
-                e('div', { className: "text-[10px] text-slate-500" }, s.label),
-                s.screenshot && e('img', { className: "mt-2 rounded-lg border border-slate-800 max-h-32", src: s.screenshot })
-              )
-            )
-          )
+    runId && activeLog && e('div', { className: "bg-slate-900 border-2 border-indigo-500 rounded-2xl p-4 space-y-4" },
+      e('div', { className: "flex justify-between items-center" }, 
+        e('span', {className:"font-bold"}, "LIVE EXECUTION WINDOW"),
+        e('div', {className:"flex gap-1"},
+          e('button', { onClick: () => setZoom(z => z + 0.1), className: "bg-slate-800 px-2 rounded" }, "🔍+"),
+          e('button', { onClick: () => setZoom(z => z - 0.1), className: "bg-slate-800 px-2 rounded" }, "🔍-"),
+          e('button', { onClick: () => setRunId(null), className: "text-xs ml-4" }, "✕")
         )
+      ),
+      e('div', { className: "w-full bg-slate-800 h-2 rounded-full overflow-hidden" }, e('div', { className: "bg-indigo-500 h-full progress-fill", style: { width: `${percent}%` } })),
+      e('div', { className: "bg-black rounded-xl aspect-video overflow-hidden border border-slate-800 relative" },
+        execFrame ? e('img', { className: "canvas-img origin-top-left", style: { transform: `scale(${zoom})` }, src: execFrame }) : e('div', {className:"absolute inset-0 flex items-center justify-center text-slate-700 text-xs"}, "Awaiting Browser Stream...")
+      ),
+      e('div', { className: "space-y-2 max-h-48 overflow-y-auto" },
+        (activeLog.log || []).sort((a,b) => b.order - a.order).map((s, i) => e('div', { key: i, className: "p-2 bg-slate-950 rounded flex gap-2 items-center" }, 
+          e('span', {}, s.status === "passed" ? "✅" : "⏳"), e('span', {className:"text-xs"}, s.label)
+        ))
       )
     ),
-    e('div', { className: "grid grid-cols-1 gap-2" },
-      runs.map(r => e('div', { key: r.id, onClick: () => setRunId(r.id), className: "p-4 bg-slate-900 border border-slate-800 rounded-xl flex justify-between items-center cursor-pointer hover:border-indigo-500 transition-all" },
-        e('div', {}, e('span', { className: `text-[10px] font-bold px-2 py-0.5 rounded mr-3 ${r.status==='passed' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}` }, r.status.toUpperCase()), e('span', {className: "text-sm"}, `${r.target_type} Session`)),
-        e('span', { className: "text-[10px] text-slate-600" }, r.created_at.slice(11, 19))
-      ))
-    )
+    runs.map(r => e('div', { key: r.id, onClick: () => setRunId(r.id), className: "p-4 bg-slate-900 rounded-xl border border-slate-800 flex justify-between cursor-pointer" }, e('span', {}, r.status.toUpperCase()), e('span', {className:"text-slate-500 text-xs"}, r.created_at.slice(11, 19))))
   );
 }
 
-function ComparisonLogs({ project }) {
+function ComparisonLogs() {
   const [runs, setRuns] = useState([]);
   const [sel, setSel] = useState(null);
   useEffect(() => { API.get("/api/runs").then(setRuns); }, []);
-
   return e('div', { className: "space-y-4" },
-    e('h2', { className: "font-bold text-lg text-indigo-400" }, "⚖️ Comparison Audit Logs"),
-    runs.map(r => e('div', { key: r.id, className: "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden" },
-      e('div', { className: "p-4 flex justify-between items-center" }, 
-        e('span', {className: "font-bold"}, `Run Analysis #${r.id.slice(0,8)}`),
-        e('button', { onClick: () => setSel(sel === r.id ? null : r.id), className: "text-xs text-indigo-400 font-bold" }, "TOGGLE SPLIT VIEW")
-      ),
-      sel === r.id && e('div', { className: "grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-black/40 border-t border-slate-800" },
-        e('div', { className: "space-y-2" },
-          e('h4', { className: "text-[10px] font-bold text-purple-400 uppercase tracking-tighter" }, "Baseline Recording Steps"),
-          (r.baseline || []).map((s, i) => e('div', { key: i, className: "p-2 bg-slate-950 rounded border border-purple-900/20 text-[10px]" }, `${s.order}. ${s.action} - ${s.label}`))
-        ),
-        e('div', { className: "space-y-2" },
-          e('h4', { className: "text-[10px] font-bold text-emerald-400 uppercase tracking-tighter" }, "Actual AI Execution Steps"),
-          (r.log || []).map((s, i) => e('div', { key: i, className: "p-2 bg-slate-950 rounded border border-emerald-900/20 text-[10px]" }, 
-            e('div', {className: "flex justify-between"}, e('span', {}, `${s.order}. ${s.action}`), e('span', {}, s.status === 'passed' ? '✅' : '❌')),
-            s.screenshot && e('img', { src: s.screenshot, className: "mt-1 rounded border border-slate-800" })
-          ))
-        )
+    e('h2', { className: "font-bold text-indigo-400" }, "⚖️ Baseline vs Execution Comparison"),
+    runs.map(r => e('div', { key: r.id, className: "bg-slate-900 border border-slate-800 rounded-xl overflow-hidden" },
+      e('div', { className: "p-4 flex justify-between bg-slate-800/50", onClick: () => setSel(sel === r.id ? null : r.id) }, e('span', {}, `Audit Run #${r.id.slice(0,8)}`), e('span', {}, "Compare ➔")),
+      sel === r.id && e('div', { className: "grid grid-cols-2 gap-2 p-2 bg-black/40" },
+        e('div', { className: "space-y-1" }, e('div', {className:"text-[10px] font-bold text-purple-400"}, "AI RECORDING (BASELINE)"), (r.baseline || []).map((s, i) => e('div', {key:i, className:"text-[9px] bg-slate-900 p-1 rounded"}, `${s.order}. ${s.action}`))),
+        e('div', { className: "space-y-1" }, e('div', {className:"text-[10px] font-bold text-emerald-400"}, "AI EXECUTION (ACTUAL)"), (r.log || []).map((s, i) => e('div', {key:i, className:"text-[9px] bg-slate-900 p-1 rounded space-y-1"}, e('div', {}, `${s.order}. ${s.status === 'passed' ? '✅' : '❌'}`), s.screenshot && e('img', {src:s.screenshot, className:"rounded"}))))
       )
     ))
   );
@@ -403,22 +291,19 @@ function Artifacts() {
   const [runs, setRuns] = useState([]);
   useEffect(() => { API.get("/api/runs").then(setRuns); }, []);
   return e('div', { className: "space-y-4" },
-    e('h2', { className: "font-bold text-lg" }, "🎥 Session Artifacts"),
-    e('div', { className: "grid grid-cols-1 gap-4" },
-      runs.filter(r => r.has_video).map(r => e('div', { key: r.id, className: "bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3" },
-        e('div', { className: "flex justify-between items-center text-xs" }, e('span', {className: "text-indigo-400 font-bold"}, `Session Video #${r.id.slice(0,8)}`), e('span', {className: "text-slate-500"}, r.created_at)),
-        e('video', { controls: true, className: "w-full rounded-xl shadow-2xl bg-black border border-slate-800", src: `/api/runs/video/${r.id}` })
-      ))
-    )
+    runs.filter(r => r.has_video).map(r => e('div', { key: r.id, className: "bg-slate-900 p-4 rounded-xl border border-slate-800" }, 
+      e('div', {className:"text-xs mb-2"}, `Session ID: ${r.id}`),
+      e('video', { controls: true, className: "w-full rounded bg-black", src: `/api/runs/video/${r.id}` })
+    ))
   );
 }
 
 function GithubSync() {
-  return e('div', { className: "bg-slate-900 p-6 rounded-2xl border border-slate-800 shadow-2xl text-center space-y-4" },
-    e('div', { className: "w-16 h-16 bg-indigo-500/10 text-indigo-400 rounded-full flex items-center justify-center mx-auto text-3xl" }, "🐙"),
-    e('h2', { className: "font-bold text-indigo-300" }, "GitHub Sync Engine"),
-    e('p', { className: "text-xs text-slate-500" }, "Archive all validation screenshots, execution logs, and session recordings organized by timestamp."),
-    e('a', { href: "/api/sync/github-bundle", className: "block w-full bg-indigo-600 py-4 rounded-xl font-bold shadow-lg shadow-indigo-900/30" }, "Download GitHub Archive (.zip)")
+  return e('div', { className: "text-center py-10 space-y-4" },
+    e('div', {className:"text-4xl"}, "🐙"),
+    e('h2', {className:"font-bold"}, "GitHub Automated Sync"),
+    e('p', {className:"text-xs text-slate-500"}, "Sync all screenshots and logs to /logs/test-results"),
+    e('a', { href: "/api/sync/github-bundle", className: "inline-block bg-indigo-600 px-10 py-3 rounded-xl font-bold" }, "Download Sync Bundle")
   );
 }
 
