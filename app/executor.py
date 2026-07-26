@@ -54,12 +54,13 @@ async def exec_one(page, step, variables):
     elif a == "scroll":
         await page.mouse.wheel(0, int(value or 400))
 
-async def exec_steps(page, steps, variables, on_event, db, depth, log):
+async def exec_steps(page, steps, variables, on_event, db, depth, log, run_dir):
     if depth > 5:
         raise StepFailure("Recording nesting too deep (possible loop)")
-    for step in steps:
+    for idx, step in enumerate(steps, 1):
+        shot_path = f"{run_dir}/step-{idx}.jpg"
         entry = {"order": step.order, "action": step.action,
-                 "label": step.label or "", "status": "running"}
+                 "label": step.label or step.action, "status": "running", "screenshot": None}
         await on_event({"type": "step", **entry})
         try:
             if step.action == "call_recording":
@@ -69,13 +70,26 @@ async def exec_steps(page, steps, variables, on_event, db, depth, log):
                 sub_vars = {**variables,
                             **resolve_variables(db, recording_id=sub.id),
                             **(step.variable_overrides or {})}
-                await exec_steps(page, sub.steps, sub_vars, on_event, db, depth + 1, log)
+                await exec_steps(page, sub.steps, sub_vars, on_event, db, depth + 1, log, run_dir)
             else:
                 await exec_one(page, step, variables)
+            
+            # Capture step screenshot for visual validation
+            try:
+                await page.screenshot(path=shot_path, type="jpeg", quality=60)
+                entry["screenshot"] = f"/api/runs/screenshot/{run_dir.split('/')[-1]}/step-{idx}.jpg"
+            except Exception:
+                pass
+
             entry["status"] = "passed"
         except Exception as e:
             entry["status"] = "failed"
             entry["error"] = str(e)[:500]
+            try:
+                await page.screenshot(path=shot_path, type="jpeg", quality=60)
+                entry["screenshot"] = f"/api/runs/screenshot/{run_dir.split('/')[-1]}/step-{idx}.jpg"
+            except Exception:
+                pass
             log.append(entry)
             await on_event({"type": "step", **entry})
             raise
@@ -85,17 +99,9 @@ async def exec_steps(page, steps, variables, on_event, db, depth, log):
 async def execute_run(run_id, on_event):
     db = SessionLocal()
     run = db.get(Run, run_id)
-    mode = run.mode if run else "script"
-    db.close()
-    if mode == "agent":
-        from app.agent import run_agent
-        await run_agent(run_id, on_event)
-        return
-
-    db = SessionLocal()
-    run = db.get(Run, run_id)
     run.status = "running"; db.commit()
-    os.makedirs(f"{ARTIFACTS}/runs/{run_id}", exist_ok=True)
+    run_dir = f"{ARTIFACTS}/runs/{run_id}"
+    os.makedirs(run_dir, exist_ok=True)
     log_entries = []
     try:
         if run.target_type == "recording":
@@ -111,12 +117,12 @@ async def execute_run(run_id, on_event):
             ctx_args = {"viewport": {"width": 1280, "height": 800},
                         "permissions": ["clipboard-read", "clipboard-write"]}
             if video_ok():
-                ctx_args["record_video_dir"] = f"{ARTIFACTS}/runs/{run_id}"
+                ctx_args["record_video_dir"] = run_dir
                 ctx_args["record_video_size"] = {"width": 1280, "height": 800}
             ctx = await browser.new_context(**ctx_args)
             page = await ctx.new_page()
             try:
-                await exec_steps(page, steps, variables, on_event, db, 0, log_entries)
+                await exec_steps(page, steps, variables, on_event, db, 0, log_entries, run_dir)
                 run.status = "passed"
             except Exception:
                 run.status = "failed"
