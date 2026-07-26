@@ -74,9 +74,8 @@ async def exec_steps(page, steps, variables, on_event, db, depth, log, run_dir):
             else:
                 await exec_one(page, step, variables)
             
-            # Capture step screenshot for visual validation
             try:
-                await page.screenshot(path=shot_path, type="jpeg", quality=60)
+                await page.screenshot(path=shot_path, type="jpeg", quality=65)
                 entry["screenshot"] = f"/api/runs/screenshot/{run_dir.split('/')[-1]}/step-{idx}.jpg"
             except Exception:
                 pass
@@ -86,7 +85,7 @@ async def exec_steps(page, steps, variables, on_event, db, depth, log, run_dir):
             entry["status"] = "failed"
             entry["error"] = str(e)[:500]
             try:
-                await page.screenshot(path=shot_path, type="jpeg", quality=60)
+                await page.screenshot(path=shot_path, type="jpeg", quality=65)
                 entry["screenshot"] = f"/api/runs/screenshot/{run_dir.split('/')[-1]}/step-{idx}.jpg"
             except Exception:
                 pass
@@ -129,8 +128,10 @@ async def execute_run(run_id, on_event):
             video = page.video if video_ok() else None
             await ctx.close()
             if video:
-                try: run.video_path = await video.path()
-                except Exception: run.video_path = None
+                try: 
+                    run.video_path = await video.path()
+                except Exception: 
+                    run.video_path = None
             await browser.close()
     except Exception as e:
         run.status = "error"; run.error = str(e)[:1000]
