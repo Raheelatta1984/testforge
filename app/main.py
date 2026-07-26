@@ -1,4 +1,4 @@
-import asyncio, os, traceback, csv, io
+import asyncio, os, traceback, csv, io, zipfile, datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -41,14 +41,6 @@ def var_dict(v):
     return {"id": v.id, "scope": v.scope, "project_id": v.project_id,
             "recording_id": v.recording_id, "name": v.name,
             "value": "••••••" if v.is_secret else v.value, "is_secret": v.is_secret}
-def scen_dict(s, with_steps=False):
-    d = {"id": s.id, "project_id": s.project_id, "title": s.title,
-         "status": s.status, "step_count": len(s.steps)}
-    if with_steps:
-        d["steps"] = [{"id": st.id, "order": st.order, "action": st.action,
-                       "selector": st.selector, "value": st.value, "expected_result": st.expected_result}
-                      for st in s.steps]
-    return d
 def run_dict(r):
     return {"id": r.id, "target_type": r.target_type, "target_id": r.target_id,
             "mode": r.mode, "status": r.status, "log": r.log or [],
@@ -77,7 +69,7 @@ def create_project(body: ProjectCreate):
 
 @app.post("/api/ai/rephrase")
 async def ai_rephrase(body: dict):
-    return {"rephrased": f"Given test setup is complete, When user executes action, Then system validates expected results."}
+    return {"rephrased": f"Given environment is ready, When user executes action, Then system validates expected results."}
 
 @app.post("/api/ai/suggest-variables")
 def ai_suggest_variables(body: dict):
@@ -114,6 +106,20 @@ def get_recording(rid: str):
         r = db.get(Recording, rid)
         if not r: raise HTTPException(404)
         return rec_dict(r, with_steps=True)
+    finally: db.close()
+
+class RecordingPatch(BaseModel): name: str | None = None; shared: bool | None = None
+
+@app.patch("/api/recordings/{rid}")
+def patch_recording(rid: str, body: RecordingPatch):
+    db = SessionLocal()
+    try:
+        r = db.get(Recording, rid)
+        if not r: raise HTTPException(404)
+        if body.name is not None: r.name = body.name
+        if body.shared is not None: r.shared = body.shared
+        db.commit()
+        return rec_dict(r)
     finally: db.close()
 
 @app.delete("/api/recordings/{rid}")
@@ -172,7 +178,7 @@ def run_status(run_id: str):
         return run_dict(r)
     finally: db.close()
 
-class VariableCreate(BaseModel): scope: str; project_id: str | None = None; name: str; value: str = ""; is_secret: bool = False
+class VariableCreate(BaseModel): scope: str; project_id: str | None = None; recording_id: str | None = None; name: str; value: str = ""; is_secret: bool = False
 
 @app.get("/api/variables")
 def list_variables(project_id: str | None = None):
@@ -180,7 +186,14 @@ def list_variables(project_id: str | None = None):
     try:
         q = db.query(Variable)
         if project_id: q = q.filter((Variable.scope == "global") | (Variable.project_id == project_id))
-        return [var_dict(v) for v in q.all()]
+        result = []
+        for v in q.all():
+            vd = var_dict(v)
+            # Find associated recordings using this variable name
+            recs = db.query(Recording).all()
+            vd["associated_recordings"] = [r.name for r in recs if any(v.name in (step.value or "") for step in r.steps)]
+            result.append(vd)
+        return result
     finally: db.close()
 
 @app.post("/api/variables")
@@ -192,6 +205,19 @@ def create_variable(body: VariableCreate):
         return var_dict(v)
     finally: db.close()
 
+class VariablePatch(BaseModel): value: str | None = None
+
+@app.patch("/api/variables/{vid}")
+def patch_variable(vid: str, body: VariablePatch):
+    db = SessionLocal()
+    try:
+        v = db.get(Variable, vid)
+        if not v: raise HTTPException(404)
+        if body.value is not None: v.value = body.value
+        db.commit()
+        return var_dict(v)
+    finally: db.close()
+
 @app.delete("/api/variables/{vid}")
 def delete_variable(vid: str):
     db = SessionLocal()
@@ -200,6 +226,24 @@ def delete_variable(vid: str):
         if v: db.delete(v); db.commit()
         return {"ok": True}
     finally: db.close()
+
+# GitHub Sync Bundle Export (Organized by date and time)
+@app.get("/api/sync/github-bundle")
+def github_sync_bundle():
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    zip_filename = f"github_logs_{timestamp}.zip"
+    zip_path = f"{ARTIFACTS}/{zip_filename}"
+    
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        runs_dir = f"{ARTIFACTS}/runs"
+        if os.path.exists(runs_dir):
+            for root, dirs, files in os.walk(runs_dir):
+                for file in files:
+                    full_path = os.path.join(root, file)
+                    rel_path = os.path.relpath(full_path, ARTIFACTS)
+                    zipf.write(full_path, arcname=f"github-logs/{timestamp}/{rel_path}")
+
+    return FileResponse(zip_path, media_type="application/zip", headers={"Content-Disposition": f"attachment; filename={zip_filename}"})
 
 class RunCreate(BaseModel): target_type: str; target_id: str; mode: str = "script"
 
