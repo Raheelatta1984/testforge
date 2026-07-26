@@ -31,6 +31,7 @@ const API = {
   },
   get: (u) => API.req("GET", u),
   post: (u, b) => API.req("POST", u, b),
+  patch: (u, b) => API.req("PATCH", u, b),
   del: (u) => API.req("DELETE", u),
 };
 
@@ -42,7 +43,7 @@ function App() {
   const [tab, setTab] = useState("projects");
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(() => JSON.parse(localStorage.getItem("tf_project") || "null"));
-  const [activeRun, setActiveRun] = useState(null);
+  const [activeRunId, setActiveRunId] = useState(null);
 
   const loadProjects = () => API.get("/api/projects").then(setProjects).catch(console.error);
   useEffect(() => { loadProjects(); }, []);
@@ -52,10 +53,17 @@ function App() {
     localStorage.setItem("tf_project", JSON.stringify(p));
   };
 
+  const startRunAndSwitch = async (type, id) => {
+    const res = await API.post("/api/runs", { target_type: type, target_id: id });
+    setActiveRunId(res.run_id);
+    setTab("runs");
+  };
+
   const tabs = [
     ["projects", "📁 Projects"], ["variables", "🔤 Variables"],
     ["record", "⏺ AI Record"], ["library", "📚 Library"],
-    ["scenarios", "✨ Jenkins Gherkin"], ["runs", "▶ Runs"]
+    ["scenarios", "✨ Gherkin"], ["runs", "▶ Live Progress & Runs"],
+    ["artifacts", "🎥 Recordings & Artifacts"]
   ];
 
   return e('div', { className: "min-h-screen pb-20" },
@@ -67,9 +75,10 @@ function App() {
       tab === "projects" && e(Projects, { projects, active: activeProject, onSelect: selectProject, onChanged: loadProjects }),
       tab === "variables" && e(Variables, { project: activeProject }),
       tab === "record" && e(Recorder, { project: activeProject, onDone: () => setTab("library") }),
-      tab === "library" && e(Library, { project: activeProject }),
-      tab === "scenarios" && e(Scenarios, { project: activeProject, onRun: (id) => { setActiveRun(id); setTab("runs"); } }),
-      tab === "runs" && e(Runs, { activeRun, setActiveRun })
+      tab === "library" && e(Library, { project: activeProject, projects, onRun: startRunAndSwitch }),
+      tab === "scenarios" && e(Scenarios, { project: activeProject, onRun: startRunAndSwitch }),
+      tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId }),
+      tab === "artifacts" && e(Artifacts, { project: activeProject })
     ),
     e('nav', { className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex overflow-x-auto z-20" },
       tabs.map(([k, label]) =>
@@ -213,7 +222,7 @@ function LiveRecorder({ recId, project, steps, setSteps, onDone }) {
   };
 
   const askAi = async () => {
-    setAiTip("🤖 AI analyzing screen and suggesting next action...");
+    setAiTip("🤖 AI analyzing screen...");
     const res = await API.post("/api/ai/suggest-step", {});
     setAiTip(`💡 AI Suggestion: ${res.suggestion}`);
   };
@@ -247,25 +256,32 @@ function LiveRecorder({ recId, project, steps, setSteps, onDone }) {
   );
 }
 
-function Library({ project }) {
+function Library({ project, projects, onRun }) {
   const [recs, setRecs] = useState([]);
   const load = () => project && API.get(`/api/projects/${project.id}/recordings`).then(setRecs);
   useEffect(() => { load(); }, [project]);
 
   if (!project) return e(NeedProject);
 
+  const dup = async (id, target) => { await API.post(`/api/recordings/${id}/duplicate`, { target_project_id: target }); alert("Copied to project ✓"); };
+
   return e('div', { className: "space-y-3" },
-    e('h2', { className: "font-bold text-sm" }, "📚 Recording Library & Jenkins Exporters"),
+    e('h2', { className: "font-bold text-sm" }, "📚 Recording Library & Exporters"),
     recs.map(r =>
       e('div', { key: r.id, className: "bg-slate-900 rounded-lg p-3 border border-slate-800 space-y-2 text-xs" },
         e('div', { className: "flex justify-between items-center" },
           e('div', { className: "font-semibold" }, r.name),
-          e('button', { onClick: () => API.post("/api/runs", { target_type: "recording", target_id: r.id }).then(() => alert("Run started! Check Runs tab.")), className: "bg-emerald-600 px-3 py-1 rounded font-bold" }, "▶ Run")
+          e('button', { onClick: () => onRun("recording", r.id), className: "bg-emerald-600 px-3 py-1 rounded font-bold" }, "▶ Run")
         ),
         e('div', { className: "flex gap-1 flex-wrap pt-1" },
-          e('a', { href: `/api/recordings/${r.id}/export/jenkins`, className: "bg-amber-800 hover:bg-amber-700 px-2.5 py-1 rounded text-[10px] font-bold text-white" }, "🥒 Jenkins .feature"),
-          e('a', { href: `/api/recordings/${r.id}/export/playwright`, className: "bg-indigo-900 px-2 py-1 rounded text-[10px]" }, "📥 Playwright"),
-          e('a', { href: `/api/recordings/${r.id}/export/selenium`, className: "bg-purple-900 px-2 py-1 rounded text-[10px]" }, "📥 Selenium")
+          e('a', { href: `/api/recordings/${r.id}/export/jenkins`, className: "bg-amber-800 px-2.5 py-1 rounded text-[10px] font-bold text-white" }, "🥒 Jenkins .feature"),
+          e('a', { href: `/api/recordings/${r.id}/export/csv`, className: "bg-slate-700 px-2.5 py-1 rounded text-[10px]" }, "📥 CSV"),
+          e('a', { href: `/api/recordings/${r.id}/export/playwright`, className: "bg-indigo-900 px-2.5 py-1 rounded text-[10px]" }, "📥 Playwright"),
+          e('a', { href: `/api/recordings/${r.id}/export/selenium`, className: "bg-purple-900 px-2.5 py-1 rounded text-[10px]" }, "📥 Selenium"),
+          e('a', { href: `/api/recordings/${r.id}/export/testcomplete`, className: "bg-teal-900 px-2.5 py-1 rounded text-[10px]" }, "📥 TestComplete XML")
+        ),
+        projects && projects.filter(p => p.id !== project.id).map(p =>
+          e('button', { key: p.id, onClick: () => dup(r.id, p.id), className: "bg-slate-800 text-[10px] px-2 py-0.5 rounded mr-1 mt-1" }, `⧉ Copy to ${p.name}`)
         )
       )
     )
@@ -297,7 +313,7 @@ function Scenarios({ project, onRun }) {
       e('div', { key: sc.id, className: "bg-slate-900 p-3 rounded-lg border border-slate-800 space-y-2 text-xs" },
         e('div', { className: "flex justify-between items-center" },
           e('span', { className: "font-bold text-indigo-400" }, sc.title),
-          e('button', { onClick: () => onRun(sc.id), className: "bg-emerald-600 px-3 py-1 rounded font-bold" }, "▶ Run")
+          e('button', { onClick: () => onRun("scenario", sc.id), className: "bg-emerald-600 px-3 py-1 rounded font-bold" }, "▶ Run")
         ),
         e('div', { className: "bg-black p-2 rounded font-mono text-[11px] text-slate-300 space-y-1" },
           sc.steps.map((st, i) => e('div', { key: i }, st.expected_result || `${st.action} ${st.value || ''}`))
@@ -307,37 +323,78 @@ function Scenarios({ project, onRun }) {
   );
 }
 
-function Runs({ activeRun, setActiveRun }) {
+function Runs({ runId, setRunId }) {
   const [runs, setRuns] = useState([]);
-  const [selectedRun, setSelectedRun] = useState(null);
+  const [activeLog, setActiveLog] = useState(null);
 
   const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, []);
 
+  useEffect(() => {
+    if (runId) {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws/runs/${runId}`);
+      ws.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.type === "snapshot" && m.run) setActiveLog(m.run);
+        else if (m.type === "done") load();
+      };
+      return () => ws.close();
+    }
+  }, [runId]);
+
   return e('div', { className: "space-y-3" },
-    e('h2', { className: "font-bold text-sm" }, "▶ Step-by-Step AI Execution & Screenshot Logs"),
-    runs.map(r =>
-      e('div', { key: r.id, className: "bg-slate-900 p-3 rounded-lg border border-slate-800 text-xs space-y-2" },
-        e('div', { className: "flex justify-between items-center" },
-          e('span', { className: `font-bold px-2 py-0.5 rounded ${r.status === 'passed' ? 'bg-emerald-900 text-emerald-200' : 'bg-red-900 text-red-200'}` }, r.status.toUpperCase()),
-          e('span', { className: "text-slate-400" }, r.created_at.slice(11, 19))
-        ),
-        e('div', { className: "text-slate-300 font-mono text-[11px]" }, `Target ID: ${r.target_id}`),
-        e('div', { className: "space-y-2 pt-2 border-t border-slate-800" },
-          (r.log || []).map((step, i) =>
-            e('div', { key: i, className: "bg-slate-950 p-2 rounded border border-slate-850 space-y-1" },
-              e('div', { className: "flex items-center gap-2" },
-                e('span', {}, step.status === "passed" ? "✅" : "❌"),
-                e('span', { className: "font-bold text-indigo-300" }, `Step ${step.order}: ${step.action}`),
-                e('span', { className: "text-slate-400 text-[10px] ml-auto" }, step.label)
-              ),
-              step.screenshot && e('div', { className: "mt-1" },
-                e('img', { src: step.screenshot, className: "rounded border border-slate-700 max-h-48 w-full object-cover", alt: "Step validation screenshot" })
-              ),
-              step.error && e('div', { className: "text-red-400 text-[10px] font-mono bg-red-950/40 p-1 rounded" }, step.error)
+    e('h2', { className: "font-bold text-sm" }, "▶ Live Execution Progress & Step Validation"),
+    runId && activeLog && e('div', { className: "bg-indigo-950/60 border border-indigo-700 p-3 rounded-lg space-y-2 text-xs" },
+      e('div', { className: "flex justify-between items-center font-bold text-indigo-300" },
+        e('span', {}, `Active Run: ${runId.slice(0,8)}... (${activeLog.status.toUpperCase()})`),
+        e('button', { onClick: () => setRunId(null), className: "bg-slate-800 px-2 py-1 rounded text-[10px]" }, "Close Inspector")
+      ),
+      e('div', { className: "space-y-2" },
+        (activeLog.log || []).map((step, i) =>
+          e('div', { key: i, className: "bg-slate-900 p-2 rounded border border-slate-800 space-y-1" },
+            e('div', { className: "flex items-center gap-2 font-bold" },
+              e('span', {}, step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏳"),
+              e('span', { className: "text-indigo-300" }, `Step ${step.order}: ${step.action}`),
+              e('span', { className: "text-slate-400 text-[10px] ml-auto" }, step.label)
+            ),
+            step.screenshot && e('div', { className: "mt-1" },
+              e('img', { src: step.screenshot, className: "rounded border border-slate-700 max-h-48 w-full object-cover", alt: "Step validation screenshot" })
             )
           )
         )
+      )
+    ),
+    e('div', { className: "space-y-2 pt-2" },
+      e('h3', { className: "text-xs font-bold text-slate-400" }, "Execution History"),
+      runs.map(r =>
+        e('div', { key: r.id, onClick: () => setRunId(r.id), className: "bg-slate-900 p-3 rounded-lg border border-slate-800 text-xs flex justify-between items-center cursor-pointer hover:border-indigo-500" },
+          e('div', {},
+            e('span', { className: `font-bold px-2 py-0.5 rounded mr-2 ${r.status === 'passed' ? 'bg-emerald-900 text-emerald-200' : 'bg-red-900 text-red-200'}` }, r.status.toUpperCase()),
+            e('span', { className: "text-slate-300" }, `${r.target_type} (${r.target_id.slice(0,6)}...)`)
+          ),
+          e('span', { className: "text-slate-500 text-[10px]" }, r.created_at.slice(11, 19))
+        )
+      )
+    )
+  );
+}
+
+function Artifacts() {
+  const [runs, setRuns] = useState([]);
+  useEffect(() => { API.get("/api/runs").then(setRuns).catch(() => {}); }, []);
+
+  return e('div', { className: "space-y-3" },
+    e('h2', { className: "font-bold text-sm" }, "🎥 Screen Recordings & Artifacts"),
+    e('p', { className: "text-xs text-slate-400" }, "All full session screen recordings (.webm) generated during test executions."),
+    runs.filter(r => r.has_video).length === 0 && e('p', { className: "text-xs text-slate-500 italic" }, "No screen recordings yet. Run a test recording or scenario to generate video."),
+    runs.filter(r => r.has_video).map(r =>
+      e('div', { key: r.id, className: "bg-slate-900 p-3 rounded-lg border border-slate-800 space-y-2 text-xs" },
+        e('div', { className: "flex justify-between items-center" },
+          e('span', { className: "font-bold text-indigo-400" }, `Session: ${r.id.slice(0,8)}...`),
+          e('span', { className: "text-slate-400 text-[10px]" }, r.created_at)
+        ),
+        e('video', { controls: true, playsInline: true, className: "w-full rounded border border-slate-700 bg-black", src: `/api/runs/video/${r.id}` })
       )
     )
   );
