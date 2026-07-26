@@ -84,7 +84,7 @@ function App() {
 
   const tabs = [
     ["projects", "📁 Projects"], ["variables", "🔤 Variables"],
-    ["record", "⏺ AI Record"], ["library", "📚 Library"],
+    ["record", "⏺ AI Record"], ["library", "📚 Library Tree"],
     ["runs", "▶ Live Execution"], ["comparison", "⚖️ Comparison Logs"],
     ["artifacts", "🎥 Artifacts"], ["github", "🐙 GitHub Sync"]
   ];
@@ -211,12 +211,11 @@ function Recorder({ project, resumeId, onDone }) {
   if (recId) return e(LiveRecorder, { recId, project, steps, setSteps, onDone: () => { setRecId(null); onDone(); } });
 
   return e('div', { className: "space-y-4 bg-slate-900 p-4 rounded-lg border border-slate-800" },
-    e('h2', { className: "font-bold text-sm text-indigo-300" }, "⏺ AI-Powered Browser Recorder"),
+    e('h2', { className: "font-bold text-sm text-indigo-300" }, resumeId ? "⏺ Resume / Continue Recording" : "⏺ AI-Powered Browser Recorder"),
     e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Recording Name", value: name, onChange: e => setName(e.target.value) }),
     e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Start URL", value: url, onChange: e => setUrl(e.target.value) }),
     e('button', { onClick: resumeId ? () => setRecId(resumeId) : start, className: "w-full bg-red-600 rounded py-2.5 font-bold text-sm" }, resumeId ? "▶ Resume Recording Session" : "● Launch Browser Recorder"),
     
-    // AI Record Tab Library Sidebar
     e('div', { className: "pt-3 border-t border-slate-800 space-y-2" },
       e('h3', { className: "text-xs font-bold text-slate-400" }, "📁 Existing Recordings Library (Quick Resume)"),
       recs.map(r =>
@@ -307,7 +306,7 @@ function Library({ project, projects, onRun, onResume }) {
   const topLevel = recs.filter(r => !r.parent_id);
 
   return e('div', { className: "space-y-3" },
-    e('h2', { className: "font-bold text-sm" }, "📚 Recording Library & Shareable Tree"),
+    e('h2', { className: "font-bold text-sm" }, "📚 Hierarchical Recording Library Tree"),
     selectedRec && e('div', { className: "bg-slate-900 p-3 rounded-lg border border-indigo-700 space-y-2 text-xs" },
       e('div', { className: "flex justify-between items-center font-bold text-indigo-300" },
         e('span', {}, `Details: ${selectedRec.name}`),
@@ -406,16 +405,13 @@ function Runs({ runId, setRunId }) {
           e('button', { onClick: () => setRunId(null), className: "bg-slate-800 px-2 py-1 rounded text-[10px]" }, "Close")
         )
       ),
-      // Progress Bar
       e('div', { className: "w-full bg-slate-800 rounded-full h-2.5 overflow-hidden" },
         e('div', { className: "bg-indigo-500 h-2.5 transition-all duration-300", style: { width: `${percent}%` } })
       ),
       e('div', { className: "text-right text-[10px] text-slate-400" }, `Completion: ${percent}%`),
-
-      // Live Execution Browser Window
       e('div', { className: "bg-black rounded-lg overflow-auto border border-slate-700 max-h-[300px] flex justify-center" },
         execFrame ? e('img', { className: "canvas-img", style: { transform: `scale(${zoom})`, transformOrigin: "top left" }, src: execFrame, draggable: "false" })
-                  : e('div', { className: "h-32 flex items-center justify-center text-slate-400 text-xs" }, "Launching live execution window...")
+                  : e('div', { className: "h-32 flex items-center justify-center text-slate-400 text-xs" }, "Executing test steps live...")
       ),
       e('div', { className: "space-y-2 pt-2" },
         (activeLog.log || []).map((step, i) =>
@@ -454,8 +450,8 @@ function ComparisonLogs({ project }) {
   useEffect(() => { API.get("/api/runs").then(setRuns).catch(() => {}); }, []);
 
   return e('div', { className: "space-y-3" },
-    e('h2', { className: "font-bold text-sm" }, "⚖️ Comparison Logs: Baseline vs Execution"),
-    e('p', { className: "text-xs text-slate-400" }, "Compare AI recording steps against live AI execution steps with screenshots and progress."),
+    e('h2', { className: "font-bold text-sm" }, "⚖️ Comparison Logs: AI Baseline vs Execution"),
+    e('p', { className: "text-xs text-slate-400" }, "Compare AI recording baseline steps against actual AI execution steps side-by-side."),
     runs.map(r =>
       e('div', { key: r.id, className: "bg-slate-900 p-3 rounded-lg border border-slate-800 space-y-2 text-xs" },
         e('div', { className: "flex justify-between items-center font-bold" },
@@ -463,14 +459,15 @@ function ComparisonLogs({ project }) {
           e('button', { onClick: () => setSelectedRun(selectedRun === r.id ? null : r.id), className: "bg-slate-800 px-2.5 py-1 rounded text-[10px]" }, selectedRun === r.id ? "Hide Split View" : "⚖️ View Comparison Split")
         ),
         selectedRun === r.id && e('div', { className: "grid grid-cols-2 gap-2 pt-2 border-t border-slate-800" },
-          // Section A: Baseline
+          // Section A: AI Recording Baseline Steps
           e('div', { className: "bg-slate-950 p-2 rounded border border-slate-850 space-y-1" },
-            e('div', { className: "font-bold text-purple-400 text-[11px]" }, "📋 Section A: Baseline Recording"),
-            (r.log || []).map((s, i) => e('div', { key: i, className: "text-[10px] text-slate-300 border-b border-slate-900 py-1" }, `${s.order}. ${s.action} (${s.label})`))
+            e('div', { className: "font-bold text-purple-400 text-[11px]" }, "📋 AI Recording Baseline"),
+            (r.baseline || []).length === 0 ? e('div', { className: "text-[10px] text-slate-500 italic" }, "No baseline steps found") :
+            (r.baseline || []).map((s, i) => e('div', { key: i, className: "text-[10px] text-slate-300 border-b border-slate-900 py-1" }, `${s.order}. ${s.action} -> ${s.label || s.value || ''}`))
           ),
-          // Section B: Actual Execution
+          // Section B: AI Execution Log
           e('div', { className: "bg-slate-950 p-2 rounded border border-slate-850 space-y-1" },
-            e('div', { className: "font-bold text-emerald-400 text-[11px]" }, "🤖 Section B: AI Execution Log"),
+            e('div', { className: "font-bold text-emerald-400 text-[11px]" }, "🤖 AI Execution Log"),
             (r.log || []).map((s, i) =>
               e('div', { key: i, className: "text-[10px] text-slate-300 border-b border-slate-900 py-1 space-y-1" },
                 e('div', {}, `${s.order}. ${s.action} - ${s.status === 'passed' ? '✅' : '❌'}`),
