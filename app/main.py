@@ -29,10 +29,9 @@ def proj_dict(p): return {"id": p.id, "name": p.name, "base_url": p.base_url}
 def step_dict(s):
     return {"id": s.id, "order": s.order, "action": s.action,
             "selector": s.selector, "value": s.value, "url": s.url,
-            "label": s.label, "screenshot_path": s.screenshot_path,
-            "ref_recording_id": s.ref_recording_id, "variable_overrides": s.variable_overrides}
+            "label": s.label, "screenshot_path": s.screenshot_path}
 def rec_dict(r, with_steps=False):
-    d = {"id": r.id, "project_id": r.project_id, "name": r.name,
+    d = {"id": r.id, "project_id": r.project_id, "parent_id": r.parent_id, "name": r.name,
          "description": r.description, "start_url": r.start_url,
          "shared": r.shared, "status": r.status, "has_video": bool(r.video_path),
          "step_count": len(r.steps)}
@@ -79,18 +78,7 @@ def create_project(body: ProjectCreate):
 @app.post("/api/ai/rephrase")
 async def ai_rephrase(body: dict):
     text = body.get("text", "")
-    if not DEMO_MODE:
-        try:
-            import anthropic
-            client = anthropic.AsyncAnthropic()
-            resp = await client.messages.create(
-                model="claude-sonnet-4-5", max_tokens=1000,
-                messages=[{"role": "user", "content": f"Rephrase, illustrate, and professionalize this QA test requirement or step into clear BDD Gherkin / test input: '{text}'"}]
-            )
-            return {"rephrased": resp.content[0].text}
-        except Exception:
-            pass
-    return {"rephrased": f"Given test environment is ready, When user executes '{text}', Then system validates expected outcomes successfully."}
+    return {"rephrased": f"Given environment is ready, When user executes '{text}', Then system validates successfully."}
 
 @app.post("/api/ai/suggest-variables")
 def ai_suggest_variables(body: dict):
@@ -101,7 +89,7 @@ def ai_suggest_step(body: dict):
     import random
     return {"suggestion": random.choice(["Click search button", "Assert welcome message visible", "Fill password securely", "Submit form"])}
 
-class RecordingCreate(BaseModel): project_id: str; name: str; start_url: str; shared: bool = False
+class RecordingCreate(BaseModel): project_id: str; parent_id: str | None = None; name: str; start_url: str; shared: bool = False
 
 @app.get("/api/projects/{pid}/recordings")
 def list_recordings(pid: str):
@@ -115,7 +103,7 @@ def list_recordings(pid: str):
 def create_recording(body: RecordingCreate):
     db = SessionLocal()
     try:
-        r = Recording(project_id=body.project_id, name=body.name, start_url=body.start_url, shared=body.shared, status="recording")
+        r = Recording(project_id=body.project_id, parent_id=body.parent_id, name=body.name, start_url=body.start_url, shared=body.shared, status="recording")
         db.add(r); db.commit(); db.refresh(r)
         return {"id": r.id}
     finally: db.close()
@@ -145,7 +133,6 @@ def export_recording(rid: str, fmt: str):
         r = db.get(Recording, rid)
         if not r: raise HTTPException(404)
         steps = r.steps
-
         if fmt == "jenkins":
             feature = f"Feature: {r.name}\n  Scenario: Automated UI flow\n    Given I launch URL '{r.start_url}'\n"
             for s in steps:
@@ -154,41 +141,11 @@ def export_recording(rid: str, fmt: str):
                 elif s.action == "fill": feature += f"    And I enter '{val}' into '{s.label or s.action}'\n"
             feature += "    Then test completes successfully\n"
             return PlainTextResponse(feature, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={r.name}.feature"})
-
         elif fmt == "csv":
-            output = io.StringIO()
-            writer = csv.writer(output)
+            output = io.StringIO(); writer = csv.writer(output)
             writer.writerow(["Order", "Action", "Selector", "Value", "Label"])
             for s in steps: writer.writerow([s.order, s.action, (s.selector or {}).get("primary", ""), s.value or "", s.label or ""])
             return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={r.name}.csv"})
-
-        elif fmt == "playwright":
-            code = f"# Playwright Script\nfrom playwright.sync_api import sync_playwright\n\ndef test_run():\n    with sync_playwright() as p:\n        b = p.chromium.launch(headless=True)\n        page = b.new_page()\n        page.goto('{r.start_url}')\n"
-            for s in steps:
-                sel = (s.selector or {}).get("primary") or "body"
-                val = s.value or ""
-                if s.action == "click": code += f"        page.locator('{sel}').click()\n"
-                elif s.action == "fill": code += f"        page.locator('{sel}').fill('{val}')\n"
-            code += "        b.close()\n"
-            return PlainTextResponse(code, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={r.name}_pw.py"})
-
-        elif fmt == "selenium":
-            code = f"# Selenium Script\nfrom selenium import webdriver\nfrom selenium.webdriver.common.by import By\n\nd = webdriver.Chrome()\nd.get('{r.start_url}')\n"
-            for s in steps:
-                sel = (s.selector or {}).get("primary") or "body"
-                val = s.value or ""
-                if s.action == "click": code += f"d.find_element(By.CSS_SELECTOR, '{sel}').click()\n"
-                elif s.action == "fill": code += f"d.find_element(By.CSS_SELECTOR, '{sel}').send_keys('{val}')\n"
-            code += "d.quit()\n"
-            return PlainTextResponse(code, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={r.name}_selenium.py"})
-
-        elif fmt == "testcomplete":
-            xml = f'<?xml version="1.0" encoding="UTF-8"?>\n<Root Name="NameMapping">\n  <Nodes Name="ChildNodes">\n'
-            for i, s in enumerate(steps):
-                xml += f'    <Child Name="Element_{i+1}" Action="{s.action}">\n      <Selectors>\n        <Selector Value="{(s.selector or {}).get("primary", "")}"/>\n      </Selectors>\n    </Child>\n'
-            xml += '  </Nodes>\n</Root>'
-            return PlainTextResponse(xml, media_type="application/xml", headers={"Content-Disposition": f"attachment; filename={r.name}_NameMapping.xml"})
-
         raise HTTPException(400, "Invalid format")
     finally: db.close()
 
@@ -203,28 +160,8 @@ def run_video(run_id: str):
     db = SessionLocal()
     try:
         r = db.get(Run, run_id)
-        if r and r.video_path and os.path.exists(r.video_path):
-            return FileResponse(r.video_path, media_type="video/webm")
+        if r and r.video_path and os.path.exists(r.video_path): return FileResponse(r.video_path, media_type="video/webm")
         raise HTTPException(404)
-    finally: db.close()
-
-class ScenarioGenerate(BaseModel): project_id: str; source_text: str
-
-@app.post("/api/scenarios")
-def generate_scenario(body: ScenarioGenerate):
-    db = SessionLocal()
-    try:
-        sc = Scenario(project_id=body.project_id, title="Jenkins Feature Scenario", source_text=body.source_text, status="ready")
-        db.add(sc); db.flush()
-        db.add(ScenarioStep(scenario_id=sc.id, order=1, action="navigate", value="{{base_url}}", expected_result="Given I open base URL"))
-        db.commit()
-        return {"created": [scen_dict(sc, with_steps=True)]}
-    finally: db.close()
-
-@app.get("/api/projects/{pid}/scenarios")
-def list_scenarios(pid: str):
-    db = SessionLocal()
-    try: return [scen_dict(s, with_steps=True) for s in db.query(Scenario).filter_by(project_id=pid).all()]
     finally: db.close()
 
 class VariableCreate(BaseModel): scope: str; project_id: str | None = None; name: str; value: str = ""; is_secret: bool = False
@@ -299,6 +236,7 @@ async def ws_record(ws: WebSocket, recording_id: str):
     db = SessionLocal()
     rec = db.get(Recording, recording_id)
     start_url = rec.start_url if rec else "about:blank"
+    start_seq = len(rec.steps) if rec and rec.steps else 0
     db.close()
     q: asyncio.Queue = asyncio.Queue(maxsize=120)
     async def on_frame(data):
@@ -307,7 +245,7 @@ async def ws_record(ws: WebSocket, recording_id: str):
             except asyncio.QueueEmpty: pass
         q.put_nowait({"type": "frame", "data": data})
     async def on_event(step): q.put_nowait({"type": "step", "step": step})
-    session = RecorderSession(recording_id, start_url, on_frame, on_event)
+    session = RecorderSession(recording_id, start_url, start_seq, on_frame, on_event)
     ACTIVE[recording_id] = session
     await session.start()
     async def sender():
