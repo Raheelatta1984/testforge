@@ -1,4 +1,4 @@
-import os
+import os, asyncio
 from datetime import datetime
 from playwright.async_api import async_playwright, expect
 
@@ -70,7 +70,7 @@ async def exec_steps(page, steps, variables, on_event, db, depth, log, run_dir):
         log.append(entry)
         await on_event({"type": "step", **entry})
 
-async def execute_run(run_id, on_event):
+async def execute_run(run_id, on_event, on_frame=None):
     db = SessionLocal()
     run = db.get(Run, run_id)
     run.status = "running"; db.commit()
@@ -94,11 +94,22 @@ async def execute_run(run_id, on_event):
                 ctx_args["record_video_size"] = {"width": 1280, "height": 800}
             ctx = await browser.new_context(**ctx_args)
             page = await ctx.new_page()
+
+            # Enable live CDP screencast streaming during execution!
+            cdp = await ctx.new_cdp_session(page)
+            if on_frame:
+                cdp.on("Page.screencastFrame", lambda params: asyncio.create_task(on_frame(params["data"])))
+                await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 60, "maxWidth": 1280, "maxHeight": 800, "everyNthFrame": 2})
+
             try:
                 await exec_steps(page, steps, variables, on_event, db, 0, log_entries, run_dir)
                 run.status = "passed"
             except Exception:
                 run.status = "failed"
+            
+            try: await cdp.send("Page.stopScreencast")
+            except Exception: pass
+
             video = page.video if video_ok() else None
             await ctx.close()
             if video:
