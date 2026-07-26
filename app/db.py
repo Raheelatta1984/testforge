@@ -4,13 +4,23 @@ from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from app.config import DATABASE_URL
 
-# pool_pre_ping=True ensures dropped connections to Neon Postgres auto-reconnect instantly
-engine = create_engine(
-    DATABASE_URL, 
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-    pool_pre_ping=True,
-    pool_recycle=300
-)
+# Resilient engine creation with automatic SQLite fallback if PostgreSQL driver is missing
+try:
+    engine = create_engine(
+        DATABASE_URL, 
+        connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+        pool_pre_ping=True,
+        pool_recycle=300
+    )
+    # Test connection
+    with engine.connect() as conn:
+        pass
+except Exception as e:
+    print(f"⚠️ Database connection warning ({e}), falling back to local SQLite...")
+    from app.config import ARTIFACTS
+    DATABASE_URL = f"sqlite:///{ARTIFACTS}/testforge.db"
+    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def uid() -> str: return str(uuid.uuid4())
@@ -88,7 +98,7 @@ class ScenarioStep(Base):
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 class Run(Base):
-    __tablename_ = "runs"
+    __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     target_type: Mapped[str] = mapped_column(String(20))
     target_id: Mapped[str] = mapped_column(String(36))
@@ -102,24 +112,3 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 def init_db(): Base.metadata.create_all(engine)
-
-VAR_PATTERN = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
-
-def resolve_variables(db, project_id=None, recording_id=None, overrides=None) -> dict:
-    merged = {}
-    for v in db.query(Variable).filter_by(scope="global"): 
-        merged[v.name] = v.value
-    if project_id:
-        for v in db.query(Variable).filter_by(scope="project", project_id=project_id): 
-            merged[v.name] = v.value
-    if recording_id:
-        for v in db.query(Variable).filter_by(scope="recording", recording_id=recording_id): 
-            merged[v.name] = v.value
-    if overrides: 
-        merged.update(overrides)
-    return merged
-
-def interpolate(text, variables):
-    if text is None: 
-        return None
-    return VAR_PATTERN.sub(lambda m: variables.get(m.group(1), m.group(0)), text)
