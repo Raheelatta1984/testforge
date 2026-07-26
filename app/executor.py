@@ -7,8 +7,7 @@ from app.browser import launch_kwargs, video_ok
 from app.db import (SessionLocal, Run, Recording, Scenario,
                  resolve_variables, interpolate)
 
-class StepFailure(Exception):
-    pass
+class StepFailure(Exception): pass
 
 async def locate(page, selector):
     candidates = [selector.get("primary")] + list(selector.get("fallbacks") or [])
@@ -18,68 +17,45 @@ async def locate(page, selector):
             loc = page.locator(sel).first
             await loc.wait_for(state="visible", timeout=3000)
             return loc
-        except Exception as e:
-            last_err = e
+        except Exception as e: last_err = e
     raise StepFailure(f"No selector matched {candidates}: {last_err}")
 
 async def exec_one(page, step, variables):
     value = interpolate(step.value, variables)
     sel = step.selector or {}
     a = step.action
-    if a == "navigate":
-        await page.goto(interpolate(step.url, variables) or value or "about:blank",
-                        wait_until="domcontentloaded")
-    elif a == "click":
-        await (await locate(page, sel)).click()
-    elif a == "dblclick":
-        await (await locate(page, sel)).dblclick()
-    elif a == "fill":
-        await (await locate(page, sel)).fill(value or "")
-    elif a == "select":
-        await (await locate(page, sel)).select_option(value)
-    elif a == "press":
-        await page.keyboard.press(value or "Enter")
-    elif a == "copy":
-        await page.keyboard.press("Control+C")
-    elif a == "cut":
-        await page.keyboard.press("Control+X")
-    elif a == "paste":
-        await (await locate(page, sel)).fill(value or "")
-    elif a == "assert_text":
-        await expect(page.locator("body")).to_contain_text(value or "", timeout=5000)
-    elif a == "assert_visible":
-        await expect(await locate(page, sel)).to_be_visible()
-    elif a == "wait":
-        await page.wait_for_timeout(int(value or 1000))
-    elif a == "scroll":
-        await page.mouse.wheel(0, int(value or 400))
+    if a == "navigate": await page.goto(interpolate(step.url, variables) or value or "about:blank", wait_until="domcontentloaded")
+    elif a == "click": await (await locate(page, sel)).click()
+    elif a == "dblclick": await (await locate(page, sel)).dblclick()
+    elif a == "fill": await (await locate(page, sel)).fill(value or "")
+    elif a == "select": await (await locate(page, sel)).select_option(value)
+    elif a == "press": await page.keyboard.press(value or "Enter")
+    elif a == "copy": await page.keyboard.press("Control+C")
+    elif a == "cut": await page.keyboard.press("Control+X")
+    elif a == "paste": await (await locate(page, sel)).fill(value or "")
+    elif a == "assert_text": await expect(page.locator("body")).to_contain_text(value or "", timeout=5000)
+    elif a == "assert_visible": await expect(await locate(page, sel)).to_be_visible()
+    elif a == "wait": await page.wait_for_timeout(int(value or 1000))
+    elif a == "scroll": await page.mouse.wheel(0, int(value or 400))
 
 async def exec_steps(page, steps, variables, on_event, db, depth, log, run_dir):
-    if depth > 5:
-        raise StepFailure("Recording nesting too deep (possible loop)")
+    if depth > 5: raise StepFailure("Recording nesting too deep")
     for idx, step in enumerate(steps, 1):
         shot_path = f"{run_dir}/step-{idx}.jpg"
-        entry = {"order": step.order, "action": step.action,
-                 "label": step.label or step.action, "status": "running", "screenshot": None}
+        entry = {"order": step.order, "action": step.action, "label": step.label or step.action, "status": "running", "screenshot": None}
         await on_event({"type": "step", **entry})
         try:
             if step.action == "call_recording":
                 sub = db.get(Recording, step.ref_recording_id)
-                if not sub:
-                    raise StepFailure("Referenced recording not found")
-                sub_vars = {**variables,
-                            **resolve_variables(db, recording_id=sub.id),
-                            **(step.variable_overrides or {})}
+                if not sub: raise StepFailure("Referenced recording not found")
+                sub_vars = {**variables, **resolve_variables(db, recording_id=sub.id), **(step.variable_overrides or {})}
                 await exec_steps(page, sub.steps, sub_vars, on_event, db, depth + 1, log, run_dir)
             else:
                 await exec_one(page, step, variables)
-            
             try:
                 await page.screenshot(path=shot_path, type="jpeg", quality=65)
                 entry["screenshot"] = f"/api/runs/screenshot/{run_dir.split('/')[-1]}/step-{idx}.jpg"
-            except Exception:
-                pass
-
+            except Exception: pass
             entry["status"] = "passed"
         except Exception as e:
             entry["status"] = "failed"
@@ -87,8 +63,7 @@ async def exec_steps(page, steps, variables, on_event, db, depth, log, run_dir):
             try:
                 await page.screenshot(path=shot_path, type="jpeg", quality=65)
                 entry["screenshot"] = f"/api/runs/screenshot/{run_dir.split('/')[-1]}/step-{idx}.jpg"
-            except Exception:
-                pass
+            except Exception: pass
             log.append(entry)
             await on_event({"type": "step", **entry})
             raise
@@ -113,8 +88,7 @@ async def execute_run(run_id, on_event):
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(**launch_kwargs())
-            ctx_args = {"viewport": {"width": 1280, "height": 800},
-                        "permissions": ["clipboard-read", "clipboard-write"]}
+            ctx_args = {"viewport": {"width": 1280, "height": 800}, "permissions": ["clipboard-read", "clipboard-write"]}
             if video_ok():
                 ctx_args["record_video_dir"] = run_dir
                 ctx_args["record_video_size"] = {"width": 1280, "height": 800}
@@ -128,10 +102,8 @@ async def execute_run(run_id, on_event):
             video = page.video if video_ok() else None
             await ctx.close()
             if video:
-                try: 
-                    run.video_path = await video.path()
-                except Exception: 
-                    run.video_path = None
+                try: run.video_path = await video.path()
+                except Exception: pass
             await browser.close()
     except Exception as e:
         run.status = "error"; run.error = str(e)[:1000]
@@ -139,6 +111,5 @@ async def execute_run(run_id, on_event):
         run.log = log_entries
         run.finished_at = datetime.utcnow()
         db.commit()
-        await on_event({"type": "done", "status": run.status,
-                        "log": log_entries, "has_video": bool(run.video_path)})
+        await on_event({"type": "done", "status": run.status, "log": log_entries, "has_video": bool(run.video_path)})
         db.close()
