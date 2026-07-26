@@ -4,7 +4,13 @@ from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from app.config import DATABASE_URL
 
-engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+# pool_pre_ping=True ensures dropped connections to Neon Postgres auto-reconnect instantly
+engine = create_engine(
+    DATABASE_URL, 
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    pool_pre_ping=True,
+    pool_recycle=300
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def uid() -> str: return str(uuid.uuid4())
@@ -33,7 +39,7 @@ class Recording(Base):
     __tablename__ = "recordings"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"))
-    parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)  # Tree structure for chunking!
+    parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(200))
     description: Mapped[str] = mapped_column(Text, default="")
     start_url: Mapped[str] = mapped_column(String(500), default="")
@@ -96,16 +102,3 @@ class Run(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 def init_db(): Base.metadata.create_all(engine)
-VAR_PATTERN = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
-def resolve_variables(db, project_id=None, recording_id=None, overrides=None) -> dict:
-    merged = {}
-    for v in db.query(Variable).filter_by(scope="global"): merged[v.name] = v.value
-    if project_id:
-        for v in db.query(Variable).filter_by(scope="project", project_id=project_id): merged[v.name] = v.value
-    if recording_id:
-        for v in db.query(Variable).filter_by(scope="recording", recording_id=recording_id): merged[v.name] = v.value
-    if overrides: merged.update(overrides)
-    return merged
-def interpolate(text, variables):
-    if text is None: return None
-    return VAR_PATTERN.sub(lambda m: variables.get(m.group(1), m.group(0)), text)
