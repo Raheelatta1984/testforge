@@ -163,6 +163,15 @@ def run_video(run_id: str):
         raise HTTPException(404)
     finally: db.close()
 
+@app.get("/api/runs/{run_id}/status")
+def run_status(run_id: str):
+    db = SessionLocal()
+    try:
+        r = db.get(Run, run_id)
+        if not r: raise HTTPException(404)
+        return run_dict(r)
+    finally: db.close()
+
 class VariableCreate(BaseModel): scope: str; project_id: str | None = None; name: str; value: str = ""; is_secret: bool = False
 
 @app.get("/api/variables")
