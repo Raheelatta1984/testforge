@@ -1,4 +1,4 @@
-lFROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
+FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 
 # Install Desktop Environment & Xvfb
 RUN apt-get update && apt-get install -y \
