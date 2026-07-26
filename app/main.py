@@ -4,10 +4,11 @@ from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+# --- 1. CONFIG & IMPORTS ---
 try:
     from app.config import DEMO_MODE, ARTIFACTS
     from app.db import (SessionLocal, init_db, Project, Recording, RecordingStep,
-                     Variable, Scenario, ScenarioStep, Run)
+                     Variable, Scenario, ScenarioStep, Run, resolve_variables, interpolate)
     from app.recorder import RecorderSession, ACTIVE
     from app.executor import execute_run
 except Exception as e:
@@ -15,7 +16,7 @@ except Exception as e:
     traceback.print_exc()
     raise e
 
-# 1. CREATE APP INSTANCE FIRST
+# --- 2. APP INITIALIZATION ---
 app = FastAPI(title="TestForge AI Enterprise")
 init_db()
 
@@ -26,7 +27,7 @@ async def emit_run(run_id: str, evt: dict):
         try: q.put_nowait(evt)
         except asyncio.QueueFull: pass
 
-# --- HELPER DICTS ---
+# --- 3. SERIALIZERS ---
 def proj_dict(p): return {"id": p.id, "name": p.name, "base_url": p.base_url}
 def step_dict(s):
     return {"id": s.id, "order": s.order, "action": s.action,
@@ -40,10 +41,9 @@ def rec_dict(r, with_steps=False):
     if with_steps: d["steps"] = [step_dict(s) for s in r.steps]
     return d
 def var_dict(v):
-    vd = {"id": v.id, "scope": v.scope, "project_id": v.project_id,
+    return {"id": v.id, "scope": v.scope, "project_id": v.project_id,
             "recording_id": v.recording_id, "name": v.name,
             "value": "••••••" if v.is_secret else v.value, "is_secret": v.is_secret}
-    return vd
 
 def run_dict(r, db=None):
     baseline = []
@@ -56,8 +56,7 @@ def run_dict(r, db=None):
             "baseline": baseline, "error": r.error, "has_video": bool(r.video_path),
             "created_at": str(r.created_at), "finished_at": str(r.finished_at)}
 
-# --- PROJECTS ---
-class ProjectCreate(BaseModel): name: str; base_url: str = ""
+# --- 4. ENDPOINTS ---
 
 @app.get("/api/projects")
 def list_projects():
@@ -66,20 +65,15 @@ def list_projects():
     finally: db.close()
 
 @app.post("/api/projects")
-def create_project(body: ProjectCreate):
+def create_project(body: dict):
     db = SessionLocal()
     try:
-        p = Project(name=body.name, base_url=body.base_url)
+        p = Project(name=body['name'], base_url=body.get('base_url', ''))
         db.add(p); db.commit(); db.refresh(p)
-        db.add(Variable(scope="project", project_id=p.id, name="base_url", value=body.base_url or "https://example.com"))
+        db.add(Variable(scope="project", project_id=p.id, name="base_url", value=p.base_url))
         db.commit()
         return proj_dict(p)
     finally: db.close()
-
-# --- AI & SYNC ---
-@app.post("/api/ai/rephrase")
-async def ai_rephrase(body: dict):
-    return {"rephrased": f"Validated Requirement: {body.get('text', '')}"}
 
 @app.get("/api/sync/github-bundle")
 def github_sync_bundle():
@@ -97,9 +91,6 @@ def github_sync_bundle():
     return Response(buf.read(), media_type="application/zip", 
                     headers={"Content-Disposition": f"attachment; filename=TestForge_Sync_{timestamp}.zip"})
 
-# --- RECORDINGS ---
-class RecordingCreate(BaseModel): project_id: str; parent_id: str | None = None; name: str; start_url: str; shared: bool = False
-
 @app.get("/api/projects/{pid}/recordings")
 def list_recordings(pid: str):
     db = SessionLocal()
@@ -109,10 +100,11 @@ def list_recordings(pid: str):
     finally: db.close()
 
 @app.post("/api/recordings")
-def create_recording(body: RecordingCreate):
+def create_recording(body: dict):
     db = SessionLocal()
     try:
-        r = Recording(project_id=body.project_id, parent_id=body.parent_id, name=body.name, start_url=body.start_url, shared=body.shared, status="recording")
+        r = Recording(project_id=body['project_id'], parent_id=body.get('parent_id'), 
+                      name=body['name'], start_url=body['start_url'], shared=body.get('shared', False), status="recording")
         db.add(r); db.commit(); db.refresh(r)
         return {"id": r.id}
     finally: db.close()
@@ -122,7 +114,6 @@ def get_recording(rid: str):
     db = SessionLocal()
     try:
         r = db.get(Recording, rid)
-        if not r: raise HTTPException(404)
         return rec_dict(r, with_steps=True)
     finally: db.close()
 
@@ -131,37 +122,23 @@ def patch_recording(rid: str, body: dict):
     db = SessionLocal()
     try:
         r = db.get(Recording, rid)
-        if not r: raise HTTPException(404)
         if "shared" in body: r.shared = body["shared"]
         db.commit()
         return rec_dict(r)
     finally: db.close()
 
-@app.delete("/api/recordings/{rid}")
-def delete_recording(rid: str):
+@app.get("/api/recordings/{rid}/export/jenkins")
+def export_gherkin(rid: str):
     db = SessionLocal()
     try:
         r = db.get(Recording, rid)
-        if r: db.delete(r); db.commit()
-        return {"ok": True}
+        feature = f"Feature: {r.name}\n  Scenario: Automated UI flow\n    Given I launch URL '{r.start_url}'\n"
+        for s in r.steps:
+            if s.action == "click": feature += f"    When I click '{s.label}'\n"
+            elif s.action == "fill": feature += f"    And I enter '{s.value}' into '{s.label}'\n"
+        return PlainTextResponse(feature)
     finally: db.close()
 
-@app.get("/api/recordings/{rid}/export/{fmt}")
-def export_recording(rid: str, fmt: str):
-    db = SessionLocal()
-    try:
-        r = db.get(Recording, rid)
-        if not r: raise HTTPException(404)
-        if fmt == "jenkins":
-            feature = f"Feature: {r.name}\n  Scenario: Automated UI flow\n    Given I launch URL '{r.start_url}'\n"
-            for s in r.steps:
-                if s.action == "click": feature += f"    When I click '{s.label}'\n"
-                elif s.action == "fill": feature += f"    And I enter '{s.value}' into '{s.label}'\n"
-            return PlainTextResponse(feature)
-        return {"error": "format not supported"}
-    finally: db.close()
-
-# --- VARIABLES ---
 @app.get("/api/variables")
 def list_variables(project_id: str | None = None):
     db = SessionLocal()
@@ -191,7 +168,6 @@ def patch_variable(vid: str, body: dict):
     db = SessionLocal()
     try:
         v = db.get(Variable, vid)
-        if not v: raise HTTPException(404)
         if "value" in body: v.value = body["value"]
         db.commit()
         return var_dict(v)
@@ -206,7 +182,6 @@ def delete_variable(vid: str):
         return {"ok": True}
     finally: db.close()
 
-# --- RUNS ---
 @app.post("/api/runs")
 def start_run(body: dict):
     db = SessionLocal()
@@ -246,7 +221,8 @@ def run_video(run_id: str):
     db = SessionLocal()
     try:
         r = db.get(Run, run_id)
-        return FileResponse(r.video_path) if r.video_path else None
+        if r.video_path: return FileResponse(r.video_path)
+        raise HTTPException(404)
     finally: db.close()
 
 @app.websocket("/ws/runs/{run_id}")
@@ -285,6 +261,15 @@ async def ws_record(ws: WebSocket, recording_id: str):
         await session.stop()
         ACTIVE.pop(recording_id, None)
 
-# 4. MOUNT STATIC AT THE VERY END
+@app.post("/api/ai/suggest-step")
+def ai_suggest_step(body: dict):
+    import random
+    return {"suggestion": random.choice(["Click Login", "Validate Text", "Submit Form"])}
+
+@app.post("/api/ai/suggest-variables")
+def ai_suggest_variables(body: dict):
+    return {"suggestions": [{"name": "email", "value": "test@user.com"}]}
+
+# --- 5. STATIC FILES ---
 os.makedirs("app/static", exist_ok=True)
 app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
