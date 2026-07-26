@@ -97,7 +97,7 @@ class ScenarioStep(Base):
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 class Run(Base):
-    __tablename__ = "runs"  # <-- Fixed double underscores here
+    __tablename__ = "runs"  # <-- CORRECTED: double underscores on both sides!
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     target_type: Mapped[str] = mapped_column(String(20))
     target_id: Mapped[str] = mapped_column(String(36))
