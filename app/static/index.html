@@ -9,7 +9,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <style>
   body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; background: #020617; color: #f8fafc; font-family: sans-serif; }
-  .canvas-img { image-rendering: auto; user-select: none; transition: transform 0.2s; }
+  .canvas-img { image-rendering: auto; user-select: none; }
 </style>
 </head>
 <body>
@@ -317,18 +317,35 @@ function Runs({ runId, setRunId }) {
   const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, []);
 
+  // Dual-engine tracking: WebSocket + 2s HTTP Polling Fallback
   useEffect(() => {
     if (runId) {
       setExecFrame(null);
+      let isLive = true;
+
+      const pollStatus = async () => {
+        try {
+          const res = await API.get(`/api/runs/${runId}/status`);
+          if (isLive && res) setActiveLog(res);
+        } catch(e) {}
+      };
+      pollStatus();
+      const pollInterval = setInterval(pollStatus, 2000);
+
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${proto}://${location.host}/ws/runs/${runId}`);
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.type === "snapshot" && m.run) setActiveLog(m.run);
         else if (m.type === "frame") setExecFrame("data:image/jpeg;base64," + m.data);
-        else if (m.type === "done") load();
+        else if (m.type === "done") { load(); pollStatus(); }
       };
-      return () => ws.close();
+
+      return () => {
+        isLive = false;
+        clearInterval(pollInterval);
+        try { ws.close(); } catch(_) {}
+      };
     }
   }, [runId]);
 
@@ -343,7 +360,6 @@ function Runs({ runId, setRunId }) {
           e('button', { onClick: () => setRunId(null), className: "bg-slate-800 px-2 py-1 rounded text-[10px]" }, "Close")
         )
       ),
-      // LIVE EXECUTION SCREENCAST WINDOW
       e('div', { className: "bg-black rounded-lg overflow-auto border border-slate-700 max-h-[300px] flex justify-center" },
         execFrame ? e('img', { className: "canvas-img", style: { transform: `scale(${zoom})`, transformOrigin: "top left" }, src: execFrame, draggable: "false" })
                   : e('div', { className: "h-32 flex items-center justify-center text-slate-400 text-xs" }, "Executing test steps live...")
@@ -357,7 +373,7 @@ function Runs({ runId, setRunId }) {
               e('span', { className: "text-slate-400 text-[10px] ml-auto" }, step.label)
             ),
             step.screenshot && e('div', { className: "mt-1" },
-              e('img', { src: step.screenshot, className: "rounded border border-slate-700 max-h-40 w-full object-cover", alt: "Step validation screenshot" })
+              e('img', { src: step.screenshot, className: "rounded border border-slate-700 max-h-48 w-full object-cover", alt: "Step screenshot" })
             )
           )
         )
