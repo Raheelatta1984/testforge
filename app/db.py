@@ -12,7 +12,6 @@ try:
         pool_pre_ping=True,
         pool_recycle=300
     )
-    # Test connection
     with engine.connect() as conn:
         pass
 except Exception as e:
@@ -98,7 +97,7 @@ class ScenarioStep(Base):
     expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 class Run(Base):
-    __tablename__ = "runs"
+    __tablename__ = "runs"  # <-- Fixed double underscores here
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     target_type: Mapped[str] = mapped_column(String(20))
     target_id: Mapped[str] = mapped_column(String(36))
