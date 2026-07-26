@@ -9,7 +9,7 @@
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
 <style>
   body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; background: #020617; color: #f8fafc; font-family: sans-serif; }
-  .canvas-img { image-rendering: auto; user-select: none; }
+  .canvas-img { image-rendering: auto; user-select: none; transition: transform 0.2s; }
 </style>
 </head>
 <body>
@@ -85,7 +85,7 @@ function App() {
   const tabs = [
     ["projects", "📁 Projects"], ["variables", "🔤 Variables"],
     ["record", "⏺ AI Record"], ["library", "📚 Library Tree"],
-    ["runs", "▶ Live Progress & Runs"], ["artifacts", "🎥 Artifacts"]
+    ["runs", "▶ Live Execution & Window"], ["artifacts", "🎥 Artifacts"]
   ];
 
   return e('div', { className: "min-h-screen pb-20" },
@@ -129,7 +129,7 @@ function Projects({ projects, active, onSelect, onChanged }) {
   };
   return e('div', { className: "space-y-3" },
     e('div', { className: "bg-slate-900 rounded-lg p-4 space-y-2 border border-slate-800" },
-      e('h2', { className: "font-bold text-sm text-indigo-300" }, "📁 Create New Project"),
+      e('h2', { className: "font-bold text-sm text-indigo-300" }, "📁 Create New Project (Neon DB Persisted)"),
       e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Project Name", value: name, onChange: e => setName(e.target.value) }),
       e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Base URL", value: url, onChange: e => setUrl(e.target.value) }),
       e('button', { onClick: create, className: "w-full bg-indigo-600 rounded py-2 font-semibold text-sm" }, "⚡ Create Project")
@@ -251,7 +251,7 @@ function LiveRecorder({ recId, project, steps, setSteps, onDone }) {
   );
 }
 
-function Library({ project, onRun, onResume }) {
+function Library({ project, projects, onRun, onResume }) {
   const [recs, setRecs] = useState([]);
   const [selectedRec, setSelectedRec] = useState(null);
   const [childName, setChildName] = useState("");
@@ -311,17 +311,21 @@ function Library({ project, onRun, onResume }) {
 function Runs({ runId, setRunId }) {
   const [runs, setRuns] = useState([]);
   const [activeLog, setActiveLog] = useState(null);
+  const [execFrame, setExecFrame] = useState(null);
+  const [zoom, setZoom] = useState(1);
 
   const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 3000); return () => clearInterval(t); }, []);
 
   useEffect(() => {
     if (runId) {
+      setExecFrame(null);
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const ws = new WebSocket(`${proto}://${location.host}/ws/runs/${runId}`);
       ws.onmessage = (e) => {
         const m = JSON.parse(e.data);
         if (m.type === "snapshot" && m.run) setActiveLog(m.run);
+        else if (m.type === "frame") setExecFrame("data:image/jpeg;base64," + m.data);
         else if (m.type === "done") load();
       };
       return () => ws.close();
@@ -329,13 +333,22 @@ function Runs({ runId, setRunId }) {
   }, [runId]);
 
   return e('div', { className: "space-y-3" },
-    e('h2', { className: "font-bold text-sm" }, "▶ Live Execution Journey & Step Inspector"),
+    e('h2', { className: "font-bold text-sm" }, "▶ Live Execution Window & Step Progress"),
     runId && activeLog && e('div', { className: "bg-indigo-950/60 border border-indigo-700 p-3 rounded-lg space-y-2 text-xs" },
       e('div', { className: "flex justify-between items-center font-bold text-indigo-300" },
         e('span', {}, `Active Run: ${runId.slice(0,8)}... (${activeLog.status.toUpperCase()})`),
-        e('button', { onClick: () => setRunId(null), className: "bg-slate-800 px-2 py-1 rounded text-[10px]" }, "Close")
+        e('div', { className: "flex gap-1" },
+          e('button', { onClick: () => setZoom(z => Math.max(1, z - 0.25)), className: "bg-slate-800 px-2 py-0.5 rounded text-[10px]" }, "🔍-"),
+          e('button', { onClick: () => setZoom(z => Math.min(2, z + 0.25)), className: "bg-slate-800 px-2 py-0.5 rounded text-[10px]" }, "🔍+"),
+          e('button', { onClick: () => setRunId(null), className: "bg-slate-800 px-2 py-1 rounded text-[10px]" }, "Close")
+        )
       ),
-      e('div', { className: "space-y-2" },
+      // LIVE EXECUTION SCREENCAST WINDOW
+      e('div', { className: "bg-black rounded-lg overflow-auto border border-slate-700 max-h-[300px] flex justify-center" },
+        execFrame ? e('img', { className: "canvas-img", style: { transform: `scale(${zoom})`, transformOrigin: "top left" }, src: execFrame, draggable: "false" })
+                  : e('div', { className: "h-32 flex items-center justify-center text-slate-400 text-xs" }, "Executing test steps live...")
+      ),
+      e('div', { className: "space-y-2 pt-2" },
         (activeLog.log || []).map((step, i) =>
           e('div', { key: i, className: "bg-slate-900 p-2 rounded border border-slate-800 space-y-1" },
             e('div', { className: "flex items-center gap-2 font-bold" },
@@ -344,7 +357,7 @@ function Runs({ runId, setRunId }) {
               e('span', { className: "text-slate-400 text-[10px] ml-auto" }, step.label)
             ),
             step.screenshot && e('div', { className: "mt-1" },
-              e('img', { src: step.screenshot, className: "rounded border border-slate-700 max-h-48 w-full object-cover", alt: "Step screenshot" })
+              e('img', { src: step.screenshot, className: "rounded border border-slate-700 max-h-40 w-full object-cover", alt: "Step validation screenshot" })
             )
           )
         )
