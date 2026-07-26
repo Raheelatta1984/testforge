@@ -9,7 +9,7 @@ ARTIFACTS = os.environ.get(
     os.path.expanduser("~/testforge/artifacts") if IS_TERMUX else "/app/artifacts")
 os.makedirs(ARTIFACTS, exist_ok=True)
 
-# Automatically picks up Neon PostgreSQL URL from environment or falls back to SQLite
+# Automatically picks up DATABASE_URL from Render/Neon or safely defaults to local SQLite
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", 
     os.environ.get("NEON_DATABASE_URL", f"sqlite:///{ARTIFACTS}/testforge.db")
