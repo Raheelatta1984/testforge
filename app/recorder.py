@@ -52,12 +52,12 @@ INIT_SCRIPT = r"""
 """
 
 class RecorderSession:
-    def __init__(self, recording_id, start_url, on_frame, on_event):
+    def __init__(self, recording_id, start_url, start_seq, on_frame, on_event):
         self.recording_id = recording_id
         self.start_url = start_url
+        self.seq = start_seq  # Continues from existing steps if resumed!
         self.on_frame = on_frame
         self.on_event = on_event
-        self.seq = 0
 
     async def start(self):
         os.makedirs(f"{ARTIFACTS}/rec/{self.recording_id}", exist_ok=True)
@@ -84,16 +84,13 @@ class RecorderSession:
         self.page.on("framenavigated", lambda f: asyncio.create_task(
             self._record({"action": "navigate", "url": f.url,
                           "label": f"Navigate to {f.url}"}))
-            if f == self.page.main_frame() else None)
+            if f == self.page.main_frame else None)
 
         await self.page.goto(self.start_url, wait_until="domcontentloaded")
 
     async def _on_screencast_frame(self, params):
-        try:
-            await self.cdp.send("Page.screencastFrameAck",
-                                {"sessionId": params["sessionId"]})
-        except Exception:
-            pass
+        try: await self.cdp.send("Page.screencastFrameAck", {"sessionId": params["sessionId"]})
+        except Exception: pass
         await self.on_frame(params["data"])
 
     async def _on_record_event(self, source, payload):
@@ -102,15 +99,12 @@ class RecorderSession:
     async def _record(self, payload):
         self.seq += 1
         shot = f"{ARTIFACTS}/rec/{self.recording_id}/step-{self.seq}.jpg"
-        try:
-            await self.page.screenshot(path=shot, type="jpeg", quality=55)
-        except Exception:
-            shot = None
+        try: await self.page.screenshot(path=shot, type="jpeg", quality=55)
+        except Exception: shot = None
         step = {"order": self.seq, "action": payload.get("action"),
-                "selector": {"primary": payload.get("selector"), "fallbacks": [],
-                             "ai_hint": payload.get("label")},
+                "selector": {"primary": payload.get("selector"), "fallbacks": [], "ai_hint": payload.get("label")},
                 "value": payload.get("value"), "url": payload.get("url"),
-                "label": payload.get("label") or self._humanize(payload),
+                "label": payload.get("label") or payload.get("action"),
                 "screenshot_path": shot}
         db = SessionLocal()
         try:
@@ -118,40 +112,23 @@ class RecorderSession:
                 action=step["action"], selector=step["selector"], value=step["value"],
                 url=step["url"], label=step["label"], screenshot_path=shot))
             db.commit()
-        finally:
-            db.close()
+        finally: db.close()
         await self.on_event(step)
-
-    @staticmethod
-    def _humanize(p):
-        a = p.get("action")
-        return {"click": f"Click '{p.get('label','')}'",
-                "fill": f"Enter '{p.get('value','')}' into '{p.get('label','')}'",
-                "paste": f"Paste '{p.get('value','')}' into '{p.get('label','')}'",
-                "copy": f"Copy '{p.get('value','')}'",
-                "press": f"Press {p.get('value','')}"}.get(a, a or "action")
 
     async def handle_input(self, msg):
         t = msg.get("type")
         if t == "tap":
             x, y = msg["x"], msg["y"]
             await self.cdp.send("Input.dispatchMouseEvent", {"type": "mouseMoved", "x": x, "y": y})
-            await self.cdp.send("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y,
-                                                             "button": "left", "clickCount": 1})
-            await self.cdp.send("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y,
-                                                             "button": "left", "clickCount": 1})
-        elif t == "text":
-            await self.page.keyboard.type(msg["text"], delay=30)
-        elif t == "key":
-            await self.page.keyboard.press(msg["key"])
-        elif t == "scroll":
-            await self.page.mouse.wheel(0, msg.get("deltaY", 300))
+            await self.cdp.send("Input.dispatchMouseEvent", {"type": "mousePressed", "x": x, "y": y, "button": "left", "clickCount": 1})
+            await self.cdp.send("Input.dispatchMouseEvent", {"type": "mouseReleased", "x": x, "y": y, "button": "left", "clickCount": 1})
+        elif t == "text": await self.page.keyboard.type(msg["text"], delay=30)
+        elif t == "key": await self.page.keyboard.press(msg["key"])
+        elif t == "scroll": await self.page.mouse.wheel(0, msg.get("deltaY", 300))
 
     async def stop(self):
-        try:
-            await self.cdp.send("Page.stopScreencast")
-        except Exception:
-            pass
+        try: await self.cdp.send("Page.stopScreencast")
+        except Exception: pass
         video = self.page.video if video_ok() else None
         await self.context.close()
         video_path = None
@@ -165,9 +142,8 @@ class RecorderSession:
             rec = db.get(Recording, self.recording_id)
             if rec:
                 rec.status = "ready"
-                rec.video_path = video_path
+                if video_path: rec.video_path = video_path
                 db.commit()
-        finally:
-            db.close()
+        finally: db.close()
 
 ACTIVE = {}
