@@ -15,7 +15,7 @@ async def locate(page, selector):
     for sel in [c for c in candidates if c]:
         try:
             loc = page.locator(sel).first
-            await loc.wait_for(state="visible", timeout=3000)
+            await loc.wait_for(state="visible", timeout=5000)
             return loc
         except Exception as e: last_err = e
     raise StepFailure(f"No selector matched {candidates}: {last_err}")
@@ -40,9 +40,11 @@ async def exec_one(page, step, variables):
 
 async def exec_steps(page, steps, variables, on_event, db, depth, log, run_dir):
     if depth > 5: raise StepFailure("Recording nesting too deep")
+    total = len(steps)
     for idx, step in enumerate(steps, 1):
         shot_path = f"{run_dir}/step-{idx}.jpg"
-        entry = {"order": step.order, "action": step.action, "label": step.label or step.action, "status": "running", "screenshot": None}
+        percent = int((idx / max(1, total)) * 100)
+        entry = {"order": step.order, "action": step.action, "label": step.label or step.action, "status": "running", "screenshot": None, "percent": percent}
         await on_event({"type": "step", **entry})
         try:
             if step.action == "call_recording":
@@ -95,7 +97,6 @@ async def execute_run(run_id, on_event, on_frame=None):
             ctx = await browser.new_context(**ctx_args)
             page = await ctx.new_page()
 
-            # Enable live CDP screencast streaming during execution!
             cdp = await ctx.new_cdp_session(page)
             if on_frame:
                 cdp.on("Page.screencastFrame", lambda params: asyncio.create_task(on_frame(params["data"])))
