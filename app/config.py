@@ -14,6 +14,7 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL", 
     os.environ.get("NEON_DATABASE_URL", f"sqlite:///{ARTIFACTS}/testforge.db")
 )
+
 # Fix for Render/Neon postgres:// prefix compatibility in SQLAlchemy
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
