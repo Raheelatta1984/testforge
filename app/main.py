@@ -29,7 +29,8 @@ def proj_dict(p): return {"id": p.id, "name": p.name, "base_url": p.base_url}
 def step_dict(s):
     return {"id": s.id, "order": s.order, "action": s.action,
             "selector": s.selector, "value": s.value, "url": s.url,
-            "label": s.label, "screenshot_path": s.screenshot_path}
+            "label": s.label, "screenshot_path": s.screenshot_path,
+            "ref_recording_id": s.ref_recording_id, "variable_overrides": s.variable_overrides}
 def rec_dict(r, with_steps=False):
     d = {"id": r.id, "project_id": r.project_id, "name": r.name,
          "description": r.description, "start_url": r.start_url,
@@ -75,20 +76,30 @@ def create_project(body: ProjectCreate):
         return proj_dict(p)
     finally: db.close()
 
+@app.post("/api/ai/rephrase")
+async def ai_rephrase(body: dict):
+    text = body.get("text", "")
+    if not DEMO_MODE:
+        try:
+            import anthropic
+            client = anthropic.AsyncAnthropic()
+            resp = await client.messages.create(
+                model="claude-sonnet-4-5", max_tokens=1000,
+                messages=[{"role": "user", "content": f"Rephrase, illustrate, and professionalize this QA test requirement or step into clear BDD Gherkin / test input: '{text}'"}]
+            )
+            return {"rephrased": resp.content[0].text}
+        except Exception:
+            pass
+    return {"rephrased": f"Given test environment is ready, When user executes '{text}', Then system validates expected outcomes successfully."}
+
 @app.post("/api/ai/suggest-variables")
 def ai_suggest_variables(body: dict):
-    proj_name = body.get("project_name", "App")
-    return {"suggestions": [
-        {"name": "username", "value": "qa_admin", "is_secret": False},
-        {"name": "password", "value": "Secure2026!", "is_secret": True},
-        {"name": "search_term", "value": "Enterprise Test", "is_secret": False}
-    ]}
+    return {"suggestions": [{"name": "username", "value": "qa_admin"}, {"name": "password", "value": "Secure2026!"}]}
 
 @app.post("/api/ai/suggest-step")
 def ai_suggest_step(body: dict):
-    actions = ["Click search button", "Assert welcome message visible", "Fill password securely", "Submit form"]
     import random
-    return {"suggestion": random.choice(actions)}
+    return {"suggestion": random.choice(["Click search button", "Assert welcome message visible", "Fill password securely", "Submit form"])}
 
 class RecordingCreate(BaseModel): project_id: str; name: str; start_url: str; shared: bool = False
 
@@ -127,7 +138,6 @@ def delete_recording(rid: str):
         return {"ok": True}
     finally: db.close()
 
-# --- MULTI-FORMAT EXPORTERS INCLUDING JENKINS GHERKIN ---
 @app.get("/api/recordings/{rid}/export/{fmt}")
 def export_recording(rid: str, fmt: str):
     db = SessionLocal()
@@ -137,35 +147,47 @@ def export_recording(rid: str, fmt: str):
         steps = r.steps
 
         if fmt == "jenkins":
-            # Gherkin .feature format for Jenkins / Cucumber
-            feature = f"Feature: {r.name}\n  As an automated QA engineer\n  I want to execute {r.name}\n\n  Scenario: Automated UI flow for {r.name}\n    Given I launch URL '{r.start_url}'\n"
+            feature = f"Feature: {r.name}\n  Scenario: Automated UI flow\n    Given I launch URL '{r.start_url}'\n"
             for s in steps:
                 val = s.value or ""
                 if s.action == "click": feature += f"    When I click element '{s.label or s.action}'\n"
                 elif s.action == "fill": feature += f"    And I enter '{val}' into '{s.label or s.action}'\n"
-                elif s.action == "press": feature += f"    And I press key '{val}'\n"
-            feature += "    Then the test execution completes successfully\n"
+            feature += "    Then test completes successfully\n"
             return PlainTextResponse(feature, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={r.name}.feature"})
 
+        elif fmt == "csv":
+            output = io.StringIO()
+            writer = csv.writer(output)
+            writer.writerow(["Order", "Action", "Selector", "Value", "Label"])
+            for s in steps: writer.writerow([s.order, s.action, (s.selector or {}).get("primary", ""), s.value or "", s.label or ""])
+            return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": f"attachment; filename={r.name}.csv"})
+
         elif fmt == "playwright":
-            code = f"# Playwright Script\nfrom playwright.sync_api import sync_playwright\n\ndef test_run():\n    with sync_playwright() as p:\n        browser = p.chromium.launch(headless=True)\n        page = browser.new_page()\n        page.goto('{r.start_url}')\n"
+            code = f"# Playwright Script\nfrom playwright.sync_api import sync_playwright\n\ndef test_run():\n    with sync_playwright() as p:\n        b = p.chromium.launch(headless=True)\n        page = b.new_page()\n        page.goto('{r.start_url}')\n"
             for s in steps:
                 sel = (s.selector or {}).get("primary") or "body"
                 val = s.value or ""
                 if s.action == "click": code += f"        page.locator('{sel}').click()\n"
                 elif s.action == "fill": code += f"        page.locator('{sel}').fill('{val}')\n"
-            code += "        browser.close()\n"
+            code += "        b.close()\n"
             return PlainTextResponse(code, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={r.name}_pw.py"})
 
         elif fmt == "selenium":
-            code = f"# Selenium Script\nfrom selenium import webdriver\nfrom selenium.webdriver.common.by import By\n\ndriver = webdriver.Chrome()\ndriver.get('{r.start_url}')\n"
+            code = f"# Selenium Script\nfrom selenium import webdriver\nfrom selenium.webdriver.common.by import By\n\nd = webdriver.Chrome()\nd.get('{r.start_url}')\n"
             for s in steps:
                 sel = (s.selector or {}).get("primary") or "body"
                 val = s.value or ""
-                if s.action == "click": code += f"driver.find_element(By.CSS_SELECTOR, '{sel}').click()\n"
-                elif s.action == "fill": code += f"driver.find_element(By.CSS_SELECTOR, '{sel}').send_keys('{val}')\n"
-            code += "driver.quit()\n"
+                if s.action == "click": code += f"d.find_element(By.CSS_SELECTOR, '{sel}').click()\n"
+                elif s.action == "fill": code += f"d.find_element(By.CSS_SELECTOR, '{sel}').send_keys('{val}')\n"
+            code += "d.quit()\n"
             return PlainTextResponse(code, media_type="text/plain", headers={"Content-Disposition": f"attachment; filename={r.name}_selenium.py"})
+
+        elif fmt == "testcomplete":
+            xml = f'<?xml version="1.0" encoding="UTF-8"?>\n<Root Name="NameMapping">\n  <Nodes Name="ChildNodes">\n'
+            for i, s in enumerate(steps):
+                xml += f'    <Child Name="Element_{i+1}" Action="{s.action}">\n      <Selectors>\n        <Selector Value="{(s.selector or {}).get("primary", "")}"/>\n      </Selectors>\n    </Child>\n'
+            xml += '  </Nodes>\n</Root>'
+            return PlainTextResponse(xml, media_type="application/xml", headers={"Content-Disposition": f"attachment; filename={r.name}_NameMapping.xml"})
 
         raise HTTPException(400, "Invalid format")
     finally: db.close()
@@ -173,9 +195,18 @@ def export_recording(rid: str, fmt: str):
 @app.get("/api/runs/screenshot/{run_id}/{filename}")
 def run_screenshot(run_id: str, filename: str):
     path = f"{ARTIFACTS}/runs/{run_id}/{filename}"
-    if os.path.exists(path):
-        return FileResponse(path, media_type="image/jpeg")
+    if os.path.exists(path): return FileResponse(path, media_type="image/jpeg")
     raise HTTPException(404)
+
+@app.get("/api/runs/video/{run_id}")
+def run_video(run_id: str):
+    db = SessionLocal()
+    try:
+        r = db.get(Run, run_id)
+        if r and r.video_path and os.path.exists(r.video_path):
+            return FileResponse(r.video_path, media_type="video/webm")
+        raise HTTPException(404)
+    finally: db.close()
 
 class ScenarioGenerate(BaseModel): project_id: str; source_text: str
 
@@ -185,8 +216,7 @@ def generate_scenario(body: ScenarioGenerate):
     try:
         sc = Scenario(project_id=body.project_id, title="Jenkins Feature Scenario", source_text=body.source_text, status="ready")
         db.add(sc); db.flush()
-        db.add(ScenarioStep(scenario_id=sc.id, order=1, action="navigate", value="{{base_url}}", expected_result="Given I open the base URL"))
-        db.add(ScenarioStep(scenario_id=sc.id, order=2, action="fill", value="{{username}}", expected_result="When I enter username"))
+        db.add(ScenarioStep(scenario_id=sc.id, order=1, action="navigate", value="{{base_url}}", expected_result="Given I open base URL"))
         db.commit()
         return {"created": [scen_dict(sc, with_steps=True)]}
     finally: db.close()
@@ -215,6 +245,15 @@ def create_variable(body: VariableCreate):
         v = Variable(**body.dict())
         db.add(v); db.commit(); db.refresh(v)
         return var_dict(v)
+    finally: db.close()
+
+@app.delete("/api/variables/{vid}")
+def delete_variable(vid: str):
+    db = SessionLocal()
+    try:
+        v = db.get(Variable, vid)
+        if v: db.delete(v); db.commit()
+        return {"ok": True}
     finally: db.close()
 
 class RunCreate(BaseModel): target_type: str; target_id: str; mode: str = "script"
