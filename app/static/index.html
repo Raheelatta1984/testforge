@@ -39,6 +39,40 @@ function Badge(props) {
   return e('span', { className: `text-[10px] px-1.5 py-0.5 rounded ${props.color || "bg-slate-700"}` }, props.children);
 }
 
+// Reusable AI Voice + Rephrase Input Component
+function AiInput(props) {
+  const [listening, setListening] = useState(false);
+
+  const startVoice = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) { alert("Speech recognition not supported in this browser."); return; }
+    const recognition = new SpeechRecognition();
+    recognition.onstart = () => setListening(true);
+    recognition.onend = () => setListening(false);
+    recognition.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      props.onChange({ target: { value: (props.value || "") + " " + transcript } });
+    };
+    recognition.start();
+  };
+
+  const rephrase = async () => {
+    if (!props.value) return;
+    const res = await API.post("/api/ai/rephrase", { text: props.value });
+    props.onChange({ target: { value: res.rephrased } });
+  };
+
+  return e('div', { className: "relative w-full" },
+    props.isArea ?
+      e('textarea', { ...props, className: `${props.className || ''} pr-20` }) :
+      e('input', { ...props, className: `${props.className || ''} pr-20` }),
+    e('div', { className: "absolute right-1 top-1.5 flex gap-1" },
+      e('button', { type: "button", onClick: startVoice, title: "Voice to Text", className: `p-1 rounded text-xs ${listening ? 'bg-red-600 animate-pulse' : 'bg-slate-800 text-slate-300'}` }, "🎤"),
+      e('button', { type: "button", onClick: rephrase, title: "AI Rephrase & Illustrate", className: "p-1 rounded bg-purple-900 text-purple-200 text-xs" }, "✨")
+    )
+  );
+}
+
 function App() {
   const [tab, setTab] = useState("projects");
   const [projects, setProjects] = useState([]);
@@ -63,7 +97,7 @@ function App() {
     ["projects", "📁 Projects"], ["variables", "🔤 Variables"],
     ["record", "⏺ AI Record"], ["library", "📚 Library"],
     ["scenarios", "✨ Gherkin"], ["runs", "▶ Live Progress & Runs"],
-    ["artifacts", "🎥 Recordings & Artifacts"]
+    ["artifacts", "🎥 Artifacts"]
   ];
 
   return e('div', { className: "min-h-screen pb-20" },
@@ -109,8 +143,8 @@ function Projects({ projects, active, onSelect, onChanged }) {
   return e('div', { className: "space-y-3" },
     e('div', { className: "bg-slate-900 rounded-lg p-4 space-y-2 border border-slate-800" },
       e('h2', { className: "font-bold text-sm text-indigo-300" }, "📁 Create New Project (AI Auto-Seeds Variables)"),
-      e('input', { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Project Name", value: name, onChange: e => setName(e.target.value) }),
-      e('input', { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Base URL (https://app.example.com)", value: url, onChange: e => setUrl(e.target.value) }),
+      e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Project Name", value: name, onChange: e => setName(e.target.value) }),
+      e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Base URL (https://app.example.com)", value: url, onChange: e => setUrl(e.target.value) }),
       e('button', { onClick: create, className: "w-full bg-indigo-600 hover:bg-indigo-500 rounded py-2 font-semibold text-sm" }, "⚡ Create Project")
     ),
     projects.map(p =>
@@ -155,8 +189,8 @@ function Variables({ project }) {
       e('button', { onClick: aiSuggest, className: "bg-purple-600 text-xs px-3 py-1.5 rounded font-bold" }, "✨ AI Suggest Variables")
     ),
     e('div', { className: "bg-slate-900 rounded-lg p-3 space-y-2 border border-slate-800" },
-      e('input', { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Variable Name (e.g. username)", value: name, onChange: e => setName(e.target.value) }),
-      e('input', { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Value", value: val, onChange: e => setVal(e.target.value) }),
+      e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Variable Name (e.g. username)", value: name, onChange: e => setName(e.target.value) }),
+      e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Value", value: val, onChange: e => setVal(e.target.value) }),
       e('button', { onClick: add, className: "w-full bg-indigo-600 rounded py-2 text-sm font-semibold" }, "+ Add Variable")
     ),
     vars.map(v =>
@@ -185,8 +219,8 @@ function Recorder({ project, onDone }) {
 
   return e('div', { className: "space-y-3 bg-slate-900 p-4 rounded-lg border border-slate-800" },
     e('h2', { className: "font-bold text-sm text-indigo-300" }, "⏺ AI-Powered Browser Recorder"),
-    e('input', { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Recording Name", value: name, onChange: e => setName(e.target.value) }),
-    e('input', { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Start URL (https://...)", value: url, onChange: e => setUrl(e.target.value) }),
+    e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Recording Name", value: name, onChange: e => setName(e.target.value) }),
+    e(AiInput, { className: "w-full bg-slate-800 rounded px-3 py-2 text-white text-sm", placeholder: "Start URL (https://...)", value: url, onChange: e => setUrl(e.target.value) }),
     e('button', { onClick: start, className: "w-full bg-red-600 rounded py-2.5 font-bold text-sm" }, "● Launch Browser Recorder")
   );
 }
@@ -247,7 +281,7 @@ function LiveRecorder({ recId, project, steps, setSteps, onDone }) {
       vars.map(v => e('button', { key: v.id, onClick: () => setText(t => t + `{{${v.name}}}`), className: "bg-indigo-900/60 border border-indigo-700 text-indigo-200 text-[10px] px-2 py-0.5 rounded" }, `+ {{${v.name}}}`))
     ),
     e('div', { className: "flex gap-1" },
-      e('input', { className: "flex-1 bg-slate-800 rounded px-3 py-1.5 text-xs text-white", placeholder: "Type value or variables...", value: text, onChange: e => setText(e.target.value) }),
+      e(AiInput, { className: "flex-1 bg-slate-800 rounded px-3 py-1.5 text-xs text-white", placeholder: "Type value or variables...", value: text, onChange: e => setText(e.target.value) }),
       e('button', { onClick: () => { if (text) { send({ type: "text", text }); setText(""); } }, className: "bg-indigo-600 px-3 py-1.5 rounded text-xs" }, "Type")
     ),
     e('div', { className: "bg-slate-900 rounded p-2 max-h-28 overflow-y-auto text-xs" },
@@ -306,7 +340,7 @@ function Scenarios({ project, onRun }) {
   return e('div', { className: "space-y-3" },
     e('div', { className: "bg-slate-900 p-4 rounded-lg border border-slate-800 space-y-2" },
       e('h2', { className: "font-bold text-sm text-indigo-300" }, "🥒 Jenkins Gherkin AI Scenario Generator"),
-      e('textarea', { className: "w-full bg-slate-800 rounded p-2 text-xs text-white h-24", placeholder: "Paste user story / acceptance criteria...", value: story, onChange: e => setStory(e.target.value) }),
+      e(AiInput, { isArea: true, className: "w-full bg-slate-800 rounded p-2 text-xs text-white h-24", placeholder: "Paste user story / acceptance criteria...", value: story, onChange: e => setStory(e.target.value) }),
       e('button', { onClick: generate, className: "w-full bg-indigo-600 py-2 rounded text-xs font-bold" }, "✨ Generate Gherkin Feature")
     ),
     scenarios.map(sc =>
