@@ -77,8 +77,7 @@ def create_project(body: ProjectCreate):
 
 @app.post("/api/ai/rephrase")
 async def ai_rephrase(body: dict):
-    text = body.get("text", "")
-    return {"rephrased": f"Given environment is ready, When user executes '{text}', Then system validates successfully."}
+    return {"rephrased": f"Given test setup is complete, When user executes action, Then system validates expected results."}
 
 @app.post("/api/ai/suggest-variables")
 def ai_suggest_variables(body: dict):
@@ -203,7 +202,13 @@ def start_run(body: RunCreate):
         db.add(run); db.commit(); db.refresh(run)
         rid = run.id
     finally: db.close()
-    asyncio.create_task(execute_run(rid, lambda e: emit_run(rid, e)))
+    
+    async def bg_run():
+        async def on_frame(data):
+            await emit_run(rid, {"type": "frame", "data": data})
+        await execute_run(rid, lambda e: emit_run(rid, e), on_frame=on_frame)
+
+    asyncio.create_task(bg_run())
     return {"run_id": rid}
 
 @app.get("/api/runs")
@@ -219,8 +224,7 @@ async def ws_run(ws: WebSocket, run_id: str):
     r = db.get(Run, run_id); snapshot = run_dict(r) if r else None
     db.close()
     await ws.send_json({"type": "snapshot", "run": snapshot})
-    if snapshot and snapshot["status"] not in ("queued", "running"): return
-    q: asyncio.Queue = asyncio.Queue(maxsize=500)
+    q: asyncio.Queue = asyncio.Queue(maxsize=150)
     RUN_SUBS.setdefault(run_id, []).append(q)
     try:
         while True:
