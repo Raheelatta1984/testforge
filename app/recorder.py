@@ -1,7 +1,6 @@
 import asyncio, os
 from playwright.async_api import async_playwright
 from app.config import ARTIFACTS
-from app.browser import launch_kwargs
 from app.db import SessionLocal, Recording, RecordingStep
 
 class RecorderSession:
@@ -41,26 +40,30 @@ class RecorderSession:
             await self._record("click", label=f"Click at {msg['x']},{msg['y']}")
         elif t == "key":
             await self.page.keyboard.press(msg['key'])
-            await self._record("press", value=msg['key'], label=f"Press {msg['key']}")
+            await self._record("press", value=msg['key'], label=f"Key: {msg['key']}")
         elif t == "text":
             await self.page.keyboard.type(msg['text'])
-            await self._record("fill", value=msg['text'], label=f"Type text")
+            await self._record("fill", value=msg['text'], label=f"Typed: {msg['text']}")
         elif t == "pause": self.paused = True
         elif t == "resume": self.paused = False
 
     async def _record(self, action, value=None, label=None):
         self.seq += 1
         shot = f"{ARTIFACTS}/rec/{self.recording_id}/step-{self.seq}.jpg"
-        await self.page.screenshot(path=shot, quality=40)
-        db = SessionLocal()
-        db.add(RecordingStep(recording_id=self.recording_id, order=self.seq, action=action, value=value, label=label, screenshot_path=shot))
-        db.commit()
-        db.close()
-        await self.on_event({"order": self.seq, "action": action, "label": label})
+        try:
+            await self.page.screenshot(path=shot, quality=40)
+            db = SessionLocal()
+            db.add(RecordingStep(recording_id=self.recording_id, order=self.seq, action=action, value=value, label=label, screenshot_path=shot))
+            db.commit()
+            db.close()
+            await self.on_event({"order": self.seq, "action": action, "label": label})
+        except: pass
 
     async def stop(self):
-        await self.context.close()
-        await self.browser.close()
-        await self._pw.stop()
+        try:
+            await self.context.close()
+            await self.browser.close()
+            await self._pw.stop()
+        except: pass
 
 ACTIVE = {}
