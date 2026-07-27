@@ -15,30 +15,29 @@ try:
     from app.recorder import RecorderSession, ACTIVE
     from app.executor import execute_run
 except Exception as e:
-    print("CRITICAL IMPORT ERROR IN main.py")
+    print("CRITICAL IMPORT ERROR")
     traceback.print_exc()
     raise e
 
-# Initialize Database after imports
-init_db()
+# Initialize Database safely
+try:
+    init_db()
+except Exception as e:
+    print(f"DB Init Warning: {e}")
 
 RUN_SUBS: dict[str, list[asyncio.Queue]] = {}
 
 async def emit_run(run_id: str, evt: dict):
     for q in list(RUN_SUBS.get(run_id, [])):
-        try:
-            q.put_nowait(evt)
-        except asyncio.QueueFull:
-            pass
+        try: q.put_nowait(evt)
+        except asyncio.QueueFull: pass
 
 # --- 3. HELPER FUNCTIONS ---
 def proj_dict(p): return {"id": p.id, "name": p.name, "base_url": p.base_url}
-
 def step_dict(s):
     return {"id": s.id, "order": s.order, "action": s.action,
             "selector": s.selector, "value": s.value, "url": s.url,
             "label": s.label, "screenshot_path": s.screenshot_path}
-
 def rec_dict(r, with_steps=False):
     d = {"id": r.id, "project_id": r.project_id, "parent_id": r.parent_id, "name": r.name,
          "description": r.description, "start_url": r.start_url,
@@ -46,7 +45,6 @@ def rec_dict(r, with_steps=False):
          "step_count": len(r.steps)}
     if with_steps: d["steps"] = [step_dict(s) for s in r.steps]
     return d
-
 def var_dict(v):
     return {"id": v.id, "scope": v.scope, "project_id": v.project_id,
             "recording_id": v.recording_id, "name": v.name,
@@ -87,13 +85,12 @@ def github_sync_bundle():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w') as zipf:
-        runs_dir = f"{ARTIFACTS}/runs"
+        runs_dir = os.path.join(ARTIFACTS, "runs")
         if os.path.exists(runs_dir):
             for root, _, files in os.walk(runs_dir):
                 for file in files:
                     full_path = os.path.join(root, file)
-                    arc_path = os.path.relpath(full_path, ARTIFACTS)
-                    zipf.write(full_path, arc_path)
+                    zipf.write(full_path, os.path.relpath(full_path, ARTIFACTS))
     buf.seek(0)
     return Response(buf.read(), media_type="application/zip", 
                     headers={"Content-Disposition": f"attachment; filename=TestForge_Sync_{timestamp}.zip"})
@@ -124,30 +121,6 @@ def get_recording(rid: str):
         return rec_dict(r, with_steps=True)
     finally: db.close()
 
-@app.patch("/api/recordings/{rid}")
-def patch_recording(rid: str, body: dict):
-    db = SessionLocal()
-    try:
-        r = db.get(Recording, rid)
-        if not r: raise HTTPException(404)
-        if "shared" in body: r.shared = body["shared"]
-        if "name" in body: r.name = body["name"]
-        db.commit()
-        return rec_dict(r)
-    finally: db.close()
-
-@app.get("/api/recordings/{rid}/export/jenkins")
-def export_gherkin(rid: str):
-    db = SessionLocal()
-    try:
-        r = db.get(Recording, rid)
-        feature = f"Feature: {r.name}\n  Scenario: Automated UI flow\n    Given I launch URL '{r.start_url}'\n"
-        for s in r.steps:
-            if s.action == "click": feature += f"    When I click '{s.label}'\n"
-            elif s.action == "fill": feature += f"    And I enter '{s.value}' into '{s.label}'\n"
-        return PlainTextResponse(feature)
-    finally: db.close()
-
 @app.get("/api/variables")
 def list_variables(project_id: str | None = None):
     db = SessionLocal()
@@ -161,35 +134,6 @@ def list_variables(project_id: str | None = None):
             vd["associated_recordings"] = [r.name for r in recs if any(v.name in (step.value or "") for step in r.steps)]
             result.append(vd)
         return result
-    finally: db.close()
-
-@app.post("/api/variables")
-def create_variable(body: dict):
-    db = SessionLocal()
-    try:
-        v = Variable(**body)
-        db.add(v); db.commit(); db.refresh(v)
-        return var_dict(v)
-    finally: db.close()
-
-@app.patch("/api/variables/{vid}")
-def patch_variable(vid: str, body: dict):
-    db = SessionLocal()
-    try:
-        v = db.get(Variable, vid)
-        if not v: raise HTTPException(404)
-        if "value" in body: v.value = body["value"]
-        db.commit()
-        return var_dict(v)
-    finally: db.close()
-
-@app.delete("/api/variables/{vid}")
-def delete_variable(vid: str):
-    db = SessionLocal()
-    try:
-        v = db.get(Variable, vid)
-        if v: db.delete(v); db.commit()
-        return {"ok": True}
     finally: db.close()
 
 @app.post("/api/runs")
@@ -220,20 +164,6 @@ def run_status(run_id: str):
     try:
         r = db.get(Run, run_id)
         return run_dict(r, db)
-    finally: db.close()
-
-@app.get("/api/runs/screenshot/{run_id}/{filename}")
-def run_screenshot(run_id: str, filename: str):
-    return FileResponse(f"{ARTIFACTS}/runs/{run_id}/{filename}")
-
-@app.get("/api/runs/video/{run_id}")
-def run_video(run_id: str):
-    db = SessionLocal()
-    try:
-        r = db.get(Run, run_id)
-        if r.video_path and os.path.exists(r.video_path):
-            return FileResponse(r.video_path)
-        raise HTTPException(404)
     finally: db.close()
 
 @app.websocket("/ws/runs/{run_id}")
@@ -272,19 +202,12 @@ async def ws_record(ws: WebSocket, recording_id: str):
         await session.stop()
         ACTIVE.pop(recording_id, None)
 
-@app.post("/api/ai/rephrase")
-async def ai_rephrase_endpoint(body: dict):
-    return {"rephrased": f"Rephrased Action: {body.get('text', '')}"}
-
-@app.post("/api/ai/suggest-step")
-def ai_suggest_step(body: dict):
-    import random
-    return {"suggestion": random.choice(["Click Login", "Validate Text", "Submit Form"])}
-
-@app.post("/api/ai/suggest-variables")
-def ai_suggest_variables_endpoint(body: dict):
-    return {"suggestions": [{"name": "email", "value": "test@user.com"}]}
-
-# --- 5. STATIC FILES ---
-os.makedirs("app/static", exist_ok=True)
-app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
+# --- 5. STATIC FILES (SAFE MOUNT) ---
+# We check if the directory exists before mounting.
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+else:
+    @app.get("/")
+    def fallback():
+        return PlainTextResponse("Static folder not found. Please ensure app/static/index.html exists.")
