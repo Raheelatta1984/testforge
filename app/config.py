@@ -1,22 +1,33 @@
 import os
 
-def _is_termux() -> bool:
-    return "com.termux" in os.environ.get("PREFIX", "")
+# 1. GET THE ABSOLUTE PATH OF THE PROJECT ROOT
+# This ensures we always know exactly where we are allowed to write files.
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-IS_TERMUX = _is_termux()
-ARTIFACTS = os.environ.get(
-    "TF_ARTIFACTS",
-    os.path.expanduser("~/testforge/artifacts") if IS_TERMUX else "/app/artifacts")
-os.makedirs(ARTIFACTS, exist_ok=True)
+# 2. DEFINE AND CREATE THE ARTIFACTS DIRECTORY
+# We put everything in a local folder called 'artifacts'
+ARTIFACTS = os.path.join(BASE_DIR, "artifacts")
 
-# Automatically picks up DATABASE_URL from Render/Neon or safely defaults to local SQLite
+# Auto-create the folder structure on startup
+try:
+    os.makedirs(ARTIFACTS, exist_ok=True)
+    os.makedirs(os.path.join(ARTIFACTS, "runs"), exist_ok=True)
+    os.makedirs(os.path.join(ARTIFACTS, "rec"), exist_ok=True)
+except Exception as e:
+    print(f"Warning: Could not create artifacts directory at {ARTIFACTS}: {e}")
+
+# 3. DATABASE CONFIGURATION
+# It will use the DATABASE_URL environment variable (for Neon/Render)
+# Or default to a local SQLite file inside the artifacts folder.
 DATABASE_URL = os.environ.get(
     "DATABASE_URL", 
-    os.environ.get("NEON_DATABASE_URL", f"sqlite:///{ARTIFACTS}/testforge.db")
+    f"sqlite:///{os.path.join(ARTIFACTS, 'testforge.db')}"
 )
 
-# Fix for Render/Neon postgres:// prefix compatibility in SQLAlchemy
+# Fix for Render/Postgres strings (SQLAlchemy requires postgresql:// not postgres://)
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
+# 4. PLATFORM DETECT & MOCK MODE
+IS_TERMUX = "com.termux" in os.environ.get("PREFIX", "")
 DEMO_MODE = not os.environ.get("ANTHROPIC_API_KEY")
