@@ -1,30 +1,29 @@
-import uuid, re
+import uuid, re, os
 from datetime import datetime
 from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, func)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from app.config import DATABASE_URL
 
-# Resilient engine creation with automatic SQLite fallback if PostgreSQL driver is missing
+# --- 1. ENGINE CONFIGURATION ---
 try:
+    # Use pool_pre_ping for Neon/Postgres, standard for SQLite
     engine = create_engine(
         DATABASE_URL, 
         connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-        pool_pre_ping=True,
-        pool_recycle=300
+        pool_pre_ping=True
     )
-    with engine.connect() as conn:
-        pass
 except Exception as e:
-    print(f"⚠️ Database connection warning ({e}), falling back to local SQLite...")
-    from app.config import ARTIFACTS
-    DATABASE_URL = f"sqlite:///{ARTIFACTS}/testforge.db"
-    engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
+    print(f"Database engine error: {e}")
+    # Fallback to local sqlite if something is wrong with the URL
+    engine = create_engine("sqlite:///./testforge_fallback.db", connect_args={"check_same_thread": False})
 
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def uid() -> str: return str(uuid.uuid4())
 
 class Base(DeclarativeBase): pass
+
+# --- 2. MODELS ---
 
 class Project(Base):
     __tablename__ = "projects"
@@ -57,8 +56,6 @@ class Recording(Base):
     video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     project: Mapped[Project] = relationship(back_populates="recordings")
-    parent: Mapped["Recording"] = relationship("Recording", remote_side=[id], back_populates="children", foreign_keys=[parent_id])
-    children: Mapped[list["Recording"]] = relationship("Recording", back_populates="parent", cascade="all, delete-orphan", foreign_keys=[parent_id])
     steps: Mapped[list["RecordingStep"]] = relationship(back_populates="recording", order_by="RecordingStep.order", cascade="all, delete-orphan")
 
 class RecordingStep(Base):
@@ -110,7 +107,10 @@ class Run(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-def init_db(): Base.metadata.create_all(engine)
+# --- 3. UTILITIES & INIT ---
+
+def init_db():
+    Base.metadata.create_all(engine)
 
 VAR_PATTERN = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
 
@@ -129,6 +129,5 @@ def resolve_variables(db, project_id=None, recording_id=None, overrides=None) ->
     return merged
 
 def interpolate(text, variables):
-    if text is None: 
-        return None
+    if text is None: return None
     return VAR_PATTERN.sub(lambda m: variables.get(m.group(1), m.group(0)), text)
