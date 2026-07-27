@@ -2,7 +2,7 @@ FROM mcr.microsoft.com/playwright/python:v1.49.1-jammy
 
 # Install Virtual Desktop and Keyboard dependencies
 RUN apt-get update && apt-get install -y \
-    xvfb fluxbox x11vnc dbus-X11 libgtk-3-0 \
+    xvfb fluxbox x11vnc dbus-x11 libgtk-3-0 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
