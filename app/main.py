@@ -15,26 +15,24 @@ try:
     from app.recorder import RecorderSession, ACTIVE
     from app.executor import execute_run
 except Exception as e:
-    print("CRITICAL IMPORT ERROR IN main.py")
+    print("IMPORT ERROR")
     traceback.print_exc()
     raise e
 
-# Safely initialize database
+# Safe DB Init
 try:
     init_db()
-except Exception as e:
-    print(f"DB Init Warning: {e}")
+except:
+    pass
 
 RUN_SUBS: dict[str, list[asyncio.Queue]] = {}
 
 async def emit_run(run_id: str, evt: dict):
     for q in list(RUN_SUBS.get(run_id, [])):
-        try:
-            q.put_nowait(evt)
-        except asyncio.QueueFull:
-            pass
+        try: q.put_nowait(evt)
+        except asyncio.QueueFull: pass
 
-# --- 3. HELPER FUNCTIONS ---
+# --- 3. HELPERS ---
 def proj_dict(p): return {"id": p.id, "name": p.name, "base_url": p.base_url}
 def step_dict(s):
     return {"id": s.id, "order": s.order, "action": s.action,
@@ -50,20 +48,19 @@ def rec_dict(r, with_steps=False):
 def var_dict(v):
     return {"id": v.id, "scope": v.scope, "project_id": v.project_id,
             "recording_id": v.recording_id, "name": v.name,
-            "value": "••••••" if v.is_secret else v.value, "is_secret": v.is_secret}
+            "value": v.value, "is_secret": v.is_secret}
 
 def run_dict(r, db=None):
     baseline = []
     if r.target_type == "recording" and db:
         rec = db.get(Recording, r.target_id)
-        if rec and rec.steps:
-            baseline = [step_dict(s) for s in rec.steps]
+        if rec and rec.steps: baseline = [step_dict(s) for s in rec.steps]
     return {"id": r.id, "target_type": r.target_type, "target_id": r.target_id,
             "mode": r.mode, "status": r.status, "log": r.log or [],
             "baseline": baseline, "error": r.error, "has_video": bool(r.video_path),
             "created_at": str(r.created_at), "finished_at": str(r.finished_at)}
 
-# --- 4. API ENDPOINTS ---
+# --- 4. ENDPOINTS ---
 
 @app.get("/api/projects")
 def list_projects():
@@ -123,18 +120,6 @@ def get_recording(rid: str):
         return rec_dict(r, with_steps=True)
     finally: db.close()
 
-@app.patch("/api/recordings/{rid}")
-def patch_recording(rid: str, body: dict):
-    db = SessionLocal()
-    try:
-        r = db.get(Recording, rid)
-        if not r: raise HTTPException(404)
-        if "shared" in body: r.shared = body["shared"]
-        if "name" in body: r.name = body["name"]
-        db.commit()
-        return rec_dict(r)
-    finally: db.close()
-
 @app.get("/api/variables")
 def list_variables(project_id: str | None = None):
     db = SessionLocal()
@@ -148,15 +133,6 @@ def list_variables(project_id: str | None = None):
             vd["associated_recordings"] = [r.name for r in recs if any(v.name in (step.value or "") for step in r.steps)]
             result.append(vd)
         return result
-    finally: db.close()
-
-@app.post("/api/variables")
-def create_variable(body: dict):
-    db = SessionLocal()
-    try:
-        v = Variable(**body)
-        db.add(v); db.commit(); db.refresh(v)
-        return var_dict(v)
     finally: db.close()
 
 @app.post("/api/runs")
@@ -232,9 +208,10 @@ async def ws_record(ws: WebSocket, recording_id: str):
 
 @app.post("/api/ai/rephrase")
 async def ai_rephrase_endpoint(body: dict):
-    return {"rephrased": f"Requirement Validated: {body.get('text', '')}"}
+    return {"rephrased": f"Validated Requirement: {body.get('text', '')}"}
 
-# --- 5. STATIC FILES (PERMISSION SAFE) ---
-static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-if os.path.exists(static_path):
-    app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
+# --- 5. STATIC FILES ---
+# Use absolute path to the static folder inside the project
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.exists(static_dir):
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
