@@ -61,7 +61,6 @@ def run_dict(r, db=None):
             "created_at": str(r.created_at), "finished_at": str(r.finished_at)}
 
 # --- 4. ENDPOINTS ---
-
 @app.get("/api/projects")
 def list_projects():
     db = SessionLocal()
@@ -94,47 +93,6 @@ def github_sync_bundle():
     return Response(buf.read(), media_type="application/zip", 
                     headers={"Content-Disposition": f"attachment; filename=TestForge_Sync_{timestamp}.zip"})
 
-@app.get("/api/projects/{pid}/recordings")
-def list_recordings(pid: str):
-    db = SessionLocal()
-    try:
-        recs = db.query(Recording).filter((Recording.project_id == pid) | (Recording.shared == True)).all()
-        return [rec_dict(r) for r in recs]
-    finally: db.close()
-
-@app.post("/api/recordings")
-def create_recording(body: dict):
-    db = SessionLocal()
-    try:
-        r = Recording(project_id=body['project_id'], parent_id=body.get('parent_id'), 
-                      name=body['name'], start_url=body['start_url'], shared=body.get('shared', False), status="recording")
-        db.add(r); db.commit(); db.refresh(r)
-        return {"id": r.id}
-    finally: db.close()
-
-@app.get("/api/recordings/{rid}")
-def get_recording(rid: str):
-    db = SessionLocal()
-    try:
-        r = db.get(Recording, rid)
-        return rec_dict(r, with_steps=True)
-    finally: db.close()
-
-@app.get("/api/variables")
-def list_variables(project_id: str | None = None):
-    db = SessionLocal()
-    try:
-        q = db.query(Variable)
-        if project_id: q = q.filter((Variable.scope == "global") | (Variable.project_id == project_id))
-        result = []
-        for v in q.all():
-            vd = var_dict(v)
-            recs = db.query(Recording).all()
-            vd["associated_recordings"] = [r.name for r in recs if any(v.name in (step.value or "") for step in r.steps)]
-            result.append(vd)
-        return result
-    finally: db.close()
-
 @app.post("/api/runs")
 def start_run(body: dict):
     db = SessionLocal()
@@ -156,19 +114,6 @@ def list_runs():
         db_runs = db.query(Run).order_by(Run.created_at.desc()).limit(50).all()
         return [run_dict(r, db) for r in db_runs]
     finally: db.close()
-
-@app.get("/api/runs/{run_id}/status")
-def run_status(run_id: str):
-    db = SessionLocal()
-    try:
-        r = db.get(Run, run_id)
-        return run_dict(r, db)
-    finally: db.close()
-
-@app.get("/api/runs/screenshot/{run_id}/{filename}")
-def run_screenshot(run_id: str, filename: str):
-    path = os.path.join(ARTIFACTS, "runs", run_id, filename)
-    return FileResponse(path)
 
 @app.websocket("/ws/runs/{run_id}")
 async def ws_run(ws: WebSocket, run_id: str):
@@ -206,12 +151,9 @@ async def ws_record(ws: WebSocket, recording_id: str):
         await session.stop()
         ACTIVE.pop(recording_id, None)
 
-@app.post("/api/ai/rephrase")
-async def ai_rephrase_endpoint(body: dict):
-    return {"rephrased": f"Validated Requirement: {body.get('text', '')}"}
-
-# --- 5. STATIC FILES ---
-# Use absolute path to the static folder inside the project
-static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-if os.path.exists(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
+# --- 5. STATIC FILES (PERMISSIONS SAFE) ---
+# This path detection is absolute to the app folder
+current_dir = os.path.dirname(os.path.abspath(__file__))
+static_path = os.path.join(current_dir, "static")
+if os.path.exists(static_path):
+    app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
