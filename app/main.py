@@ -15,11 +15,11 @@ try:
     from app.recorder import RecorderSession, ACTIVE
     from app.executor import execute_run
 except Exception as e:
-    print("CRITICAL IMPORT ERROR")
+    print("CRITICAL IMPORT ERROR IN main.py")
     traceback.print_exc()
     raise e
 
-# Initialize Database safely
+# Safely initialize database
 try:
     init_db()
 except Exception as e:
@@ -29,8 +29,10 @@ RUN_SUBS: dict[str, list[asyncio.Queue]] = {}
 
 async def emit_run(run_id: str, evt: dict):
     for q in list(RUN_SUBS.get(run_id, [])):
-        try: q.put_nowait(evt)
-        except asyncio.QueueFull: pass
+        try:
+            q.put_nowait(evt)
+        except asyncio.QueueFull:
+            pass
 
 # --- 3. HELPER FUNCTIONS ---
 def proj_dict(p): return {"id": p.id, "name": p.name, "base_url": p.base_url}
@@ -121,6 +123,18 @@ def get_recording(rid: str):
         return rec_dict(r, with_steps=True)
     finally: db.close()
 
+@app.patch("/api/recordings/{rid}")
+def patch_recording(rid: str, body: dict):
+    db = SessionLocal()
+    try:
+        r = db.get(Recording, rid)
+        if not r: raise HTTPException(404)
+        if "shared" in body: r.shared = body["shared"]
+        if "name" in body: r.name = body["name"]
+        db.commit()
+        return rec_dict(r)
+    finally: db.close()
+
 @app.get("/api/variables")
 def list_variables(project_id: str | None = None):
     db = SessionLocal()
@@ -134,6 +148,15 @@ def list_variables(project_id: str | None = None):
             vd["associated_recordings"] = [r.name for r in recs if any(v.name in (step.value or "") for step in r.steps)]
             result.append(vd)
         return result
+    finally: db.close()
+
+@app.post("/api/variables")
+def create_variable(body: dict):
+    db = SessionLocal()
+    try:
+        v = Variable(**body)
+        db.add(v); db.commit(); db.refresh(v)
+        return var_dict(v)
     finally: db.close()
 
 @app.post("/api/runs")
@@ -165,6 +188,11 @@ def run_status(run_id: str):
         r = db.get(Run, run_id)
         return run_dict(r, db)
     finally: db.close()
+
+@app.get("/api/runs/screenshot/{run_id}/{filename}")
+def run_screenshot(run_id: str, filename: str):
+    path = os.path.join(ARTIFACTS, "runs", run_id, filename)
+    return FileResponse(path)
 
 @app.websocket("/ws/runs/{run_id}")
 async def ws_run(ws: WebSocket, run_id: str):
@@ -202,12 +230,11 @@ async def ws_record(ws: WebSocket, recording_id: str):
         await session.stop()
         ACTIVE.pop(recording_id, None)
 
-# --- 5. STATIC FILES (SAFE MOUNT) ---
-# We check if the directory exists before mounting.
-static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-if os.path.exists(static_dir):
-    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
-else:
-    @app.get("/")
-    def fallback():
-        return PlainTextResponse("Static folder not found. Please ensure app/static/index.html exists.")
+@app.post("/api/ai/rephrase")
+async def ai_rephrase_endpoint(body: dict):
+    return {"rephrased": f"Requirement Validated: {body.get('text', '')}"}
+
+# --- 5. STATIC FILES (PERMISSION SAFE) ---
+static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+if os.path.exists(static_path):
+    app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
