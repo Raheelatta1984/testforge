@@ -4,26 +4,11 @@ from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from app.config import DATABASE_URL
 
-# --- 1. ENGINE CONFIGURATION ---
-try:
-    # Use pool_pre_ping for Neon/Postgres, standard for SQLite
-    engine = create_engine(
-        DATABASE_URL, 
-        connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
-        pool_pre_ping=True
-    )
-except Exception as e:
-    print(f"Database engine error: {e}")
-    # Fallback to local sqlite if something is wrong with the URL
-    engine = create_engine("sqlite:///./testforge_fallback.db", connect_args={"check_same_thread": False})
-
+engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def uid() -> str: return str(uuid.uuid4())
-
 class Base(DeclarativeBase): pass
-
-# --- 2. MODELS ---
 
 class Project(Base):
     __tablename__ = "projects"
@@ -38,10 +23,8 @@ class Variable(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     scope: Mapped[str] = mapped_column(String(20))
     project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True)
-    recording_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(100))
     value: Mapped[str] = mapped_column(Text, default="")
-    is_secret: Mapped[bool] = mapped_column(Boolean, default=False)
 
 class Recording(Base):
     __tablename__ = "recordings"
@@ -49,10 +32,9 @@ class Recording(Base):
     project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"))
     parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(200))
-    description: Mapped[str] = mapped_column(Text, default="")
     start_url: Mapped[str] = mapped_column(String(500), default="")
     shared: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[str] = mapped_column(String(20), default="draft")
+    status: Mapped[str] = mapped_column(String(20), default="ready")
     video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     project: Mapped[Project] = relationship(back_populates="recordings")
@@ -69,65 +51,26 @@ class RecordingStep(Base):
     url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     label: Mapped[str | None] = mapped_column(String(300), nullable=True)
     screenshot_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    ref_recording_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    variable_overrides: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     recording: Mapped[Recording] = relationship(back_populates="steps")
-
-class Scenario(Base):
-    __tablename__ = "scenarios"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"))
-    title: Mapped[str] = mapped_column(String(300))
-    source_text: Mapped[str] = mapped_column(Text, default="")
-    status: Mapped[str] = mapped_column(String(20), default="draft")
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    steps: Mapped[list["ScenarioStep"]] = relationship(order_by="ScenarioStep.order", cascade="all, delete-orphan")
-
-class ScenarioStep(Base):
-    __tablename__ = "scenario_steps"
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    scenario_id: Mapped[str] = mapped_column(String(36), ForeignKey("scenarios.id"))
-    order: Mapped[int] = mapped_column(Integer)
-    action: Mapped[str] = mapped_column(String(30))
-    selector: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    value: Mapped[str | None] = mapped_column(Text, nullable=True)
-    expected_result: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 class Run(Base):
     __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
     target_type: Mapped[str] = mapped_column(String(20))
     target_id: Mapped[str] = mapped_column(String(36))
-    mode: Mapped[str] = mapped_column(String(20), default="script")
     status: Mapped[str] = mapped_column(String(20), default="queued")
     log: Mapped[list] = mapped_column(JSON, default=list)
     video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    agent_transcript: Mapped[list | None] = mapped_column(JSON, nullable=True)
-    error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-# --- 3. UTILITIES & INIT ---
-
-def init_db():
-    Base.metadata.create_all(engine)
-
+def init_db(): Base.metadata.create_all(engine)
 VAR_PATTERN = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
-
-def resolve_variables(db, project_id=None, recording_id=None, overrides=None) -> dict:
+def resolve_variables(db, project_id=None):
     merged = {}
-    for v in db.query(Variable).filter_by(scope="global"): 
-        merged[v.name] = v.value
+    for v in db.query(Variable).filter_by(scope="global"): merged[v.name] = v.value
     if project_id:
-        for v in db.query(Variable).filter_by(scope="project", project_id=project_id): 
-            merged[v.name] = v.value
-    if recording_id:
-        for v in db.query(Variable).filter_by(scope="recording", recording_id=recording_id): 
-            merged[v.name] = v.value
-    if overrides: 
-        merged.update(overrides)
+        for v in db.query(Variable).filter_by(project_id=project_id): merged[v.name] = v.value
     return merged
-
 def interpolate(text, variables):
     if text is None: return None
-    return VAR_PATTERN.sub(lambda m: variables.get(m.group(1), m.group(0)), text)
+    return VAR_PATTERN.sub(lambda m: variables.get(m.group(1), m.group(0)), str(text))
