@@ -4,7 +4,7 @@ from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from app.config import DATABASE_URL
 
-# ENGINE CONFIG
+# Robust engine creation
 engine = create_engine(
     DATABASE_URL, 
     connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
@@ -69,21 +69,21 @@ class Run(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 def init_db():
-    try:
-        Base.metadata.create_all(bind=engine)
-        print("Database initialized successfully.")
-    except Exception as e:
-        print(f"DB Init Error: {e}")
+    try: Base.metadata.create_all(bind=engine)
+    except Exception as e: print(f"DB Error: {e}")
 
 VAR_PATTERN = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
 
 def resolve_variables(db, project_id=None):
     merged = {}
-    for v in db.query(Variable).filter_by(scope="global"): merged[v.name] = v.value
-    if project_id:
-        for v in db.query(Variable).filter(Variable.project_id == project_id): merged[v.name] = v.value
+    try:
+        for v in db.query(Variable).filter_by(scope="global"): merged[v.name] = v.value
+        if project_id:
+            for v in db.query(Variable).filter_by(project_id=project_id): merged[v.name] = v.value
+    except: pass
     return merged
 
 def interpolate(text, variables):
     if text is None: return None
-    return VAR_PATTERN.sub(lambda m: str(variables.get(m.group(1), m.group(0))), str(text))
+    try: return VAR_PATTERN.sub(lambda m: str(variables.get(m.group(1), m.group(0))), str(text))
+    except: return str(text)
