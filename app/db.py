@@ -4,7 +4,7 @@ from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from app.config import DATABASE_URL
 
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=3600)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 def uid() -> str: return str(uuid.uuid4())
@@ -21,7 +21,7 @@ class Project(Base):
 class Variable(Base):
     __tablename__ = "variables"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
-    scope: Mapped[str] = mapped_column(String(20))
+    scope: Mapped[str] = mapped_column(String(20)) # global, project
     project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(100))
     value: Mapped[str] = mapped_column(Text, default="")
@@ -34,7 +34,6 @@ class Recording(Base):
     name: Mapped[str] = mapped_column(String(200))
     start_url: Mapped[str] = mapped_column(String(500), default="")
     shared: Mapped[bool] = mapped_column(Boolean, default=False)
-    status: Mapped[str] = mapped_column(String(20), default="ready")
     video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     project: Mapped[Project] = relationship(back_populates="recordings")
@@ -59,11 +58,8 @@ class Run(Base):
     status: Mapped[str] = mapped_column(String(20), default="queued")
     log: Mapped[list] = mapped_column(JSON, default=list)
     video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    # AI Handoff Chain Metadata
-    current_agent: Mapped[str | None] = mapped_column(String(50)) # monitor, devops, qa
-    investigation_log: Mapped[str | None] = mapped_column(Text)
+    rog_investigation: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
-    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 def init_db():
     try: Base.metadata.create_all(bind=engine)
