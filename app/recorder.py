@@ -32,7 +32,7 @@ class RecorderSession:
         t = msg.get("type")
         if t == "tap":
             await self.page.mouse.click(msg['x'], msg['y'])
-            await self._record("click", label=f"Click at {msg['x']},{msg['y']}")
+            await self._record("click", label=f"Click {msg['x']},{msg['y']}")
         elif t == "text":
             await self.page.keyboard.type(msg['text'])
             await self._record("fill", value=msg['text'], label=f"Type: {msg['text']}")
@@ -47,5 +47,3 @@ class RecorderSession:
     async def stop(self):
         await self.browser.close()
         await self._pw.stop()
-
-ACTIVE = {}
