@@ -2,19 +2,16 @@ import asyncio, os, traceback, csv, io, zipfile, datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
 
 app = FastAPI(title="TestForge AI Enterprise")
 
 try:
     from app.config import DEMO_MODE, ARTIFACTS
-    from app.db import (SessionLocal, init_db, Project, Recording, RecordingStep,
-                     Variable, Run, resolve_variables, interpolate)
+    from app.db import (SessionLocal, init_db, Project, Recording, RecordingStep, Variable, Run, resolve_variables, interpolate)
     from app.recorder import RecorderSession
     from app.executor import execute_run
 except Exception as e:
-    print("IMPORT ERROR")
-    traceback.print_exc()
+    print("IMPORT ERROR"); traceback.print_exc()
 
 init_db()
 RUN_SUBS = {}
@@ -60,8 +57,7 @@ def list_variables(project_id: str | None = None):
 def create_recording(body: dict):
     db = SessionLocal()
     try:
-        r = Recording(project_id=body['project_id'], parent_id=body.get('parent_id'), 
-                      name=body['name'], start_url=body['start_url'], shared=body.get('shared', False), status="recording")
+        r = Recording(project_id=body['project_id'], parent_id=body.get('parent_id'), name=body['name'], start_url=body['start_url'], status="recording")
         db.add(r); db.commit(); db.refresh(r)
         return {"id": r.id}
     finally: db.close()
@@ -74,13 +70,18 @@ def list_recordings(pid: str):
         return [{"id": r.id, "name": r.name, "step_count": len(r.steps), "parent_id": r.parent_id, "shared": r.shared} for r in recs]
     finally: db.close()
 
-@app.get("/api/recordings/{rid}")
-def get_recording(rid: str):
+@app.get("/api/runs")
+def list_runs():
     db = SessionLocal()
     try:
-        r = db.get(Recording, rid)
-        steps = [{"order": s.order, "action": s.action, "label": s.label, "value": s.value} for s in r.steps]
-        return {"id": r.id, "name": r.name, "steps": steps, "start_url": r.start_url}
+        runs = db.query(Run).order_by(Run.created_at.desc()).limit(20).all()
+        res = []
+        for r in runs:
+            baseline = []
+            rec = db.get(Recording, r.target_id)
+            if rec: baseline = [{"order": s.order, "action": s.action, "label": s.label} for s in rec.steps]
+            res.append({"id": r.id, "status": r.status, "created_at": str(r.created_at), "log": r.log, "baseline": baseline})
+        return res
     finally: db.close()
 
 @app.post("/api/runs")
@@ -98,19 +99,21 @@ def start_run(body: dict):
         return {"run_id": rid}
     finally: db.close()
 
-@app.get("/api/runs")
-def list_runs():
-    db = SessionLocal()
-    try:
-        runs = db.query(Run).order_by(Run.created_at.desc()).limit(20).all()
-        res = []
-        for r in runs:
-            baseline = []
-            rec = db.get(Recording, r.target_id)
-            if rec: baseline = [{"order": s.order, "action": s.action, "label": s.label} for s in rec.steps]
-            res.append({"id":r.id, "status":r.status, "created_at":str(r.created_at), "log":r.log, "baseline": baseline})
-        return res
-    finally: db.close()
+@app.get("/api/runs/screenshot/{run_id}/{filename}")
+def run_screenshot(run_id: str, filename: str):
+    return FileResponse(os.path.join(ARTIFACTS, "runs", run_id, filename))
+
+@app.get("/api/sync/github-bundle")
+def github_sync_bundle():
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as zipf:
+        runs_dir = os.path.join(ARTIFACTS, "runs")
+        if os.path.exists(runs_dir):
+            for root, _, files in os.walk(runs_dir):
+                for f in files: zipf.write(os.path.join(root, f), os.path.relpath(os.path.join(root, f), ARTIFACTS))
+    buf.seek(0)
+    return Response(buf.read(), media_type="application/zip")
 
 @app.websocket("/ws/record/{rid}")
 async def ws_record(ws: WebSocket, rid: str):
@@ -142,21 +145,9 @@ async def ws_run(ws: WebSocket, run_id: str):
     except: pass
     finally: RUN_SUBS[run_id].remove(q)
 
-@app.get("/api/sync/github-bundle")
-def github_sync_bundle():
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w') as zipf:
-        runs_dir = os.path.join(ARTIFACTS, "runs")
-        if os.path.exists(runs_dir):
-            for root, _, files in os.walk(runs_dir):
-                for f in files: zipf.write(os.path.join(root, f), os.path.relpath(os.path.join(root, f), ARTIFACTS))
-    buf.seek(0)
-    return Response(buf.read(), media_type="application/zip")
-
 @app.post("/api/ai/rephrase")
 async def ai_rephrase_endpoint(body: dict):
-    return {"rephrased": f"AI Optimized: {body.get('text', '')}"}
+    return {"rephrased": f"AI Logic: {body.get('text', '')}"}
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
