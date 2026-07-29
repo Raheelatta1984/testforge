@@ -79,7 +79,7 @@ def resolve_variables(db, project_id=None):
     try:
         for v in db.query(Variable).filter_by(scope="global"): merged[v.name] = v.value
         if project_id:
-            for v in db.query(Variable).filter_by(project_id=project_id): merged[v.name] = v.value
+            for v in db.query(Variable).filter(Variable.project_id == project_id): merged[v.name] = v.value
     except: pass
     return merged
 
