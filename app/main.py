@@ -2,6 +2,7 @@ import asyncio, os, traceback, csv, io, zipfile, datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 app = FastAPI(title="TestForge AI Enterprise")
 
@@ -55,6 +56,33 @@ def list_variables(project_id: str | None = None):
         return res
     finally: db.close()
 
+@app.post("/api/recordings")
+def create_recording(body: dict):
+    db = SessionLocal()
+    try:
+        r = Recording(project_id=body['project_id'], parent_id=body.get('parent_id'), 
+                      name=body['name'], start_url=body['start_url'], shared=body.get('shared', False), status="recording")
+        db.add(r); db.commit(); db.refresh(r)
+        return {"id": r.id}
+    finally: db.close()
+
+@app.get("/api/projects/{pid}/recordings")
+def list_recordings(pid: str):
+    db = SessionLocal()
+    try:
+        recs = db.query(Recording).filter((Recording.project_id == pid) | (Recording.shared == True)).all()
+        return [{"id": r.id, "name": r.name, "step_count": len(r.steps), "parent_id": r.parent_id, "shared": r.shared} for r in recs]
+    finally: db.close()
+
+@app.get("/api/recordings/{rid}")
+def get_recording(rid: str):
+    db = SessionLocal()
+    try:
+        r = db.get(Recording, rid)
+        steps = [{"order": s.order, "action": s.action, "label": s.label, "value": s.value} for s in r.steps]
+        return {"id": r.id, "name": r.name, "steps": steps, "start_url": r.start_url}
+    finally: db.close()
+
 @app.post("/api/runs")
 def start_run(body: dict):
     db = SessionLocal()
@@ -75,15 +103,13 @@ def list_runs():
     db = SessionLocal()
     try:
         runs = db.query(Run).order_by(Run.created_at.desc()).limit(20).all()
-        return [{"id":r.id, "status":r.status, "created_at":str(r.created_at), "log":r.log} for r in runs]
-    finally: db.close()
-
-@app.get("/api/projects/{pid}/recordings")
-def list_recs(pid: str):
-    db = SessionLocal()
-    try:
-        recs = db.query(Recording).filter((Recording.project_id==pid)|(Recording.shared==True)).all()
-        return [{"id":r.id, "name":r.name, "step_count":len(r.steps), "parent_id":r.parent_id} for r in recs]
+        res = []
+        for r in runs:
+            baseline = []
+            rec = db.get(Recording, r.target_id)
+            if rec: baseline = [{"order": s.order, "action": s.action, "label": s.label} for s in rec.steps]
+            res.append({"id":r.id, "status":r.status, "created_at":str(r.created_at), "log":r.log, "baseline": baseline})
+        return res
     finally: db.close()
 
 @app.websocket("/ws/record/{rid}")
@@ -91,8 +117,11 @@ async def ws_record(ws: WebSocket, rid: str):
     await ws.accept()
     db = SessionLocal()
     rec = db.get(Recording, rid)
-    session = RecorderSession(rid, rec.start_url, len(rec.steps), lambda d: ws.send_json({"type":"frame","data":d}), lambda e: ws.send_json({"type":"step","step":e}))
+    url, seq = (rec.start_url, len(rec.steps))
     db.close()
+    async def on_f(d): await ws.send_json({"type":"frame","data":d})
+    async def on_e(s): await ws.send_json({"type":"step","step":s})
+    session = RecorderSession(rid, url, seq, on_f, on_e)
     await session.start()
     try:
         while True:
@@ -112,6 +141,22 @@ async def ws_run(ws: WebSocket, run_id: str):
             await ws.send_json(evt)
     except: pass
     finally: RUN_SUBS[run_id].remove(q)
+
+@app.get("/api/sync/github-bundle")
+def github_sync_bundle():
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w') as zipf:
+        runs_dir = os.path.join(ARTIFACTS, "runs")
+        if os.path.exists(runs_dir):
+            for root, _, files in os.walk(runs_dir):
+                for f in files: zipf.write(os.path.join(root, f), os.path.relpath(os.path.join(root, f), ARTIFACTS))
+    buf.seek(0)
+    return Response(buf.read(), media_type="application/zip")
+
+@app.post("/api/ai/rephrase")
+async def ai_rephrase_endpoint(body: dict):
+    return {"rephrased": f"AI Optimized: {body.get('text', '')}"}
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
