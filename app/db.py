@@ -1,135 +1,89 @@
-import asyncio, os, traceback, csv, io, zipfile, datetime
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
-from fastapi.responses import FileResponse, PlainTextResponse
-from fastapi.staticfiles import StaticFiles
+import uuid, re, os
+from datetime import datetime
+from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, func)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from app.config import DATABASE_URL
 
-# --- 1. APP INSTANCE (MUST BE AT TOP) ---
-app = FastAPI(title="TestForge AI Enterprise")
+# ENGINE CONFIG
+engine = create_engine(
+    DATABASE_URL, 
+    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {},
+    pool_pre_ping=True
+)
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
-# --- 2. CONFIG & IMPORTS ---
-try:
-    from app.config import DEMO_MODE, ARTIFACTS
-    from app.db import (SessionLocal, init_db, Project, Recording, RecordingStep,
-                     Variable, Run, resolve_variables, interpolate)
-    from app.recorder import RecorderSession
-    from app.executor import execute_run
-except Exception as e:
-    print("CRITICAL IMPORT ERROR")
-    traceback.print_exc()
-    raise e
+def uid() -> str: return str(uuid.uuid4())
+class Base(DeclarativeBase): pass
 
-init_db()
-RUN_SUBS = {}
+class Project(Base):
+    __tablename__ = "projects"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    name: Mapped[str] = mapped_column(String(200))
+    base_url: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    recordings: Mapped[list["Recording"]] = relationship(back_populates="project", cascade="all, delete-orphan")
 
-async def emit_run(run_id: str, evt: dict):
-    if run_id in RUN_SUBS:
-        for q in list(RUN_SUBS[run_id]):
-            try: q.put_nowait(evt)
-            except: pass
+class Variable(Base):
+    __tablename__ = "variables"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    scope: Mapped[str] = mapped_column(String(20))
+    project_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("projects.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(100))
+    value: Mapped[str] = mapped_column(Text, default="")
 
-# --- 3. ENDPOINTS ---
-@app.get("/api/projects")
-def list_projects():
-    db = SessionLocal()
-    try: return [{"id": p.id, "name": p.name, "base_url": p.base_url} for p in db.query(Project).all()]
-    finally: db.close()
+class Recording(Base):
+    __tablename__ = "recordings"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    project_id: Mapped[str] = mapped_column(String(36), ForeignKey("projects.id"))
+    parent_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)
+    name: Mapped[str] = mapped_column(String(200))
+    start_url: Mapped[str] = mapped_column(String(500), default="")
+    shared: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(String(20), default="ready")
+    video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    project: Mapped[Project] = relationship(back_populates="recordings")
+    steps: Mapped[list["RecordingStep"]] = relationship(back_populates="recording", order_by="RecordingStep.order", cascade="all, delete-orphan")
 
-@app.post("/api/projects")
-def create_project(body: dict):
-    db = SessionLocal()
+class RecordingStep(Base):
+    __tablename__ = "recording_steps"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    recording_id: Mapped[str] = mapped_column(String(36), ForeignKey("recordings.id"))
+    order: Mapped[int] = mapped_column(Integer)
+    action: Mapped[str] = mapped_column(String(30))
+    selector: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    value: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    label: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    screenshot_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    recording: Mapped[Recording] = relationship(back_populates="steps")
+
+class Run(Base):
+    __tablename__ = "runs"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=uid)
+    target_type: Mapped[str] = mapped_column(String(20))
+    target_id: Mapped[str] = mapped_column(String(36))
+    status: Mapped[str] = mapped_column(String(20), default="queued")
+    log: Mapped[list] = mapped_column(JSON, default=list)
+    video_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+def init_db():
     try:
-        p = Project(name=body['name'], base_url=body.get('base_url', ''))
-        db.add(p); db.commit(); db.refresh(p)
-        return {"id": p.id, "name": p.name}
-    finally: db.close()
+        Base.metadata.create_all(bind=engine)
+        print("Database initialized successfully.")
+    except Exception as e:
+        print(f"DB Init Error: {e}")
 
-@app.get("/api/variables")
-def list_variables(project_id: str | None = None):
-    db = SessionLocal()
-    try:
-        q = db.query(Variable)
-        if project_id: q = q.filter(Variable.project_id == project_id)
-        result = []
-        for v in q.all():
-            vd = {"id":v.id, "name":v.name, "value":v.value}
-            recs = db.query(Recording).all()
-            vd["associated_recordings"] = [r.name for r in recs if any(v.name in str(s.value) for s in r.steps)]
-            result.append(vd)
-        return result
-    finally: db.close()
+VAR_PATTERN = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
 
-@app.get("/api/sync/github-bundle")
-def github_sync_bundle():
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, 'w') as zipf:
-        runs_dir = os.path.join(ARTIFACTS, "runs")
-        if os.path.exists(runs_dir):
-            for root, _, files in os.walk(runs_dir):
-                for f in files: zipf.write(os.path.join(root, f), os.path.relpath(os.path.join(root, f), ARTIFACTS))
-    buf.seek(0)
-    return Response(buf.read(), media_type="application/zip")
+def resolve_variables(db, project_id=None):
+    merged = {}
+    for v in db.query(Variable).filter_by(scope="global"): merged[v.name] = v.value
+    if project_id:
+        for v in db.query(Variable).filter(Variable.project_id == project_id): merged[v.name] = v.value
+    return merged
 
-@app.post("/api/runs")
-def start_run(body: dict):
-    db = SessionLocal()
-    try:
-        run = Run(target_type=body['target_type'], target_id=body['target_id'], status="queued")
-        db.add(run); db.commit(); db.refresh(run)
-        rid = run.id
-        async def bg():
-            async def on_f(d): await emit_run(rid, {"type":"frame", "data":d})
-            await execute_run(rid, lambda e: emit_run(rid, e), on_frame=on_f)
-        asyncio.create_task(bg())
-        return {"run_id": rid}
-    finally: db.close()
-
-@app.get("/api/runs")
-def list_runs():
-    db = SessionLocal()
-    try:
-        runs = db.query(Run).order_by(Run.created_at.desc()).limit(20).all()
-        result = []
-        for r in runs:
-            baseline = []
-            rec = db.get(Recording, r.target_id)
-            if rec: baseline = [{"order": s.order, "action": s.action, "label": s.label} for s in rec.steps]
-            result.append({"id": r.id, "status": r.status, "created_at": str(r.created_at), "log": r.log, "baseline": baseline})
-        return result
-    finally: db.close()
-
-@app.websocket("/ws/runs/{run_id}")
-async def ws_run(ws: WebSocket, run_id: str):
-    await ws.accept()
-    q = asyncio.Queue()
-    RUN_SUBS.setdefault(run_id, []).append(q)
-    try:
-        while True:
-            evt = await q.get()
-            await ws.send_json(evt)
-            if evt.get("type") == "done": break
-    except: pass
-    finally: RUN_SUBS[run_id].remove(q)
-
-@app.websocket("/ws/record/{recording_id}")
-async def ws_record(ws: WebSocket, recording_id: str):
-    await ws.accept()
-    db = SessionLocal()
-    rec = db.get(Recording, recording_id)
-    url, seq = (rec.start_url, len(rec.steps)) if rec else ("about:blank", 0)
-    db.close()
-    async def on_f(d): await ws.send_json({"type":"frame", "data":d})
-    async def on_e(s): await ws.send_json({"type":"step", "step":s})
-    session = RecorderSession(recording_id, url, seq, on_f, on_e)
-    await session.start()
-    try:
-        while True:
-            msg = await ws.receive_json()
-            if msg['type'] == 'stop': break
-            await session.handle_input(msg)
-    finally: await session.stop()
-
-# --- 4. STATIC FILES ---
-static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
-if os.path.exists(static_path):
-    app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
+def interpolate(text, variables):
+    if text is None: return None
+    return VAR_PATTERN.sub(lambda m: str(variables.get(m.group(1), m.group(0))), str(text))
