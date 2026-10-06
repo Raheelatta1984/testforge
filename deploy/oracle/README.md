@@ -22,7 +22,7 @@ The script obtains the tenancy, region, and home-region information from the aut
 
 The script is idempotent by display name and reuses infrastructure it previously created. Its default names all begin with `testforge-`.
 
-If Sydney has no A1 host capacity, the script retries every 10 minutes until Oracle accepts the launch request. HTTP 429 rate limits are retried every two minutes. Keep the Cloud Shell session active while it waits. Set `TF_OCI_MAX_LAUNCH_ATTEMPTS` to a nonzero number to impose a retry limit.
+If Sydney has no A1 host capacity, the script retries every 30 minutes until Oracle accepts the launch request. HTTP 429 rate limits are retried every two minutes. Keep the Cloud Shell session active while it waits. Set `TF_OCI_MAX_LAUNCH_ATTEMPTS` to a nonzero number to impose a retry limit.
 
 ## Optional sizing
 
