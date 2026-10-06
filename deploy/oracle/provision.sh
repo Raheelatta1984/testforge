@@ -152,7 +152,13 @@ if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == null ]]; then
   LAUNCH_ERR=$(mktemp)
   trap 'rm -f "$LAUNCH_OUT" "$LAUNCH_ERR"' EXIT
   INSTANCE_ID=""
-  for attempt in 1 2 3 4 5 6; do
+  attempt=0
+  MAX_LAUNCH_ATTEMPTS="${TF_OCI_MAX_LAUNCH_ATTEMPTS:-0}"
+  CAPACITY_RETRY_SECONDS="${TF_OCI_CAPACITY_RETRY_SECONDS:-600}"
+  while [[ -z "$INSTANCE_ID" ]]; do
+    attempt=$((attempt + 1))
+    : >"$LAUNCH_OUT"
+    : >"$LAUNCH_ERR"
     if oci compute instance launch \
       --compartment-id "$TENANCY_ID" --availability-domain "$AD_NAME" \
       --display-name "$INSTANCE_NAME" --shape "$SHAPE" --shape-config "$SHAPE_CONFIG" \
@@ -163,10 +169,18 @@ if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == null ]]; then
       INSTANCE_ID=$(cat "$LAUNCH_OUT")
       break
     fi
-    if grep -Eqi 'Too many requests|status[^0-9]*429|TooManyRequests' "$LAUNCH_ERR"; then
-      delay=$((attempt * 30))
-      log "OCI is rate limiting this new account; retrying in ${delay} seconds (attempt ${attempt}/6)"
-      sleep "$delay"
+
+    if [[ "$MAX_LAUNCH_ATTEMPTS" != "0" && "$attempt" -ge "$MAX_LAUNCH_ATTEMPTS" ]]; then
+      cat "$LAUNCH_ERR" >&2
+      die "OCI did not create the instance after ${attempt} attempts."
+    fi
+
+    if grep -Eqi 'Out of host capacity|OutOfHostCapacity' "$LAUNCH_ERR"; then
+      log "No A1 host capacity is available in $REGION. Retrying in $((CAPACITY_RETRY_SECONDS / 60)) minutes (attempt $attempt)."
+      sleep "$CAPACITY_RETRY_SECONDS"
+    elif grep -Eqi 'Too many requests|status[^0-9]*429|TooManyRequests' "$LAUNCH_ERR"; then
+      log "OCI is rate limiting the launch request. Retrying in 2 minutes (attempt $attempt)."
+      sleep 120
     else
       cat "$LAUNCH_ERR" >&2
       die "OCI could not create the instance."
@@ -174,7 +188,6 @@ if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == null ]]; then
   done
   rm -f "$LAUNCH_OUT" "$LAUNCH_ERR"
   trap - EXIT
-  [[ -n "$INSTANCE_ID" && "$INSTANCE_ID" != null ]] || die "OCI continued returning HTTP 429. Wait 15 minutes, then rerun this script."
 else
   log "Reusing instance $INSTANCE_NAME"
 fi
