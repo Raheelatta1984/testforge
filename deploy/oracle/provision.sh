@@ -148,13 +148,33 @@ if [[ -z "$INSTANCE_ID" || "$INSTANCE_ID" == null ]]; then
   log "Creating Always Free ARM instance (${OCPUS} OCPU, ${MEMORY_GB} GB RAM)"
   SHAPE_CONFIG=$(printf '{"ocpus":%s,"memoryInGBs":%s}' "$OCPUS" "$MEMORY_GB")
   METADATA=$(python3 -c 'import json,sys; print(json.dumps({"ssh_authorized_keys": sys.argv[1]}))' "$SSH_PUBLIC_KEY")
-  INSTANCE_ID=$(oci compute instance launch \
-    --compartment-id "$TENANCY_ID" --availability-domain "$AD_NAME" \
-    --display-name "$INSTANCE_NAME" --shape "$SHAPE" --shape-config "$SHAPE_CONFIG" \
-    --image-id "$IMAGE_ID" --subnet-id "$SUBNET_ID" --assign-public-ip true \
-    --metadata "$METADATA" --boot-volume-size-in-gbs "$BOOT_GB" \
-    --wait-for-state RUNNING --max-wait-seconds 1200 \
-    --query data.id --raw-output)
+  LAUNCH_OUT=$(mktemp)
+  LAUNCH_ERR=$(mktemp)
+  trap 'rm -f "$LAUNCH_OUT" "$LAUNCH_ERR"' EXIT
+  INSTANCE_ID=""
+  for attempt in 1 2 3 4 5 6; do
+    if oci compute instance launch \
+      --compartment-id "$TENANCY_ID" --availability-domain "$AD_NAME" \
+      --display-name "$INSTANCE_NAME" --shape "$SHAPE" --shape-config "$SHAPE_CONFIG" \
+      --image-id "$IMAGE_ID" --subnet-id "$SUBNET_ID" --assign-public-ip true \
+      --metadata "$METADATA" --boot-volume-size-in-gbs "$BOOT_GB" \
+      --wait-for-state RUNNING --max-wait-seconds 1200 \
+      --query data.id --raw-output >"$LAUNCH_OUT" 2>"$LAUNCH_ERR"; then
+      INSTANCE_ID=$(cat "$LAUNCH_OUT")
+      break
+    fi
+    if grep -Eqi 'Too many requests|status[^0-9]*429|TooManyRequests' "$LAUNCH_ERR"; then
+      delay=$((attempt * 30))
+      log "OCI is rate limiting this new account; retrying in ${delay} seconds (attempt ${attempt}/6)"
+      sleep "$delay"
+    else
+      cat "$LAUNCH_ERR" >&2
+      die "OCI could not create the instance."
+    fi
+  done
+  rm -f "$LAUNCH_OUT" "$LAUNCH_ERR"
+  trap - EXIT
+  [[ -n "$INSTANCE_ID" && "$INSTANCE_ID" != null ]] || die "OCI continued returning HTTP 429. Wait 15 minutes, then rerun this script."
 else
   log "Reusing instance $INSTANCE_NAME"
 fi
