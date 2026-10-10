@@ -186,6 +186,18 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(page.gotos[0][0], "https://example.com/ada")
         self.assertEqual(page.gotos[0][1], "domcontentloaded")
 
+    def test_UT_REP_10_relative_navigate_uses_this_server(self):
+        saved = _env_set(PORT="8765")
+        try:
+            page = FakePage()
+            asyncio.run(replay_step(page, {"action": "navigate", "value": "/demo.html"}, {}))
+            self.assertEqual(page.gotos[0][0], "http://127.0.0.1:8765/demo.html")
+            other = FakePage()
+            asyncio.run(replay_step(other, {"action": "navigate", "value": "http://127.0.0.1:3000/app"}, {}))
+            self.assertEqual(other.gotos[0][0], "http://127.0.0.1:3000/app")
+        finally:
+            _env_restore(saved)
+
     def test_UT_REP_02_click_selector(self):
         page = FakePage(known={"#go"})
         asyncio.run(replay_step(page, {"action": "click", "selector": {"primary": "#go", "x": 1, "y": 2}}, {}))
@@ -286,6 +298,163 @@ class RunTests(unittest.TestCase):
         self.assertEqual(events[-1]["error"], "Recording not found")
 
 
+class LibraryStoreTests(unittest.TestCase):
+    def test_UT_LIB_01_project_is_written_to_the_repository_tree(self):
+        from app import library_store
+
+        payload = library_store.create_project("Catalog", "https://example.com")
+        self.assertEqual(payload["source"], "repository")
+        self.assertFalse(payload["published"])
+        path = Path(os.environ["TF_LIBRARY_DIR"]) / "projects" / payload["id"] / "project.json"
+        self.assertTrue(path.is_file())
+        self.assertIn(payload["id"], [item["id"] for item in library_store.list_projects()])
+
+    def test_UT_LIB_02_database_only_projects_are_hidden(self):
+        from app import library_store
+        from app.db import Project, SessionLocal
+
+        with SessionLocal() as db:
+            db.add(Project(id="db-only-project", name="Not in git", base_url=""))
+            db.commit()
+        self.assertNotIn("Not in git", [item["name"] for item in library_store.list_projects()])
+        library_store.materialize_all()
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(Project, "db-only-project"))
+
+    def test_UT_LIB_03_recording_writes_its_jenkins_resource(self):
+        from app import library_store
+
+        project = library_store.create_project("Rec", "")
+        recording = library_store.create_recording(project["id"], "Flow", "/demo.html")
+        jenkins = (
+            Path(os.environ["TF_LIBRARY_DIR"])
+            / "projects" / project["id"] / "recordings" / recording["id"] / "resources" / "Jenkinsfile"
+        )
+        self.assertTrue(jenkins.is_file())
+        self.assertIn("pipeline", jenkins.read_text(encoding="utf-8"))
+        self.assertTrue(str(recording["repository_path"]).endswith("recording.json"))
+
+    def test_UT_LIB_04_variables_roundtrip_in_the_repository(self):
+        import json
+        from app import library_store
+
+        project = library_store.create_project("Vars", "")
+        created = library_store.create_variable(project["id"], "user", "Ada")
+        updated = library_store.update_variable(created["id"], value="Grace")
+        self.assertEqual(updated["value"], "Grace")
+        raw = json.loads((Path(os.environ["TF_LIBRARY_DIR"]) / "projects" / project["id"] / "variables.json").read_text())
+        self.assertEqual(raw[0]["value"], "Grace")
+        library_store.delete_variable(created["id"])
+        self.assertEqual(library_store.list_variables(project["id"]), [])
+
+    def test_UT_LIB_05_rejects_a_path_escape(self):
+        from app import library_store
+
+        with self.assertRaises(library_store.LibraryError):
+            library_store.require_id("../etc")
+
+    def test_UT_LIB_06_publish_pushes_only_library_files(self):
+        import shutil
+        import subprocess
+        import tempfile
+        from app import library_store
+
+        tmp = Path(tempfile.mkdtemp(prefix="tf-git-"))
+        bare = tmp / "remote.git"
+        repo = tmp / "repo"
+        try:
+            subprocess.check_call(["git", "init", "--bare", "-b", "library-test", str(bare)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call(["git", "init", "-b", "library-test", str(repo)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call(["git", "config", "user.email", "qa@testforge.local"], cwd=repo)
+            subprocess.check_call(["git", "config", "user.name", "TestForge QA"], cwd=repo)
+            (repo / "KEEP.txt").write_text("do not touch\n", encoding="utf-8")
+            subprocess.check_call(["git", "add", "KEEP.txt"], cwd=repo)
+            subprocess.check_call(["git", "commit", "-m", "init"], cwd=repo, stdout=subprocess.DEVNULL)
+            subprocess.check_call(["git", "branch", "-M", "library-test"], cwd=repo)
+            subprocess.check_call(["git", "remote", "add", "origin", str(bare)], cwd=repo)
+            subprocess.check_call(["git", "push", "-u", "origin", "HEAD"], cwd=repo, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            saved = _env_set(TF_LIBRARY_DIR=str(repo / "library"), TF_LIBRARY_PUBLISH="1", TF_GIT_REMOTE="origin")
+            try:
+                payload = library_store.create_project("Pushed", "https://example.com")
+                self.assertTrue(payload["published"])
+                clone = tmp / "clone"
+                subprocess.check_call(
+                    ["git", "clone", "--branch", "library-test", str(bare), str(clone)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                cloned = clone / "library" / "projects" / payload["id"] / "project.json"
+                self.assertTrue(cloned.is_file())
+                self.assertEqual((clone / "KEEP.txt").read_text(encoding="utf-8"), "do not touch\n")
+                status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
+                self.assertEqual(status.strip(), "")
+            finally:
+                _env_restore(saved)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_UT_LIB_07_failed_push_does_not_keep_the_project(self):
+        import shutil
+        import subprocess
+        import tempfile
+        from app import library_store
+        from app.db import Project, SessionLocal
+
+        tmp = Path(tempfile.mkdtemp(prefix="tf-git-fail-"))
+        repo = tmp / "repo"
+        try:
+            subprocess.check_call(["git", "init", "-b", "library-test", str(repo)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.check_call(["git", "config", "user.email", "qa@testforge.local"], cwd=repo)
+            subprocess.check_call(["git", "config", "user.name", "TestForge QA"], cwd=repo)
+            (repo / "README").write_text("init\n", encoding="utf-8")
+            subprocess.check_call(["git", "add", "README"], cwd=repo)
+            subprocess.check_call(["git", "commit", "-m", "init"], cwd=repo, stdout=subprocess.DEVNULL)
+            subprocess.check_call(["git", "remote", "add", "origin", str(tmp / "missing.git")], cwd=repo)
+            saved = _env_set(TF_LIBRARY_DIR=str(repo / "library"), TF_LIBRARY_PUBLISH="1")
+            try:
+                with self.assertRaises(library_store.PublishError):
+                    library_store.create_project("Nope", "")
+                self.assertEqual(library_store.list_projects(), [])
+                with SessionLocal() as db:
+                    self.assertEqual(db.query(Project).filter_by(name="Nope").count(), 0)
+            finally:
+                _env_restore(saved)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_UT_LIB_08_materialize_loads_a_file_only_recording(self):
+        import json
+        from app import library_store
+        from app.db import Recording, SessionLocal
+
+        root = Path(os.environ["TF_LIBRARY_DIR"]) / "projects" / "file-only"
+        rec = root / "recordings" / "file-only-rec"
+        (rec / "resources").mkdir(parents=True)
+        (root / "project.json").write_text(json.dumps({
+            "id": "file-only",
+            "name": "File only",
+            "base_url": "/demo.html",
+            "industry_type": "Generic",
+            "created_at": "2026-10-10T00:00:00Z",
+        }), encoding="utf-8")
+        (root / "variables.json").write_text("[]\n", encoding="utf-8")
+        (rec / "recording.json").write_text(json.dumps({
+            "id": "file-only-rec",
+            "project_id": "file-only",
+            "name": "From git",
+            "start_url": "/demo.html",
+            "steps": [{"id": "file-only-1", "order": 1, "action": "navigate", "value": "/demo.html", "label": "Open"}],
+        }), encoding="utf-8")
+        (rec / "resources" / "Jenkinsfile").write_text("pipeline {}\n", encoding="utf-8")
+        library_store.materialize_all()
+        with SessionLocal() as db:
+            row = db.get(Recording, "file-only-rec")
+            self.assertIsNotNone(row)
+            self.assertEqual(row.name, "From git")
+            self.assertEqual(len(list(row.steps)), 1)
+        self.assertEqual(library_store.get_recording("file-only-rec")["source"], "repository")
+
+
 class CatalogTests(unittest.TestCase):
     def test_UT_DOC_01_catalog_ids_match(self):
         import json
@@ -301,7 +470,7 @@ class CatalogTests(unittest.TestCase):
                     missing.append(covered)
         for name in dir(unittest.TestCase):
             pass
-        for cls in (BootTests, VariableTests, UrlTests, BrowserLaunchTests, SecurityTests, ReplayTests, RunTests):
+        for cls in (BootTests, VariableTests, UrlTests, BrowserLaunchTests, SecurityTests, ReplayTests, RunTests, LibraryStoreTests):
             for name in dir(cls):
                 if name.startswith("test_UT_") and name.split("_", 1)[0] == "test":
                     scenario_id = name.split("_", 1)[1]

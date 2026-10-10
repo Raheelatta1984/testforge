@@ -167,8 +167,16 @@ function Recorder({ project }) {
   const stop = async () => {
     const id = recId;
     recRef.current = null;
-    setRecId(null); setFrame(null); setStatus("");
-    if (id) { try { await API.post("/api/recordings/" + id + "/stop", {}); } catch (_) {} }
+    if (!id) { setRecId(null); setFrame(null); setStatus(""); return; }
+    setStatus("Saving to GitHub…");
+    try {
+      await API.post("/api/recordings/" + id + "/stop", {});
+      setError("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRecId(null); setFrame(null); setStatus("");
+    }
   };
 
   if (recId) return e("div", { className: "fixed inset-0 bg-slate-950 z-[100] flex flex-col p-2 gap-2" },
@@ -220,7 +228,7 @@ function Recorder({ project }) {
   return e("div", { className: "space-y-4" },
     e("div", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-3" },
       e("h2", { className: "font-bold text-lg text-indigo-300" }, "Record in a remote browser"),
-      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on the server and shows it here. Clicks and typing are saved, then replayed from the library."),
+      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on the server and shows it here. SAVE writes the recording and its files into the GitHub library."),
       e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-name" }, "Recording name"),
       e("input", { id: "rec-name", value: name, onChange: (evt) => setName(evt.target.value), className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-url" }, "Page to open"),
@@ -341,7 +349,8 @@ function Library({ project, onRun }) {
   };
   return e("div", { className: "space-y-4" },
     error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),
-    recs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No recordings yet. Open the record tab and capture a session."),
+    e("p", { className: "text-xs text-slate-500" }, "Recordings and their files are loaded from the GitHub library."),
+    recs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No recordings in the repository yet. Open the record tab and capture a session."),
     recs.map(r => e("div", { key: r.id, className: "p-5 bg-slate-900 rounded-2xl border border-slate-800 flex justify-between shadow-xl gap-3" },
       e("div", { className: "min-w-0" },
         e("div", { className: "font-bold text-indigo-300" }, r.name),
@@ -395,7 +404,7 @@ function Projects({ setActiveProject }) {
       setProjs(prev => [project, ...prev.filter(item => item.id !== project.id)]);
       setName("");
       setBaseUrl("");
-      setNotice(`Project “${project.name}” created.`);
+      setNotice(project.published ? `Project “${project.name}” saved to GitHub.` : `Project “${project.name}” saved to the library.`);
     } catch (err) {
       setError(`Could not create project: ${err.message}`);
     } finally {
@@ -405,7 +414,8 @@ function Projects({ setActiveProject }) {
 
   return e('div', { className: "space-y-4" },
     e('form', { onSubmit: create, className: "bg-slate-900 p-6 rounded-3xl border border-slate-800" },
-      e('h2', { className: "font-bold text-lg text-indigo-300 mb-4" }, "Create a test project"),
+      e('h2', { className: "font-bold text-lg text-indigo-300 mb-1" }, "Create a test project"),
+      e('p', { className: "text-xs text-slate-500 mb-4" }, "Projects, recordings, and variables are stored in the GitHub library and loaded from there."),
       e('label', { className: "block text-xs text-slate-400 mb-1", htmlFor: "project-name" }, "Project name"),
       e('input', { id: "project-name", required: true, maxLength: 200, value: name, onChange: evt => setName(evt.target.value), placeholder: "e.g. Customer Portal", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e('label', { className: "block text-xs text-slate-400 mt-3 mb-1", htmlFor: "project-url" }, "Application URL (optional)"),
@@ -415,9 +425,10 @@ function Projects({ setActiveProject }) {
       notice && e('p', { role: "status", className: "mt-3 text-sm text-emerald-300" }, notice)
     ),
     loading && e('p', { className: "text-sm text-slate-400" }, "Loading projects…"),
-    !loading && projs.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No projects yet. Create one above to get started."),
+    !loading && projs.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No projects in the GitHub library yet. Create one above to save it to the repository."),
     projs.map(p => e('div', { key: p.id, onClick: () => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); }, className: "p-5 bg-slate-900 rounded-3xl border border-slate-800 mb-3 shadow-md hover:border-indigo-500 transition-all cursor-pointer font-bold text-sm" },
       e('div', {}, p.name),
+      e('div', { className: "text-[10px] text-emerald-400 font-normal mt-1" }, "GitHub · " + (p.repository_path || "library")),
       p.base_url && e('div', { className: "text-[10px] text-slate-500 font-normal mt-1" }, p.base_url)
     ))
   );
@@ -431,6 +442,7 @@ function Variables({ project }) {
   useEffect(() => { load(); }, [project]);
   if (!project) return e('div', {className:"py-20 text-center text-slate-500"}, "SELECT PROJECT FIRST");
   return e('div', { className: "space-y-4" },
+    e('p', { className: "text-xs text-slate-500" }, "Variables are loaded from the GitHub library for this project."),
     e('div', { className: "bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-lg" },
       e(AiInput, { value: name, onChange: e => setName(e.target.value), placeholder: "Key" }), e('div', {className:"h-2"}),
       e(AiInput, { value: val, onChange: e => setVal(e.target.value), placeholder: "Value" }),
@@ -479,13 +491,51 @@ function Artifacts() {
 }
 
 function Github() {
-  const repositoryUrl = "https://github.com/Raheelatta1984/testforge";
-  return e('div', { className: "text-center py-16 px-5 bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl space-y-5" },
-    e('div', {className:"text-6xl"}, "🐙"),
-    e('h2', {className:"font-bold text-xl text-indigo-300"}, "GITHUB & SYNC"),
-    e('p', {className:"text-sm text-slate-400"}, "Open the TestForge source repository on GitHub. TestForge projects are stored separately and are not imported from this code repository."),
-    e('a', { href: repositoryUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-block bg-slate-700 px-8 py-3 rounded-2xl font-bold" }, "OPEN SOURCE REPOSITORY"),
-    e('div', {}, e('a', { href: "/api/sync/github", className: "inline-block bg-indigo-600 px-8 py-3 rounded-2xl font-bold shadow-xl shadow-indigo-900/30" }, "DOWNLOAD SYNC PACKAGE"))
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState("");
+  const [publishing, setPublishing] = useState(false);
+  const load = () => API.get("/api/library").then(setInfo).catch(err => setError(err.message));
+  useEffect(() => { load(); }, []);
+  const publish = async () => {
+    setPublishing(true);
+    try {
+      setInfo(await API.post("/api/library/publish", {}));
+      setError("");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPublishing(false);
+    }
+  };
+  const repositoryUrl = (info && info.repository_url) || "https://github.com/Raheelatta1984/testforge";
+  const tree = info && info.branch ? repositoryUrl + "/tree/" + info.branch + "/library" : repositoryUrl;
+  const projects = (info && info.projects) || [];
+  return e('div', { className: "py-8 px-5 bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl space-y-4" },
+    e('div', {className:"text-5xl text-center"}, "🐙"),
+    e('h2', {className:"font-bold text-xl text-indigo-300 text-center"}, "GITHUB LIBRARY"),
+    e('p', {className:"text-sm text-slate-400"}, "Projects, variables, recordings, and their resource files are stored in the library/ folder of this repository. The dashboard shows that folder only. Creating a project or saving a recording commits and pushes it."),
+    info && e('div', { className: "text-xs text-slate-400 font-mono space-y-1" },
+      e('div', {}, "Branch " + (info.branch || "not a git checkout")),
+      e('div', {}, "Revision " + (info.revision || "—")),
+      e('div', {}, info.publish_enabled ? "Push enabled" : "Push disabled for this process"),
+      info.dirty && e('div', { className: "text-amber-300" }, "Unpublished library changes")
+    ),
+    e('div', { className: "space-y-2" },
+      projects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center" }, "No projects in the repository yet."),
+      projects.map(project => e('div', { key: project.id, className: "p-3 bg-slate-950 rounded-xl border border-slate-800" },
+        e('div', { className: "font-bold text-sm" }, project.name),
+        e('div', { className: "text-[10px] text-slate-500 font-mono" }, project.repository_path),
+        (project.variables || []).length > 0 && e('div', { className: "text-[10px] text-indigo-300 mt-1" }, "Variables: " + project.variables.join(", ")),
+        (project.recordings || []).map(rec => e('div', { key: rec.id, className: "text-[10px] text-slate-400 mt-1" },
+          rec.name + " · " + rec.step_count + " steps · " + ((rec.resources || []).join(", ") || "no files")
+        ))
+      ))
+    ),
+    error && e('p', { role: "alert", className: "text-sm text-red-300" }, error),
+    e('div', { className: "flex flex-col gap-2" },
+      e('a', { href: tree, target: "_blank", rel: "noopener noreferrer", className: "text-center bg-slate-700 px-8 py-3 rounded-2xl font-bold" }, "OPEN LIBRARY ON GITHUB"),
+      e('button', { type: "button", onClick: publish, disabled: publishing, className: "bg-indigo-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "PUSHING…" : "PUSH LIBRARY TO GITHUB")
+    )
   );
 }
 

@@ -78,7 +78,8 @@
       "requires": "api",
       "steps": [
         {"action": "create_project", "name": "Other port", "base_url": "", "save": "project"},
-        {"action": "create_recording", "project": "$project", "name": "Local app", "start_url": "http://127.0.0.1:3000/app", "save": "rec", "expect_start_url": "http://127.0.0.1:3000/app"}
+        {"action": "create_recording", "project": "$project", "name": "Local app", "start_url": "http://127.0.0.1:3000/app", "save": "rec", "expect_start_url": "http://127.0.0.1:3000/app"},
+        {"action": "assert_repository", "recording": "$rec"}
       ]
     },
     {
@@ -128,7 +129,8 @@
         {"action": "input", "recording": "$rec", "body": {"type": "key", "key": "Enter"}, "expect_action": "press"},
         {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 200}, "expect_action": "click", "expect_selector": "#go"},
         {"action": "assert_actions", "recording": "$rec", "actions": ["navigate", "click", "type", "press", "click"]},
-        {"action": "stop_session", "recording": "$rec"}
+        {"action": "stop_session", "recording": "$rec"},
+        {"action": "assert_repository", "recording": "$rec"}
       ]
     },
     {
@@ -165,6 +167,33 @@
         {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 200}},
         {"action": "stop_session", "recording": "$rec"},
         {"action": "queue_run", "recording": "$rec", "save": "run"},
+        {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Ada"}
+      ]
+    },
+    {
+      "id": "LB-LIB-01",
+      "title": "The dashboard library is the repository catalog",
+      "requires": "api",
+      "steps": [
+        {"action": "library_contains", "project_id": "qa-sample-app", "recording_id": "qa-hello-literal", "resources": ["Jenkinsfile"], "variable": "user"},
+        {"action": "library_contains", "project_id": "qa-sample-app", "recording_id": "qa-hello-variable", "resources": ["Jenkinsfile"]}
+      ]
+    },
+    {
+      "id": "LB-LIB-02",
+      "title": "Replay the repository recording qa-hello-literal",
+      "requires": "browser",
+      "steps": [
+        {"action": "queue_run", "recording": "qa-hello-literal", "save": "run"},
+        {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Quinn"}
+      ]
+    },
+    {
+      "id": "LB-LIB-03",
+      "title": "Replay the repository recording that interpolates {{user}}",
+      "requires": "browser",
+      "steps": [
+        {"action": "queue_run", "recording": "qa-hello-variable", "save": "run"},
         {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Ada"}
       ]
     }

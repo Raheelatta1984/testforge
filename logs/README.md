@@ -22,4 +22,4 @@ Run the harness from the repository root:
 python -m tests.harness
 ```
 
-Scenario definitions live in `tests/SCENARIOS.md` and `tests/scenarios.json`.
+Scenario definitions live in `tests/SCENARIOS.md`, `tests/scenarios.json`, and the committed catalog under `library/`. The harness copies that catalog and replays it. It does not push test projects to GitHub.

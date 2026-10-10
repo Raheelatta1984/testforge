@@ -11,8 +11,10 @@ from app.config import ARTIFACTS
 from app.errors import redact
 from app.db import (
     SCHEMA_STATUS, SessionLocal, engine, init_db, repair_schema,
-    Project, Recording, RecordingStep, Variable, Run,
+    Project, Recording, RecordingStep, Run,
 )
+from app.library_store import LibraryError, NotFound, PublishError
+from app import library_store
 
 # Browser-dependent features are optional at boot so the dashboard and its API
 # remain usable if the browser runtime is unavailable.
@@ -37,6 +39,11 @@ except Exception as exc:
 
 app = FastAPI(title="TestForge Titan ERP")
 init_db()
+try:
+    library_store.materialize_all()
+    library_store.publish_pending()
+except Exception as exc:
+    print(f"LIBRARY LOAD FAILED: {redact(exc)}")
 RUN_STREAMS = {}
 RUN_BUFFERS = {}
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
@@ -194,13 +201,15 @@ def health():
         "recorder": RecorderSession is not None,
         "executor": execute_run_task is not None,
         "revision": os.environ.get("RENDER_GIT_COMMIT", "local"),
+        "library": "repository",
     }
 
 
 @app.get("/api/projects")
 def get_projects():
-    with SessionLocal() as db:
-        return [_project_dict(project) for project in db.query(Project).order_by(Project.created_at.desc()).all()]
+    # The repository tree is the catalog. Database-only rows are not listed.
+    library_store.materialize_all()
+    return library_store.list_projects()
 
 
 @app.post("/api/projects", status_code=201)
@@ -218,28 +227,28 @@ def create_project(body: dict):
         raise HTTPException(status_code=422, detail="Project name or application URL is too long")
 
     try:
-        return _insert_project(name, base_url)
+        return library_store.create_project(name, base_url)
+    except PublishError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not save the project to GitHub: {redact(exc)}",
+        ) from exc
     except SQLAlchemyError as exc:
         # A database created by an older revision can be missing columns.
         # Repair it and try once more before surfacing the failure.
         try:
             if repair_schema():
-                return _insert_project(name, base_url)
-        except SQLAlchemyError:
-            pass
+                return library_store.create_project(name, base_url)
+        except (SQLAlchemyError, PublishError) as retry_exc:
+            if isinstance(retry_exc, PublishError):
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Could not save the project to GitHub: {redact(retry_exc)}",
+                ) from retry_exc
         raise HTTPException(
             status_code=503,
             detail=f"Database rejected the project: {redact(exc)}",
         ) from exc
-
-
-def _insert_project(name: str, base_url: str) -> dict:
-    with SessionLocal() as db:
-        project = Project(name=name, base_url=base_url)
-        db.add(project)
-        db.commit()
-        db.refresh(project)
-        return _project_dict(project)
 
 
 def _probe_project_write():
@@ -290,6 +299,11 @@ def diagnostics():
         report["database"] = f"unavailable: {redact(exc)}"
         report["status"] = "degraded"
     report["write_probe"] = _probe_project_write()
+    report["library"] = {
+        "source": "repository",
+        "publish_enabled": library_store.publish_enabled(),
+        "path": "library",
+    }
     if not report["write_probe"]["ok"]:
         report["status"] = "degraded"
     if RecorderSession is None or execute_run_task is None:
@@ -297,26 +311,23 @@ def diagnostics():
     return report
 
 
+def _library_http(exc: Exception) -> HTTPException:
+    if isinstance(exc, NotFound):
+        return HTTPException(status_code=404, detail=str(exc))
+    if isinstance(exc, PublishError):
+        return HTTPException(status_code=503, detail=f"Could not save the library to GitHub: {redact(exc)}")
+    if isinstance(exc, LibraryError):
+        return HTTPException(status_code=422, detail=str(exc))
+    raise exc
+
+
 @app.get("/api/variables")
 def get_vars(project_id: str):
-    with SessionLocal() as db:
-        variables = db.query(Variable).filter_by(project_id=project_id).all()
-        recordings = db.query(Recording).filter_by(project_id=project_id).all()
-        loaded = [(recording.name, list(recording.steps)) for recording in recordings]
-        result = []
-        for variable in variables:
-            tags = [
-                name for name, steps in loaded
-                if any(variable.name in (step.value or "") or variable.name in str(step.selector or "") for step in steps)
-            ]
-            result.append({
-                "id": variable.id,
-                "name": variable.name,
-                "value": variable.value,
-                "is_secret": variable.is_secret,
-                "tags": tags,
-            })
-        return result
+    try:
+        library_store.materialize_all()
+        return library_store.list_variables(project_id)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
 
 
 @app.post("/api/variables", status_code=201)
@@ -327,39 +338,30 @@ def create_var(body: dict):
     project_id = body.get("project_id")
     if not project_id:
         raise HTTPException(status_code=422, detail="Project is required")
-    with SessionLocal() as db:
-        if db.get(Project, project_id) is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-        variable = Variable(project_id=project_id, name=name, value=body.get("value") or "")
-        db.add(variable)
-        db.commit()
-        db.refresh(variable)
-        return {"id": variable.id, "name": variable.name, "value": variable.value, "tags": []}
+    try:
+        return library_store.create_variable(project_id, name, "" if body.get("value") is None else str(body.get("value")))
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
 
 
 @app.patch("/api/variables/{vid}")
 def patch_var(vid: str, body: dict):
-    with SessionLocal() as db:
-        variable = db.get(Variable, vid)
-        if variable is None:
-            raise HTTPException(status_code=404, detail="Variable not found")
+    try:
+        value = None
         if "value" in body:
-            variable.value = "" if body.get("value") is None else str(body.get("value"))
-        if isinstance(body.get("name"), str) and body["name"].strip():
-            variable.name = body["name"].strip()
-        db.commit()
-        db.refresh(variable)
-        return {"id": variable.id, "name": variable.name, "value": variable.value}
+            value = "" if body.get("value") is None else str(body.get("value"))
+        name = body["name"].strip() if isinstance(body.get("name"), str) and body["name"].strip() else None
+        return library_store.update_variable(vid, name=name, value=value)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
 
 
 @app.delete("/api/variables/{vid}")
 def delete_var(vid: str):
-    with SessionLocal() as db:
-        variable = db.get(Variable, vid)
-        if variable is None:
-            raise HTTPException(status_code=404, detail="Variable not found")
-        db.delete(variable)
-        db.commit()
+    try:
+        library_store.delete_variable(vid)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
     return {"ok": True}
 
 
@@ -375,48 +377,44 @@ def create_rec(body: dict, request: Request):
         raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    with SessionLocal() as db:
-        if db.get(Project, project_id) is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-        recording = Recording(
-            project_id=project_id,
+    try:
+        return library_store.create_recording(
+            project_id,
+            name.strip(),
+            start_url,
             parent_id=body.get("parent_id") or None,
-            name=name.strip()[:255],
-            start_url=start_url,
         )
-        db.add(recording)
-        db.commit()
-        db.refresh(recording)
-        return _recording_dict(recording)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
 
 
 @app.get("/api/projects/{project_id}/recordings")
 def list_recordings(project_id: str):
-    with SessionLocal() as db:
-        if db.get(Project, project_id) is None:
-            raise HTTPException(status_code=404, detail="Project not found")
-        rows = (
-            db.query(Recording)
-            .filter_by(project_id=project_id)
-            .order_by(Recording.created_at.desc())
-            .all()
-        )
-        return [_recording_dict(row) for row in rows]
+    try:
+        library_store.materialize_all()
+        return library_store.list_recordings(project_id)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
 
 
 @app.get("/api/recordings/{rid}")
 def get_recording(rid: str):
-    with SessionLocal() as db:
-        recording = db.get(Recording, rid)
-        if recording is None:
-            raise HTTPException(status_code=404, detail="Recording not found")
-        return _recording_dict(recording, with_steps=True)
+    try:
+        library_store.materialize_recording(rid)
+        recording = library_store.get_recording(rid)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+    if recording is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return recording
 
 
 @app.post("/api/recordings/{rid}/session")
 async def start_recording_session(rid: str, request: Request):
     if open_session is None:
         raise HTTPException(status_code=503, detail=f"Recorder is unavailable: {RECORDER_ERROR}")
+    if not library_store.materialize_recording(rid):
+        raise HTTPException(status_code=404, detail="Recording not found")
     with SessionLocal() as db:
         recording = db.get(Recording, rid)
         if recording is None:
@@ -426,6 +424,7 @@ async def start_recording_session(rid: str, request: Request):
             recording.start_url = start_url
             db.commit()
         seq = len(list(recording.steps or []))
+    library_store.export_recording(rid, publish=False)
     session = await open_session(rid, start_url, seq)
     return {"status": session.status, "error": session.error, "url": session.current_url}
 
@@ -473,20 +472,24 @@ async def stop_recording(rid: str):
     session = get_session(rid)
     if session is not None:
         await session.stop()
-    return {"ok": True}
+    try:
+        saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+    if saved is None:
+        return {"ok": True, "published": False}
+    return {"ok": True, "published": bool(saved.get("published")), "repository_path": saved.get("repository_path")}
 
 
 @app.get("/api/recordings/{rid}/jenkins")
 def get_jenkins(rid: str):
-    with SessionLocal() as db:
-        recording = db.get(Recording, rid)
-        if recording is None:
-            raise HTTPException(status_code=404, detail="Recording not found")
-        script = "pipeline {\n  agent any\n  stages {\n    stage('TestForge') {\n      steps {\n"
-        for step in recording.steps:
-            script += f"        echo 'Executing {step.action} on {step.label}'\n"
-        script += "      }\n    }\n  }\n}\n"
-        return PlainTextResponse(script)
+    recording = library_store.get_recording(rid)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    folder = library_store.library_dir() / "projects" / recording["project_id"] / "recordings" / rid / "resources" / "Jenkinsfile"
+    if folder.is_file():
+        return PlainTextResponse(folder.read_text(encoding="utf-8"))
+    return PlainTextResponse(library_store.jenkins_script(recording.get("steps") or []))
 
 
 @app.post("/api/runs", status_code=201)
@@ -496,6 +499,8 @@ async def queue_run(body: dict):
     target_id = body.get("target_id") or body.get("recording_id")
     if not target_id:
         raise HTTPException(status_code=422, detail="Recording id is required")
+    if not library_store.materialize_recording(target_id):
+        raise HTTPException(status_code=404, detail="Recording not found")
     with SessionLocal() as db:
         recording = db.get(Recording, target_id)
         if recording is None:
@@ -578,6 +583,20 @@ def get_video(run_id: str):
     return FileResponse(path)
 
 
+@app.get("/api/library")
+def library_status():
+    return library_store.status()
+
+
+@app.post("/api/library/publish")
+def library_publish():
+    try:
+        library_store.publish_pending()
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+    return library_store.status()
+
+
 @app.get("/api/sync/github")
 def get_sync():
     buf = io.BytesIO()
@@ -595,6 +614,10 @@ async def ws_rec(ws: WebSocket, rid: str):
     await ws.accept()
     if open_session is None:
         await ws.send_json({"type": "error", "message": f"Recorder is unavailable: {RECORDER_ERROR}"})
+        await ws.close()
+        return
+    if not library_store.materialize_recording(rid):
+        await ws.send_json({"type": "error", "message": "Recording not found"})
         await ws.close()
         return
     with SessionLocal() as db:
@@ -635,6 +658,10 @@ async def ws_rec(ws: WebSocket, rid: str):
         session.remove_listener(listener)
         if not session.listeners:
             await session.stop()
+            try:
+                await asyncio.to_thread(library_store.export_recording, rid, publish=True)
+            except Exception:
+                pass
 
 
 @app.websocket("/ws/runs/{run_id}")

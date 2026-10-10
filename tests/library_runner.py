@@ -124,6 +124,8 @@ class ScenarioRunner:
 
     def do_create_project(self, step, ctx):
         _, payload = self.client.ok("POST", "/api/projects", {"name": step["name"], "base_url": step.get("base_url", "")})
+        if payload.get("source") != "repository" or not str(payload.get("repository_path", "")).endswith("project.json"):
+            raise ScenarioError(f"project was not stored in the repository: {payload}")
         ctx[step["save"]] = payload["id"]
 
     def do_list_projects(self, step, ctx):
@@ -138,6 +140,8 @@ class ScenarioRunner:
             "name": step["name"],
             "value": step.get("value", ""),
         })
+        if payload.get("source") != "repository" or not str(payload.get("repository_path", "")).endswith("variables.json"):
+            raise ScenarioError(f"variable was not stored in the repository: {payload}")
         if step.get("save"):
             ctx[step["save"]] = payload["id"]
 
@@ -156,6 +160,8 @@ class ScenarioRunner:
             "start_url": step.get("start_url", "/demo.html"),
         })
         ctx[step["save"]] = payload["id"]
+        if payload.get("source") != "repository" or not str(payload.get("repository_path", "")).endswith("recording.json"):
+            raise ScenarioError(f"recording was not stored in the repository: {payload}")
         if step.get("expect_start_url") and payload.get("start_url") != step["expect_start_url"]:
             raise ScenarioError(f"start_url {payload.get('start_url')!r} != {step['expect_start_url']!r}")
         if step.get("expect_start_url_contains") and step["expect_start_url_contains"] not in (payload.get("start_url") or ""):
@@ -238,6 +244,35 @@ class ScenarioRunner:
         status, blob = self.client.request("GET", f"/api/runs/{step['run']}/live.jpg")
         if status != 200 or not isinstance(blob, (bytes, bytearray)) or len(blob) < step.get("min_bytes", 1):
             raise ScenarioError(f"live frame missing ({status}, {type(blob).__name__})")
+
+    def do_library_contains(self, step, ctx):
+        _, payload = self.client.ok("GET", "/api/library")
+        if payload.get("source") != "repository":
+            raise ScenarioError(f"library source is not the repository: {payload}")
+        projects = payload.get("projects") or []
+        match = next((item for item in projects if item.get("id") == step["project_id"]), None)
+        if match is None:
+            raise ScenarioError(f"project {step['project_id']} not in repository library")
+        if step.get("variable") and step["variable"] not in (match.get("variables") or []):
+            raise ScenarioError(f"variable {step['variable']} missing from {match.get('variables')}")
+        if step.get("recording_id"):
+            recordings = match.get("recordings") or []
+            recording = next((item for item in recordings if item.get("id") == step["recording_id"]), None)
+            if recording is None:
+                raise ScenarioError(f"recording {step['recording_id']} missing from repository library")
+            for resource in step.get("resources") or []:
+                if resource not in (recording.get("resources") or []):
+                    raise ScenarioError(f"resource {resource} missing from {recording}")
+
+    def do_assert_repository(self, step, ctx):
+        _, payload = self.client.ok("GET", f"/api/recordings/{step['recording']}")
+        if payload.get("source") != "repository" or not str(payload.get("repository_path", "")).endswith("recording.json"):
+            raise ScenarioError(f"recording is not in the repository: {payload}")
+        self.do_library_contains({
+            "project_id": payload["project_id"],
+            "recording_id": payload["id"],
+            "resources": step.get("resources") or ["Jenkinsfile"],
+        }, ctx)
 
     def do_jenkins_contains(self, step, ctx):
         status, payload = self.client.request("GET", f"/api/recordings/{step['recording']}/jenkins")

@@ -1,0 +1,9 @@
+[
+  {
+    "category": "Data",
+    "id": "qa-var-user",
+    "is_secret": false,
+    "name": "user",
+    "value": "Ada"
+  }
+]

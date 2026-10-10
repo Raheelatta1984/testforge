@@ -23,7 +23,7 @@ Add a check by editing `tests/test_unit.py` (ID in the method name, `test_UT_ARE
 | Application | TestForge dashboard and API |
 | Sample app | `/demo.html` (name field at 80,140, Continue at 80,200, viewport 1280x800) |
 | Unit database | temporary SQLite, discarded after the process exits |
-| Library database | separate temporary SQLite used only by the harness server |
+| Library database | temporary SQLite, hydrated from a copy of `library/` |
 | Logs | `logs/<timestamp>/{harness,unit,scenarios,server}.log` plus `results.json` and `results.md` |
 
 ## Unit scenarios
@@ -59,6 +59,15 @@ Add a check by editing `tests/test_unit.py` (ID in the method name, `test_UT_ARE
 | UT-REP-07 | Key press | `press` sends `Enter`. |
 | UT-REP-08 | Unsupported action | An unknown action raises rather than being reported as passed. |
 | UT-REP-09 | Navigate without a URL | Raises before `goto`. |
+| UT-REP-10 | Relative navigate URL | `/demo.html` is opened on `127.0.0.1:$PORT`. `http://127.0.0.1:3000/app` is not rewritten. |
+| UT-LIB-01 | Create a project | `project.json` is written and the list comes from that file. Publish is off in unit tests. |
+| UT-LIB-02 | Database-only project | A row that is not in `library/` is not listed, and materialize removes it. |
+| UT-LIB-03 | Create a recording | `recording.json` and `resources/Jenkinsfile` are written. |
+| UT-LIB-04 | Variable roundtrip | Create, update, and delete change `variables.json` and only that file. |
+| UT-LIB-05 | Path escape | An id of `../etc` is rejected. |
+| UT-LIB-06 | Publish | A local git remote receives only `library/` files. `KEEP.txt` is untouched. |
+| UT-LIB-07 | Failed push | The project is not listed and the database row is removed. |
+| UT-LIB-08 | File-only recording | A recording that exists only as JSON is loaded into the database for replay. |
 | UT-RUN-01 | Recording with no steps | Status becomes `error`, the monitor log says no steps, and no browser is launched. |
 | UT-RUN-02 | Run whose recording was deleted | Status becomes `error` and the event says `Recording not found`. |
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
@@ -71,24 +80,27 @@ These run against a live `uvicorn` process started by the harness.
 | --- | --- | --- | --- |
 | LB-API-01 | api | `GET /api/health` | `status=ok`, recorder and executor both true. |
 | LB-API-02 | api | POST a blank project name | HTTP 422, detail mentions name. |
-| LB-API-03 | api | Create and list a project | The new name is in `GET /api/projects`. |
-| LB-API-04 | api | Create, patch, and delete a variable | The patched value is returned, then delete succeeds. |
+| LB-API-03 | api | Create and list a project | The new name is in `GET /api/projects`, `source` is `repository`, and `repository_path` points at `project.json`. |
+| LB-API-04 | api | Create, patch, and delete a variable | The variable is stored in `variables.json`. The patched value is returned, then delete succeeds. |
 | LB-API-05 | api | Rephrase without an API key | `"  click   continue  "` becomes `Click continue.` |
 | LB-API-06 | api | Screenshot path traversal | `../` and a missing file both return 404. No file outside artifacts is served. |
 | LB-API-07 | api | Queue a run for an unknown recording | HTTP 404. |
 | LB-API-08 | api | Queue a recording that has no steps | Run finishes `error` and the message contains `no steps`. |
-| LB-API-09 | api | Record against another local port | `http://127.0.0.1:3000/app` is stored exactly. |
+| LB-API-09 | api | Record against another local port | `http://127.0.0.1:3000/app` is stored exactly, and the recording is in the repository catalog with a Jenkinsfile. |
 | LB-API-10 | api | Diagnostics | Write probe is ok. Recorder and executor are ok. |
 | LB-REC-01 | browser | Start a recording of the sample app | A JPEG frame arrives, at least 800x500, and the session does not report an error. |
-| LB-REC-02 | browser | Click the name field, type, press Enter, click Continue | Steps are `navigate, click, type, press, click`. Selectors are `#name` and `#go`. |
+| LB-REC-02 | browser | Click the name field, type, press Enter, click Continue | Steps are `navigate, click, type, press, click`. Selectors are `#name` and `#go`. After SAVE the recording and its Jenkinsfile are in the repository catalog. |
 | LB-REC-03 | browser | Key press is recorded | Covered by the Enter step in LB-REC-02. A failure there fails this ID too. |
 | LB-REC-04 | api | Stop a session that was never started, twice | Both calls succeed. Status is `absent`. |
 | LB-RUN-01 | browser | Replay a literal recording | Status `passed`. The page excerpt contains `Hello, Quinn`. A live frame remains. The Jenkins script mentions `navigate`. |
 | LB-RUN-02 | browser | Replay `{{user}}` with variable `user=Ada` | The stored step value is still `{{user}}`. After replay the page contains `Hello, Ada`. |
+| LB-LIB-01 | api | Read `GET /api/library` | Source is `repository`. `qa-sample-app` is listed with variable `user` and both committed recordings, each with a Jenkinsfile. |
+| LB-LIB-02 | browser | Run the committed recording `qa-hello-literal` | Status `passed`. The page contains `Hello, Quinn`. No new recording is created. |
+| LB-LIB-03 | browser | Run the committed recording `qa-hello-variable` | Status `passed`. The page contains `Hello, Ada` because `user` comes from the repository. |
 
 ## Adding or changing a scenario
 
-1. Add the check to `tests/test_unit.py` or a step list in `tests/scenarios.json`.
+1. Add the check to `tests/test_unit.py` or a step list in `tests/scenarios.json`. If the check is a saved recording, add it under `library/projects/` and replay that id.
 2. Document the ID, preconditions, and expected result in this file.
 3. Run `python -m tests.harness`.
-4. Commit the scenario and the new `logs/<timestamp>/` report together so the result has a date, a time, and the revision it ran against.
+4. Commit the scenario, any `library/` change, and the new `logs/<timestamp>/` report together so the result has a date, a time, and the revision it ran against.

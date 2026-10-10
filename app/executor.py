@@ -16,6 +16,7 @@ from playwright.async_api import async_playwright
 from app.browser import Preview, explain_launch_error, launch_kwargs, video_ok
 from app.config import ARTIFACTS, logger
 from app.db import Recording, Run, SessionLocal, interpolate, resolve_variables
+from app.library_store import playback_url
 
 execution_lock = asyncio.Semaphore(1)
 LIVE_FRAMES = {}
@@ -77,7 +78,7 @@ async def replay_step(page, step, variables):
     value = interpolate(raw, variables) if raw else None
     selector = step.get("selector") or {}
     if action == "navigate":
-        url = value or ""
+        url = playback_url(value or "")
         if not url:
             raise RuntimeError("Navigate step has no URL")
         await page.goto(url, wait_until="domcontentloaded", timeout=30000)

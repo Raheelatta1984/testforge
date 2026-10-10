@@ -17,6 +17,8 @@ def ensure_test_env() -> str:
     os.environ["TF_TEST_ROOT"] = root
     os.environ["DATABASE_URL"] = "sqlite:///" + os.path.join(root, "unit.db")
     os.environ["TF_ARTIFACTS"] = os.path.join(root, "artifacts")
+    os.environ["TF_LIBRARY_DIR"] = os.path.join(root, "library")
+    os.environ["TF_LIBRARY_PUBLISH"] = "0"
     os.environ.setdefault("PORT", "8765")
     os.makedirs(os.environ["TF_ARTIFACTS"], exist_ok=True)
     return root

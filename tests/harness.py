@@ -159,11 +159,16 @@ def run_library(log, run_dir, server_log, require_browser):
     have_browser = discover_chromium(log)
     port = free_port()
     work = Path(tempfile.mkdtemp(prefix="tf-library-"))
+    library_copy = work / "library"
+    shutil.copytree(ROOT / "library", library_copy)
     env = os.environ.copy()
     env["PORT"] = str(port)
     env["DATABASE_URL"] = "sqlite:///" + str(work / "library.db")
     env["TF_ARTIFACTS"] = str(work / "artifacts")
+    env["TF_LIBRARY_DIR"] = str(library_copy)
+    env["TF_LIBRARY_PUBLISH"] = "0"
     env.pop("LD_LIBRARY_PATH", None)
+    env.pop("TF_GIT_BRANCH", None)
     log(f"server: starting on 127.0.0.1:{port}")
     handle = open(server_log, "w", encoding="utf-8")
     proc = subprocess.Popen(

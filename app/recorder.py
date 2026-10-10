@@ -13,6 +13,7 @@ from playwright.async_api import async_playwright
 from app.browser import Preview, explain_launch_error, launch_kwargs
 from app.config import ARTIFACTS, logger
 from app.db import RecordingStep, SessionLocal
+from app import library_store
 
 # Element under the click, plus a CSS selector stable enough to replay.
 _ELEMENT_JS = """
@@ -218,7 +219,7 @@ class RecorderSession:
             db.add(row)
             db.commit()
             db.refresh(row)
-            return {
+            step = {
                 "id": row.id,
                 "order": row.order,
                 "action": row.action,
@@ -226,6 +227,17 @@ class RecorderSession:
                 "label": row.label,
                 "selector": row.selector,
             }
+        if self.latest_jpeg:
+            name = library_store.attach_step_image(self.recording_id, step["order"], self.latest_jpeg)
+            if name:
+                with SessionLocal() as db:
+                    saved = db.get(RecordingStep, step["id"])
+                    if saved is not None:
+                        saved.screenshot_path = name
+                        db.commit()
+                step["screenshot"] = name
+        library_store.export_recording(self.recording_id, publish=False)
+        return step
 
     async def _close_browser(self):
         if self.preview is not None:
