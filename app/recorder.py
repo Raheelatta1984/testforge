@@ -8,20 +8,19 @@ Optimizations:
 - Fast viewport (1024x640) for lower CPU on free tier, configurable
 - Adaptive preview with touch() for instant feedback
 - Debounced export to avoid heavy I/O on every step
-- Deduplication of repeated steps (compress consecutive identical)
+- Each action remains individually editable, even identical repeated actions
 - Smooth save with retry and detailed logs
 """
 
 import asyncio
 import os
 import time
-from collections import deque
 
 from playwright.async_api import async_playwright
 
 from app.browser import Preview, explain_launch_error, launch_kwargs
 from app.config import ARTIFACTS, logger
-from app.db import RecordingStep, SessionLocal
+from app.db import RecordingStep, SessionLocal, resolve_variables, interpolate, Variable, VAR_REGEX
 from app import library_store
 
 # Element under the click, plus a CSS selector stable enough to replay.
@@ -77,6 +76,18 @@ _FOCUSED_JS = """
   if (el.id) selector = "#" + cssEscape(el.id);
   else if (el.getAttribute("name")) selector = el.tagName.toLowerCase() + '[name="' + cssEscape(el.getAttribute("name")) + '"]';
   else if (el.getAttribute("placeholder")) selector = el.tagName.toLowerCase() + '[placeholder="' + el.getAttribute("placeholder").replace(/"/g, '\\\\"') + '"]';
+  if (!selector) {
+    const parts = [];
+    let cur = el;
+    while (cur && cur.tagName !== "HTML" && parts.length < 6) {
+      let index = 1;
+      let sib = cur;
+      while ((sib = sib.previousElementSibling)) if (sib.tagName === cur.tagName) index++;
+      parts.unshift(cur.tagName.toLowerCase() + ":nth-of-type(" + index + ")");
+      cur = cur.parentElement;
+    }
+    selector = parts.join(" > ");
+  }
   return { selector, tag: el.tagName.toLowerCase() };
 }
 """
@@ -91,18 +102,6 @@ _LOCK = asyncio.Lock()
 
 def get_session(recording_id):
     return SESSIONS.get(recording_id)
-
-
-def _step_sig(action, value, selector, label):
-    """Signature for deduplication."""
-    sel_primary = ""
-    sel_x = None
-    sel_y = None
-    if isinstance(selector, dict):
-        sel_primary = selector.get("primary") or ""
-        sel_x = selector.get("x")
-        sel_y = selector.get("y")
-    return (action, value, sel_primary, sel_x, sel_y)
 
 
 class RecorderSession:
@@ -122,14 +121,11 @@ class RecorderSession:
         self.preview = None
         self._ready = asyncio.Event()
         self._closed = False
-        # For deduplication and smooth saving
-        self._last_step_sig = None
-        self._last_step_id = None
-        self._last_step_repeat = 1
+        # For smooth saving
         self._pending_export = False
         self._export_task = None
-        self._step_buffer = deque(maxlen=50)  # recent steps for block detection
         self._save_logs = []  # for debugging save issues
+        self._image_tasks = set()
 
     def add_listener(self, callback):
         self.listeners.append(callback)
@@ -222,7 +218,15 @@ class RecorderSession:
                     focused = await self.page.evaluate(_FOCUSED_JS)
                 except Exception:
                     focused = None
-                await self.page.keyboard.type(text, delay=10)  # small delay for stability, but fast
+                with SessionLocal() as db:
+                    from app.db import Recording
+                    recording = db.get(Recording, self.recording_id)
+                    variables = resolve_variables(db, recording.project_id)
+                missing = [name for name in VAR_REGEX.findall(text) if name not in variables]
+                if missing:
+                    raise ValueError("Unknown variable: " + ", ".join(missing))
+                resolved = interpolate(text, variables)
+                await self.page.keyboard.type(resolved, delay=0)
                 selector = {"primary": (focused or {}).get("selector")} if focused else None
                 step = await self._record("type", value=text, selector=selector, label=f"Type: {text}")
             elif kind in ("key", "press"):
@@ -231,59 +235,49 @@ class RecorderSession:
                     raise ValueError("Key is empty")
                 await self.page.keyboard.press(key)
                 step = await self._record("press", value=key, label=f"Press {key}")
+            elif kind == "save_variable":
+                name = str(msg.get("name") or "").strip()
+                if not name or not __import__("re").fullmatch(r"[\w.-]{1,100}", name):
+                    raise ValueError("Variable name must be 1–100 letters, numbers, dots, dashes or underscores")
+                focused = await self.page.evaluate(_FOCUSED_JS)
+                selector = (focused or {}).get("selector")
+                if not selector:
+                    raise ValueError("Focus an input with an id, name or placeholder before saving its value")
+                actual = await self.page.evaluate("() => document.activeElement.value")
+                with SessionLocal() as db:
+                    from app.db import Recording
+                    recording = db.get(Recording, self.recording_id)
+                    row = db.query(Variable).filter(Variable.project_id == recording.project_id, Variable.name == name).first()
+                    project_id = recording.project_id
+                    if row and not msg.get("existing"):
+                        raise ValueError(f"Variable {name} already exists; choose update existing")
+                    if not row and msg.get("existing"):
+                        raise ValueError(f"Variable {name} does not exist")
+                    variable_id = row.id if row else None
+                if variable_id:
+                    await asyncio.to_thread(library_store.update_variable, variable_id, value=str(actual))
+                else:
+                    await asyncio.to_thread(library_store.create_variable, project_id, name, str(actual))
+                step = await self._record("save_variable", value=name, selector={"primary": selector}, label=f"Save input into {name}")
             else:
                 raise ValueError(f"Unknown input type: {kind}")
             try:
-                # Force capture after action for immediate visual feedback
-                await self.preview._shoot(force=True)
-            except Exception:
-                pass
+                # Screenshot after the action, not the preceding frame. Persist off the
+                # input path so screenshots and exports do not stall the next click.
+                png = await self.page.screenshot(type="png", animations="disabled")
+                task = asyncio.create_task(self._attach_image(step, png))
+                self._image_tasks.add(task)
+                task.add_done_callback(self._image_tasks.discard)
+                self.preview.touch()
+            except Exception as exc:
+                logger.warning("STEP SCREENSHOT FAILED %s %s", self.recording_id, exc)
             self.current_url = self.page.url
         await self._broadcast({"type": "step", "step": step})
         return step
 
     async def _record(self, action, value=None, label=None, selector=None, force_new=False):
-        """Record step with deduplication: if same as last, increment repeat instead of new row."""
-        sig = _step_sig(action, value, selector, label)
-
-        # Check for consecutive duplicate - implement "follow last steps x times"
-        if not force_new and self._last_step_sig == sig and self._last_step_id:
-            # Same as last step, increment repeat count
-            self._last_step_repeat += 1
-            try:
-                with SessionLocal() as db:
-                    row = db.get(RecordingStep, self._last_step_id)
-                    if row is not None:
-                        row.repeat_count = self._last_step_repeat
-                        # Update label to show repeat
-                        base_label = (row.label or "").split(" ×")[0]
-                        row.label = f"{base_label} ×{self._last_step_repeat}"
-                        db.commit()
-                        db.refresh(row)
-                        step = {
-                            "id": row.id,
-                            "order": row.order,
-                            "action": row.action,
-                            "value": row.value,
-                            "label": row.label,
-                            "selector": row.selector,
-                            "repeat": row.repeat_count,
-                        }
-                        # Keep buffer updated
-                        if self._step_buffer and self._step_buffer[-1].get("id") == row.id:
-                            self._step_buffer[-1] = step
-                        logger.info("RECORDER DEDUP %s repeat=%s", self.recording_id, self._last_step_repeat)
-                        # Debounced export
-                        self._schedule_export()
-                        return step
-            except Exception as e:
-                logger.warning("DEDUP FAILED %s %s", self.recording_id, e)
-                # Fall through to create new step
-
-        # New distinct step
+        """Persist one separately editable row for each action."""
         self.seq += 1
-        self._last_step_sig = sig
-        self._last_step_repeat = 1
 
         try:
             with SessionLocal() as db:
@@ -299,7 +293,6 @@ class RecorderSession:
                 db.add(row)
                 db.commit()
                 db.refresh(row)
-                self._last_step_id = row.id
                 step = {
                     "id": row.id,
                     "order": row.order,
@@ -313,26 +306,23 @@ class RecorderSession:
             logger.exception("RECORD FAILED %s %s", self.recording_id, e)
             raise RuntimeError(f"Failed to save step: {e}") from e
 
-        # Attach screenshot if available (async, don't block)
-        if self.latest_jpeg:
-            try:
-                name = library_store.attach_step_image(self.recording_id, step["order"], self.latest_jpeg)
-                if name:
-                    with SessionLocal() as db:
-                        saved = db.get(RecordingStep, step["id"])
-                        if saved is not None:
-                            saved.screenshot_path = name
-                            db.commit()
-                    step["screenshot"] = name
-            except Exception as e:
-                logger.warning("SCREENSHOT ATTACH FAILED %s %s", self.recording_id, e)
-
-        # Buffer for block repeat detection
-        self._step_buffer.append(step)
-
         # Schedule debounced export for smooth saving (not on every step immediately)
         self._schedule_export()
         return step
+
+    async def _attach_image(self, step, png):
+        try:
+            name = await asyncio.to_thread(library_store.attach_step_image, self.recording_id, step["order"], png)
+            if name:
+                with SessionLocal() as db:
+                    row = db.get(RecordingStep, step["id"])
+                    if row:
+                        row.screenshot_path = name
+                        db.commit()
+                step["screenshot"] = name
+                self._schedule_export()
+        except Exception as exc:
+            logger.warning("SCREENSHOT ATTACH FAILED %s %s", self.recording_id, exc)
 
     def _schedule_export(self):
         """Debounced export to avoid heavy I/O on every step."""
@@ -390,6 +380,9 @@ class RecorderSession:
         self.status = "stopped" if self.status != "error" else self.status
         SESSIONS.pop(self.recording_id, None)
 
+        # Do not close before queued screenshot writes finish.
+        if self._image_tasks:
+            await asyncio.gather(*list(self._image_tasks), return_exceptions=True)
         # Ensure final export with retry for smooth save
         if self._export_task and not self._export_task.done():
             try:

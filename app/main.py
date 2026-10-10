@@ -49,11 +49,7 @@ try:
         # Still materialize in background for DB sync, but don't block startup
         # For now, do quick materialize with cache check (fast if no changes)
         library_store.materialize_all()
-    # Try to push pending to main branch immediately
-    try:
-        library_store.publish_pending()
-    except Exception as e:
-        print(f"INITIAL PUBLISH TO MAIN FAILED (will retry on save): {redact(e)}")
+    # Network publication runs in the retry worker, never on the startup path.
 except Exception as exc:
     print(f"LIBRARY LOAD FAILED: {redact(exc)}")
 RUN_STREAMS = {}
@@ -146,6 +142,7 @@ def _step_dict(step: RecordingStep) -> dict:
         "label": step.label,
         "selector": step.selector,
         "repeat": getattr(step, "repeat_count", 1) or 1,
+        "screenshot": os.path.basename(step.screenshot_path) if step.screenshot_path else None,
     }
 
 
@@ -198,6 +195,12 @@ async def broadcast_run(run_id, payload):
             pass
 
 
+@app.on_event("startup")
+async def retry_unpublished_library():
+    if library_store.publish_enabled():
+        schedule_publish_retry()
+
+
 @app.get("/api/health")
 def health():
     """Readiness check used to verify a deployment and its database connection."""
@@ -214,7 +217,7 @@ def health():
         "revision": os.environ.get("RENDER_GIT_COMMIT", "local"),
         "library": "repository",
         "optimized": True,
-        "main_branch_push": True,
+        "library_publish_enabled": library_store.publish_enabled(),
     }
 
 
@@ -268,7 +271,7 @@ def create_project(body: dict):
     except PublishError as exc:
         raise HTTPException(
             status_code=503,
-            detail=f"Could not save the project to GitHub main branch: {redact(exc)}",
+            detail=f"Could not save the project to GitHub branch: {redact(exc)}",
         ) from exc
     except SQLAlchemyError as exc:
         try:
@@ -278,7 +281,7 @@ def create_project(body: dict):
             if isinstance(retry_exc, PublishError):
                 raise HTTPException(
                     status_code=503,
-                    detail=f"Could not save the project to GitHub main: {redact(retry_exc)}",
+                    detail=f"Could not save the project to GitHub branch: {redact(retry_exc)}",
                 ) from retry_exc
         raise HTTPException(
             status_code=503,
@@ -312,8 +315,8 @@ def diagnostics():
         "executor": "ok" if execute_run_task is not None else f"unavailable: {EXECUTOR_ERROR}",
         "optimizations": {
             "fast_projects": True,
-            "dedup_steps": True,
-            "main_branch_push": True,
+            "individual_steps": True,
+            "library_publish_enabled": library_store.publish_enabled(),
             "adaptive_preview": True,
             "smooth_save": True,
         }
@@ -341,7 +344,7 @@ def diagnostics():
         "source": "repository",
         "publish_enabled": library_store.publish_enabled(),
         "path": "library",
-        "push_branch": "main",
+        "push_branch": library_store.status().get("branch"),
     }
     if not report["write_probe"]["ok"]:
         report["status"] = "degraded"
@@ -354,7 +357,7 @@ def _library_http(exc: Exception) -> HTTPException:
     if isinstance(exc, NotFound):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, PublishError):
-        return HTTPException(status_code=503, detail=f"Could not save the library to GitHub main: {redact(exc)}")
+        return HTTPException(status_code=503, detail=f"Could not save the library to GitHub branch: {redact(exc)}")
     if isinstance(exc, LibraryError):
         return HTTPException(status_code=422, detail=str(exc))
     raise exc
@@ -525,8 +528,7 @@ async def start_recording_session(rid: str, request: Request):
         if start_url != recording.start_url:
             recording.start_url = start_url
             db.commit()
-        seq = len(list(recording.steps or []))
-    library_store.export_recording(rid, publish=False)
+        seq = max((step.order for step in recording.steps), default=0)
     session = await open_session(rid, start_url, seq)
     return {"status": session.status, "error": session.error, "url": session.current_url, "optimized": True}
 
@@ -543,7 +545,7 @@ def recording_session_status(rid: str):
 def recording_frame(rid: str):
     session = get_session(rid)
     if session is None:
-        raise HTTPException(status_code=404, detail="Recording session is not running")
+        return Response(status_code=204)
     if session.latest_jpeg:
         return Response(
             content=session.latest_jpeg,
@@ -566,7 +568,7 @@ async def recording_input(rid: str, body: dict):
         raise HTTPException(status_code=422, detail=f"Missing {exc}") from exc
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return {"ok": True, "step": step, "optimized": True, "dedup": step.get("repeat", 1) > 1}
+    return {"ok": True, "step": step, "optimized": True, "dedup": False}
 
 
 @app.post("/api/recordings/{rid}/stop")
@@ -585,27 +587,113 @@ async def stop_recording(rid: str):
         try:
             # Try again without publish to ensure local save
             saved_local = await asyncio.to_thread(library_store.export_recording, rid, publish=False)
+            schedule_publish_retry()
             return {
                 "ok": True,
                 "published": False,
                 "publish_error": str(exc),
                 "repository_path": saved_local.get("repository_path") if saved_local else None,
                 "save_logs": save_logs,
-                "message": f"Recording saved locally but push to main failed: {exc}. Will retry.",
-                "retry_branch": "main"
+                "message": f"Recording saved locally but branch push failed: {exc}. Will retry.",
+                "retry_branch": library_store.status().get("branch")
             }
         except Exception as e2:
             raise _library_http(exc) from exc
     if saved is None:
-        return {"ok": True, "published": False, "save_logs": save_logs}
+        raise HTTPException(status_code=404, detail="Recording not found")
+    if not saved.get("published"):
+        schedule_publish_retry()
     return {
         "ok": True,
         "published": bool(saved.get("published")),
         "repository_path": saved.get("repository_path"),
         "save_logs": save_logs,
-        "branch": "main",
-        "description": f"AI recording {saved.get('name') or rid} saved to main"
+        "branch": library_store.status().get("branch"),
+        "publish_error": saved.get("publish_error"),
+        "description": f"AI recording {saved.get('name') or rid} saved locally"
     }
+
+
+# Only one retry loop per worker. Failed pushes stay visible as unsynced;
+# no request blocks for the one-minute backoff.
+_publish_retry_task = None
+
+
+def schedule_publish_retry():
+    global _publish_retry_task
+    if not library_store.publish_enabled():
+        return
+    if _publish_retry_task and not _publish_retry_task.done():
+        return
+
+    async def retry():
+        while True:
+            await asyncio.sleep(60)
+            try:
+                await asyncio.to_thread(library_store.publish_pending)
+                verified = await asyncio.to_thread(library_store.remote_library_status)
+                if verified.get("synced"):
+                    return
+            except Exception as exc:
+                from app.config import logger
+                logger.warning("LIBRARY RETRY FAILED: %s", redact(exc))
+
+    _publish_retry_task = asyncio.create_task(retry())
+
+
+@app.get("/api/recordings/{rid}/steps/{step_id}/screenshot")
+def recording_step_screenshot(rid: str, step_id: str):
+    with SessionLocal() as db:
+        step = db.get(RecordingStep, step_id)
+        if not step or step.recording_id != rid or not step.screenshot_path:
+            raise HTTPException(status_code=404, detail="Screenshot not found")
+        recording = db.get(Recording, rid)
+        path = library_store.library_dir() / "projects" / recording.project_id / "recordings" / rid / "resources" / os.path.basename(step.screenshot_path)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Screenshot not found")
+    return FileResponse(path, media_type="image/png" if path.suffix.lower() == ".png" else "image/jpeg")
+
+
+@app.patch("/api/recordings/{rid}/steps/{step_id}")
+async def edit_recording_step(rid: str, step_id: str, body: dict):
+    allowed = {"navigate", "click", "type", "fill", "press", "save_variable"}
+    with SessionLocal() as db:
+        step = db.get(RecordingStep, step_id)
+        if not step or step.recording_id != rid:
+            raise HTTPException(status_code=404, detail="Step not found")
+        if "action" in body:
+            if body["action"] not in allowed:
+                raise HTTPException(status_code=422, detail="Unsupported action")
+            step.action = body["action"]
+        if "value" in body:
+            step.value = None if body["value"] is None else str(body["value"])
+        if "label" in body:
+            step.label = str(body["label"] or "")[:500]
+        if "selector" in body:
+            if body["selector"] is not None and not isinstance(body["selector"], dict):
+                raise HTTPException(status_code=422, detail="Selector must be an object")
+            step.selector = body["selector"]
+        db.commit()
+        result = _step_dict(step)
+    saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True)
+    result["published"] = bool(saved and saved.get("published"))
+    if not result["published"]:
+        schedule_publish_retry()
+    return result
+
+
+@app.get("/api/recordings/{rid}/resources/{filename}")
+def download_recording_resource(rid: str, filename: str):
+    if not _SAFE_NAME.fullmatch(filename) or ".." in filename:
+        raise HTTPException(status_code=404, detail="Resource not found")
+    recording = library_store.get_recording(rid)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    folder = library_store.library_dir() / "projects" / recording["project_id"] / "recordings" / rid / "resources"
+    path = folder / filename
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Resource not found")
+    return FileResponse(path, filename=filename)
 
 
 @app.get("/api/recordings/{rid}/jenkins")
@@ -654,6 +742,14 @@ async def queue_run(body: dict):
         try:
             await execute_run_task(rid, on_event, on_frame=on_frame)
         except Exception as exc:
+            from datetime import datetime
+            with SessionLocal() as db:
+                row = db.get(Run, rid)
+                if row:
+                    row.status = "error"
+                    row.rog_monitor_log = redact(exc)
+                    row.finished_at = datetime.utcnow()
+                    db.commit()
             await broadcast_run(rid, {"type": "done", "status": "error", "error": redact(exc)})
 
     asyncio.create_task(task_wrapper())
@@ -686,6 +782,10 @@ def get_queue_status():
         return {
             "queued": queued,
             "running": running,
+            "passed": db.query(Run).filter(Run.status == "passed").count(),
+            "failed": db.query(Run).filter(Run.status.in_(["failed", "error"])).count(),
+            "pending": queued + running,
+            "passed_pct": round(100 * db.query(Run).filter(Run.status == "passed").count() / total, 1) if total else 0,
             "total": total,
             "immediate": True,
             "recent": [_run_dict(r) for r in recent],
@@ -734,18 +834,23 @@ def get_video(run_id: str):
 
 
 @app.get("/api/library")
-def library_status():
-    return library_store.status()
+async def library_status():
+    info = await asyncio.to_thread(library_store.status)
+    info["remote_verification"] = await asyncio.to_thread(library_store.remote_library_status)
+    if info["publish_enabled"] and not info["remote_verification"].get("synced"):
+        schedule_publish_retry()
+    return info
 
 
 @app.post("/api/library/publish")
 def library_publish():
     try:
-        # Force push to main branch immediately per requirements 6,9
-        result = library_store.force_push_to_main("Manual push library to main branch")
+        result = library_store.push_current_branch("Manual push library")
         status = library_store.status()
-        status["pushed_to_main"] = result
-        status["branch"] = "main"
+        status["pushed"] = result
+        status["remote_verification"] = library_store.remote_library_status()
+        if not status["remote_verification"].get("synced"):
+            schedule_publish_retry()
         return status
     except LibraryError as exc:
         raise _library_http(exc) from exc
@@ -765,7 +870,7 @@ def library_fast():
                     "fast": True,
                     "projects": catalog.get("projects") or [],
                     "load_time": f"{elapsed:.3f}s",
-                    "branch": "main",
+                    "branch": library_store.status().get("branch"),
                 },
                 headers={"X-Load-Time": f"{elapsed:.3f}s", "X-Source": "catalog-fast"}
             )
@@ -777,14 +882,16 @@ def library_fast():
 
 @app.post("/api/sync/github")
 def sync_github():
-    """Force sync to main branch immediately - requirement 9."""
+    """Push and verify the checked-out branch against GitHub."""
     try:
-        pushed = library_store.force_push_to_main("Force sync library to main - immediate push")
+        pushed = library_store.push_current_branch("Sync library")
+        verification = library_store.remote_library_status()
         return {
-            "ok": True,
+            "ok": bool(verification.get("synced")),
             "pushed": pushed,
-            "branch": "main",
-            "message": "Repository pushed to main branch immediately" if pushed else "Already up to date with main",
+            "branch": library_store.status().get("branch"),
+            "verification": verification,
+            "message": "Repository push verified" if verification.get("synced") else "Publishing disabled or remote not verified",
             "immediate": True
         }
     except LibraryError as exc:
@@ -823,7 +930,7 @@ async def ws_rec(ws: WebSocket, rid: str):
             await ws.close()
             return
         start_url = recording.start_url
-        seq = len(list(recording.steps or []))
+        seq = max((step.order for step in recording.steps), default=0)
     session = await open_session(rid, start_url, seq)
 
     async def listener(payload):
@@ -855,7 +962,9 @@ async def ws_rec(ws: WebSocket, rid: str):
         if not session.listeners:
             await session.stop()
             try:
-                await asyncio.to_thread(library_store.export_recording, rid, publish=True)
+                saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True)
+                if saved and not saved.get("published"):
+                    schedule_publish_retry()
             except Exception as e:
                 print(f"WS SAVE FAILED {rid} {redact(e)}")
 

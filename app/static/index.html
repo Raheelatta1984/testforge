@@ -105,9 +105,13 @@ function Recorder({ project }) {
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [armed, setArmed] = useState(null);
+  const [variableName, setVariableName] = useState("");
   const [varsList, setVarsList] = useState([]);
   const recRef = useRef(null);
   const frameUrl = useRef(null);
+  const initialStepsLoaded = useRef(false);
 
   useEffect(() => {
     if (!project) return;
@@ -131,7 +135,16 @@ function Recorder({ project }) {
       try {
         const session = await API.get("/api/recordings/" + recId + "/session");
         if (session.error) { setError(session.error); setStatus("Browser error"); }
-        else if (session.status === "live") setStatus("Browser live ⚡ FAST");
+        else if (session.status === "live") {
+          setStatus("Browser live ⚡ FAST");
+          if (!initialStepsLoaded.current) {
+            API.get("/api/recordings/" + recId).then(recording => {
+              if ((recording.steps || []).length >= session.seq) initialStepsLoaded.current = true;
+              setSteps(prev => [...prev, ...(recording.steps || []).filter(step => !prev.some(item => item.id === step.id))]
+                .sort((a, b) => b.order - a.order));
+            }).catch(() => {});
+          }
+        }
         else if (session.status === "starting") setStatus("Launching browser… FAST");
         const res = await fetch("/api/recordings/" + recId + "/frame?t=" + Date.now());
         if (res.ok && (res.headers.get("content-type") || "").indexOf("image") !== -1) {
@@ -159,20 +172,9 @@ function Recorder({ project }) {
   const send = async (msg) => {
     try {
       const res = await API.post("/api/recordings/" + recId + "/input", msg);
-      if (res.step) {
-        // Handle dedup display
-        if (res.dedup) {
-          // Update existing step instead of adding new
-          setSteps(prev => {
-            const last = prev[prev.length - 1];
-            if (last && last.id === res.step.id) {
-              return [...prev.slice(0, -1), res.step];
-            }
-            return prev.concat([res.step]);
-          });
-        } else {
-          setSteps(prev => prev.concat([res.step]));
-        }
+      if (res.step) setSteps(prev => [res.step, ...prev.filter(step => step.id !== res.step.id)]);
+      if (msg.type === "save_variable") {
+        API.get(`/api/projects/${project.id}/variables`).then(data => setVarsList(data.variables || [])).catch(() => {});
       }
       setError("");
     } catch (err) { setError(err.message); }
@@ -185,6 +187,7 @@ function Recorder({ project }) {
         name: (name || "Session").trim(),
         start_url: (url || "").trim() || "/demo.html"
       });
+      initialStepsLoaded.current = false;
       setSteps([]); setFrame(null); setStatus("Launching browser… FAST ⚡"); setRecId(recording.id);
       await API.post("/api/recordings/" + recording.id + "/session", {});
     } catch (err) { setError(err.message); }
@@ -194,11 +197,11 @@ function Recorder({ project }) {
     const id = recId;
     recRef.current = null;
     if (!id) { setRecId(null); setFrame(null); setStatus(""); return; }
-    setStatus("Saving to GitHub main… ⚡");
+    setStatus("Saving recording…");
     try {
       const result = await API.post("/api/recordings/" + id + "/stop", {});
       if (result.publish_error) {
-        setError(`Saved locally, push to main retrying: ${result.publish_error}`);
+        setError(`Saved locally; GitHub push will retry in 1 minute: ${result.publish_error}`);
       } else {
         setError("");
       }
@@ -217,7 +220,11 @@ function Recorder({ project }) {
   if (recId) return e("div", { className: "fixed inset-0 bg-slate-950 z-[100] flex flex-col p-2 gap-2" },
     e("div", { className: "flex justify-between items-center px-1" },
       e("span", { className: "text-xs font-bold " + (status.includes("live") ? "text-emerald-400" : "text-red-400") }, status === "Browser live ⚡ FAST" ? "● BROWSER LIVE ⚡ FAST" : "● " + (status || "RECORDING")),
-      e("button", { onClick: stop, className: "bg-red-600 px-4 py-1 rounded font-bold text-xs" }, "SAVE TO MAIN")
+      e("div", { className: "flex gap-1 items-center" },
+        e("button", { onClick: () => setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2))), className: "key-btn", title: "Zoom out" }, "−"),
+        e("span", { className: "text-xs" }, Math.round(zoom * 100) + "%"),
+        e("button", { onClick: () => setZoom(z => Math.min(2, +(z + 0.25).toFixed(2))), className: "key-btn", title: "Zoom in" }, "+"),
+        e("button", { onClick: stop, className: "bg-red-600 px-4 py-1 rounded font-bold text-xs" }, "SAVE"))
     ),
     error && e("p", { role: "alert", className: "text-sm text-red-300 px-1" }, error),
     e("div", { className: "browser-shell flex-1 min-h-0" },
@@ -230,6 +237,7 @@ function Recorder({ project }) {
         frame
           ? e("img", {
               src: frame, alt: "Remote browser", draggable: false,
+              style: { width: (100 * zoom) + "%", maxWidth: "none" },
               onClick: (evt) => {
                 const img = evt.target;
                 const rect = img.getBoundingClientRect();
@@ -253,9 +261,16 @@ function Recorder({ project }) {
       ))
     ),
     e("div", { className: "bg-slate-900 p-2 space-y-2 rounded-xl" },
-      e("div", { className: "grid grid-cols-4 gap-1" },
-        ["Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].map(key =>
-          e("button", { key: key, className: "key-btn", onClick: () => send({ type: "key", key: key }) }, key))
+      e("p", { className: "text-[10px] text-slate-400" }, armed ? `Confirm ${armed}: tap again to send` : "Tap a command once to enlarge; tap again to execute."),
+      e("div", { className: "flex flex-wrap gap-1" },
+        ["Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Control", "Alt", "Control+c", "Control+v", "Control+s"].map(key =>
+          e("button", { key, className: "key-btn " + (armed === key ? "scale-110 bg-indigo-600 border-indigo-300 z-10" : ""),
+            onClick: () => { if (armed === key) { setArmed(null); send({ type: "key", key }); } else setArmed(key); } }, key))
+      ),
+      e("div", { className: "flex gap-1 items-center" },
+        e("input", { value: variableName, onChange: evt => setVariableName(evt.target.value), placeholder: "Variable name for focused input", className: "flex-1 min-w-0 bg-slate-800 p-1 rounded text-xs" }),
+        [false, true].map(existing => e("button", { key: String(existing), className: "key-btn " + (armed === (existing ? "update" : "new") ? "scale-110 bg-indigo-600" : ""),
+          onClick: () => { const key = existing ? "update" : "new"; if (armed === key) { setArmed(null); send({ type: "save_variable", name: variableName, existing }); } else setArmed(key); } }, existing ? "Update variable" : "New variable"))
       ),
       e("div", { className: "flex gap-2" },
         e("input", {
@@ -265,7 +280,7 @@ function Recorder({ project }) {
         }),
         e("button", { className: "bg-indigo-600 px-4 rounded font-bold text-sm", onClick: () => { if (text) { send({ type: "text", text: text }); setText(""); } } }, "Type")
       ),
-      e("p", { className: "text-[9px] text-slate-500" }, "💡 Repeated steps auto-compress to 'follow last steps x times' ⚡")
+      e("p", { className: "text-[9px] text-slate-500" }, "💡 Each action is saved as an editable step in its original execution order.")
     )
   );
 
@@ -275,7 +290,7 @@ function Recorder({ project }) {
         e("h2", { className: "font-bold text-lg text-indigo-300" }, "Record in remote browser ⚡ FAST"),
         e("span", { className: "fast-badge" }, "OPTIMIZED")
       ),
-      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on server (free-tier optimized, low CPU). SAVE pushes immediately to GitHub main with description. Repeated steps auto-dedup."),
+      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on server (free-tier optimized, low CPU). SAVE pushes immediately to GitHub branch with description. Each step remains editable."),
       varsList.length > 0 && e("div", { className: "bg-slate-950 p-3 rounded-xl border border-slate-800" },
         e("div", { className: "text-xs font-bold text-indigo-300 mb-2" }, `📦 ${varsList.length} Variables available for reuse:`),
         e("div", { className: "flex flex-wrap gap-1" },
@@ -359,7 +374,7 @@ function Runs({ runId, setRunId }) {
         e("span", { className: "font-bold text-indigo-300" }, `Queue: ${queueInfo.queued} queued, ${queueInfo.running} running ⚡`),
         e("span", { className: "fast-badge" }, "IMMEDIATE")
       ),
-      e("p", { className: "text-[10px] text-slate-500 mt-1" }, "Execution queue proceeds immediately and displays window")
+      e("p", { className: "text-[10px] text-slate-400 mt-1" }, `${queueInfo.passed} passed (${queueInfo.passed_pct}%) · ${queueInfo.failed} failed · ${queueInfo.pending} pending` )
     ),
     runId && e("div", { className: "bg-slate-900 border-2 border-indigo-500 rounded-3xl p-5 shadow-2xl" },
       e("div", { className: "flex justify-between font-bold text-xs" },
@@ -403,6 +418,9 @@ function Library({ project, onRun }) {
   const [error, setError] = useState("");
   const [running, setRunning] = useState("");
   const [loadTime, setLoadTime] = useState("");
+  const [editing, setEditing] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [draft, setDraft] = useState(null);
   useEffect(() => {
     if (!project) return;
     const start = Date.now();
@@ -416,6 +434,17 @@ function Library({ project, onRun }) {
     }).catch(err => setError(err.message));
   }, [project]);
   if (!project) return e("div", { className: "py-20 text-center text-slate-500" }, "SELECT PROJECT FIRST");
+  const openEditor = async (id) => {
+    try { setDetail(await API.get("/api/recordings/" + id)); setEditing(id); setDraft(null); setError(""); }
+    catch (err) { setError(err.message); }
+  };
+  const saveStep = async (step, changes) => {
+    try {
+      const result = await API.patch(`/api/recordings/${editing}/steps/${step.id}`, changes);
+      await openEditor(editing);
+      if (!result.published) setError("Step saved locally; GitHub sync retry pending.");
+    } catch (err) { setError(err.message); }
+  };
   const run = async (recording) => {
     setRunning(recording.id); setError("");
     try {
@@ -428,22 +457,40 @@ function Library({ project, onRun }) {
   };
   return e("div", { className: "space-y-4" },
     e("div", { className: "flex justify-between items-center" },
-      e("p", { className: "text-xs text-slate-500" }, "Recordings loaded super fast from GitHub main branch"),
+      e("p", { className: "text-xs text-slate-500" }, "Recordings loaded super fast from GitHub branch branch"),
       loadTime && e("span", { className: "fast-badge" }, loadTime)
     ),
     error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),
-    recs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No recordings in repository yet. Open record tab and capture a session. Saves push to main immediately."),
+    recs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No recordings in repository yet. Open record tab and capture a session. Saves push to the active branch immediately."),
     recs.map(r => e("div", { key: r.id, className: "p-5 bg-slate-900 rounded-2xl border border-slate-800 flex justify-between shadow-xl gap-3" },
       e("div", { className: "min-w-0" },
-        e("div", { className: "font-bold text-indigo-300 flex items-center gap-2" }, r.name, e("span", { className: "text-[8px] bg-emerald-900 px-1 rounded" }, "MAIN")),
-        e("div", { className: "text-[10px] text-slate-500 font-mono truncate" }, (r.step_count || 0) + " steps · " + (r.start_url || "") + (r.step_count > 5 ? " · 🔁 deduped" : "")),
-        r.resources && r.resources.length > 0 && e("div", { className: "text-[9px] text-slate-600" }, r.resources.join(", "))
+        e("div", { className: "font-bold text-indigo-300 flex items-center gap-2" }, r.name, e("span", { className: "text-[8px] bg-emerald-900 px-1 rounded" }, "BRANCH")),
+        e("div", { className: "text-[10px] text-slate-500 font-mono truncate" }, (r.step_count || 0) + " steps · " + (r.start_url || "")),
+        r.resources && r.resources.length > 0 && e("div", { className: "text-[10px] flex flex-wrap gap-2 mt-2" },
+          r.resources.filter(name => !name.startsWith("step-")).map(name => e("a", { key: name, href: `/api/recordings/${r.id}/resources/${encodeURIComponent(name)}`, className: "text-indigo-300 underline" }, name)))
       ),
       e("div", { className: "flex gap-2 items-start" },
         e("a", { href: "/api/recordings/" + r.id + "/jenkins", className: "bg-slate-800 p-2 rounded text-[10px]" }, "J"),
+        e("button", { onClick: () => openEditor(r.id), className: "bg-slate-700 px-3 py-2 rounded-xl text-xs" }, "EDIT"),
         e("button", { onClick: () => run(r), disabled: running === r.id, className: "bg-emerald-600 px-6 py-2 rounded-xl font-bold text-xs disabled:opacity-60" }, running === r.id ? "…⚡" : "RUN ⚡")
       )
-    ))
+    )),
+    editing && detail && e("div", { className: "fixed inset-0 z-[110] overflow-y-auto bg-slate-950 p-4 space-y-3" },
+      e("div", { className: "flex justify-between" }, e("h2", {}, `Edit ${detail.name} · steps in execution order`),
+        e("button", { onClick: () => setEditing(null), className: "key-btn" }, "CLOSE")),
+      (detail.steps || []).slice().sort((a, b) => a.order - b.order).map(step => e("div", { key: step.id, className: "bg-slate-900 rounded-xl p-3 space-y-2" },
+        e("div", { className: "text-xs" }, `#${step.order} ${step.action} · ${step.label || ""}`),
+        step.screenshot && e("img", { src: `/api/recordings/${editing}/steps/${step.id}/screenshot`, alt: `Step ${step.order}`, className: "max-w-full max-h-48 rounded" }),
+        e("div", { className: "text-xs break-all" }, `Input: ${step.value || "—"} · Selector: ${JSON.stringify(step.selector || {})}`),
+        e("button", { className: "key-btn", onClick: () => setDraft({ id: step.id, action: step.action, label: step.label || "", value: step.value || "", selector: step.selector || {} }) }, "MODIFY"),
+        draft && draft.id === step.id && e("div", { className: "space-y-2" },
+          ["action", "label", "value"].map(field => e("label", { key: field, className: "block text-xs" }, field,
+            e("input", { className: "w-full bg-slate-800 p-2 rounded", value: draft[field], onChange: ev => setDraft({ ...draft, [field]: ev.target.value }) }))),
+          e("label", { className: "block text-xs" }, "Selector (JSON)", e("textarea", { className: "w-full bg-slate-800 p-2 rounded", value: typeof draft.selector === "string" ? draft.selector : JSON.stringify(draft.selector), onChange: ev => setDraft({ ...draft, selector: ev.target.value }) })),
+          e("button", { className: "bg-indigo-600 p-2 rounded", onClick: () => { try { saveStep({ ...step, id: step.id }, { ...draft, selector: typeof draft.selector === "string" ? JSON.parse(draft.selector) : draft.selector }); } catch (err) { setError(err.message); } } }, "SAVE STEP")
+        )
+      )), error && e("p", { role: "alert", className: "text-red-300" }, error)
+    )
   );
 }
 
@@ -500,7 +547,7 @@ function Projects({ setActiveProject, activeProject }) {
       setProjs(prev => [project, ...prev.filter(item => item.id !== project.id)]);
       setName("");
       setBaseUrl("");
-      setNotice(project.published ? `Project “${project.name}” saved to GitHub main ⚡.` : `Project “${project.name}” saved to library. Pushing to main...`);
+      setNotice(project.published ? `Project “${project.name}” saved to GitHub branch ⚡.` : `Project “${project.name}” saved to library. Pushing to the active branch...`);
       // Reload vars
       setTimeout(load, 500);
     } catch (err) {
@@ -516,23 +563,23 @@ function Projects({ setActiveProject, activeProject }) {
         e('h2', { className: "font-bold text-lg text-indigo-300" }, "Create a test project ⚡"),
         loadTime && e('span', { className: "fast-badge" }, loadTime)
       ),
-      e('p', { className: "text-xs text-slate-500 mb-4" }, "Projects, recordings, variables stored in GitHub main branch. Loads super fast from catalog. Pushes immediately to main with description."),
+      e('p', { className: "text-xs text-slate-500 mb-4" }, "Projects, recordings, variables stored in GitHub branch branch. Loads super fast from catalog. Pushes immediately to the active branch with description."),
       e('label', { className: "block text-xs text-slate-400 mb-1", htmlFor: "project-name" }, "Project name"),
       e('input', { id: "project-name", required: true, maxLength: 200, value: name, onChange: evt => setName(evt.target.value), placeholder: "e.g. Customer Portal", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e('label', { className: "block text-xs text-slate-400 mt-3 mb-1", htmlFor: "project-url" }, "Application URL (optional)"),
       e('input', { id: "project-url", type: "url", maxLength: 500, value: baseUrl, onChange: evt => setBaseUrl(evt.target.value), placeholder: "https://example.com", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
-      e('button', { type: "submit", disabled: saving, className: "w-full bg-indigo-600 disabled:opacity-60 mt-4 py-3 rounded-xl font-bold shadow-xl" }, saving ? "CREATING & PUSHING TO MAIN…⚡" : "CREATE PROJECT → MAIN ⚡"),
+      e('button', { type: "submit", disabled: saving, className: "w-full bg-indigo-600 disabled:opacity-60 mt-4 py-3 rounded-xl font-bold shadow-xl" }, saving ? "CREATING & PUSHING…⚡" : "CREATE PROJECT"),
       error && e('p', { role: "alert", className: "mt-3 text-sm text-red-300" }, error),
       notice && e('p', { role: "status", className: "mt-3 text-sm text-emerald-300" }, notice)
     ),
-    loading && e('p', { className: "text-sm text-slate-400" }, "Loading projects super fast from GitHub main… ⚡"),
-    !loading && projs.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No projects in GitHub library yet. Create one above - pushes to main immediately."),
+    loading && e('p', { className: "text-sm text-slate-400" }, "Loading projects super fast from GitHub branch… ⚡"),
+    !loading && projs.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No projects in GitHub library yet. Create one above - pushes to the active branch immediately."),
     projs.map(p => e('div', { key: p.id, onClick: () => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); }, className: `p-5 bg-slate-900 rounded-3xl border ${activeProject && activeProject.id===p.id ? 'border-indigo-500' : 'border-slate-800'} mb-3 shadow-md hover:border-indigo-500 transition-all cursor-pointer` },
       e('div', { className: "flex justify-between items-start" },
         e('div', { className: "font-bold text-sm" }, p.name),
-        e('span', { className: "fast-badge" }, "MAIN")
+        e('span', { className: "fast-badge" }, "BRANCH")
       ),
-      e('div', { className: "text-[10px] text-emerald-400 font-normal mt-1" }, "GitHub main · " + (p.repository_path || "library")),
+      e('div', { className: "text-[10px] text-emerald-400 font-normal mt-1" }, "GitHub branch · " + (p.repository_path || "library")),
       p.base_url && e('div', { className: "text-[10px] text-slate-500 font-normal mt-1" }, p.base_url),
       varsMap[p.id] && varsMap[p.id].length > 0 && e('div', { className: "mt-2" },
         e('div', { className: "text-[10px] text-indigo-300 font-bold" }, `🔤 ${varsMap[p.id].length} Variables (reusable as parameters):`),
@@ -563,21 +610,21 @@ function Variables({ project }) {
   if (!project) return e('div', {className:"py-20 text-center text-slate-500"}, "SELECT PROJECT FIRST");
   return e('div', { className: "space-y-4" },
     e('div', { className: "flex justify-between items-center" },
-      e('p', { className: "text-xs text-slate-500" }, `Variables loaded from GitHub main for ${project.name}. Reusable in projects & recordings.`),
+      e('p', { className: "text-xs text-slate-500" }, `Variables loaded from GitHub branch for ${project.name}. Reusable in projects & recordings.`),
       loadTime && e('span', { className: "fast-badge" }, loadTime)
     ),
     e('div', { className: "bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-lg" },
       e(AiInput, { value: name, onChange: e => setName(e.target.value), placeholder: "Key (e.g. user, password)" }), e('div', {className:"h-2"}),
       e(AiInput, { value: val, onChange: e => setVal(e.target.value), placeholder: "Value" }),
-      e('button', { onClick: async () => { await API.post("/api/variables", { project_id: project.id, name, value: val }); setName(""); setVal(""); load(); }, className: "w-full bg-indigo-600 mt-3 py-2 rounded-lg font-bold" }, "SAVE VARIABLE → MAIN ⚡")
+      e('button', { onClick: async () => { await API.post("/api/variables", { project_id: project.id, name, value: val }); setName(""); setVal(""); load(); }, className: "w-full bg-indigo-600 mt-3 py-2 rounded-lg font-bold" }, "SAVE VARIABLE")
     ),
     e('div', { className: "text-xs text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800" },
       e('p', { className: "font-bold text-indigo-300" }, "💡 How to reuse as parameters:"),
-      e('p', { className: "text-[11px] mt-1" }, "Use {{variableName}} in recording type steps. Variables show in Projects tab and Recording tab for quick insert. They push to main immediately.")
+      e('p', { className: "text-[11px] mt-1" }, "Use {{variableName}} in recording type steps. Variables show in Projects tab and Recording tab for quick insert. They push to the active branch immediately.")
     ),
     vars.map(v => e('div', { key: v.id, className: "p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-2 shadow-inner" },
       e('div', { className: "flex justify-between" }, e('code', {className:"text-indigo-400 font-bold"}, `{{${v.name}}}`), e('button', { onClick: async () => { await API.del(`/api/variables/${v.id}`); load(); }, className: "text-red-500" }, "✕")),
-      e('div', { className: "text-[10px] text-slate-500 font-bold" }, "ASSOCIATED RECORDINGS: " + (v.tags?.join(", ") || "None") + " · MAIN BRANCH"),
+      e('div', { className: "text-[10px] text-slate-500 font-bold" }, "ASSOCIATED RECORDINGS: " + (v.tags?.join(", ") || "None") + " · ACTIVE BRANCH"),
       e('input', { className: "w-full bg-slate-950 p-2 rounded text-xs text-slate-300 border border-slate-800", value: v.value, onChange: async (evt) => { await API.patch(`/api/variables/${v.id}`, {value: evt.target.value}); load(); } })
     ))
   );
@@ -586,13 +633,18 @@ function Variables({ project }) {
 function Comparison() {
   const [runs, setRuns] = useState([]);
   const [sel, setSel] = useState(null);
-  useEffect(() => { API.get("/api/runs").then(setRuns); }, []);
+  useEffect(() => { API.get("/api/runs").then(setRuns).catch(() => {}); }, []);
   return e('div', { className: "space-y-4" },
-    runs.map(r => e('div', { key: r.id, className: "bg-slate-900 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl" },
-      e('div', { className: "p-4 flex justify-between bg-slate-800/30", onClick: () => setSel(sel === r.id ? null : r.id) }, e('span', {className:"font-bold"}, `ERP Audit: ${r.id.slice(0,8)}`), e('span', {className:"text-indigo-400 font-bold text-xs"}, "SPLIT ➔")),
-      sel === r.id && e('div', { className: "grid grid-cols-2 gap-2 p-3 bg-black/40 border-t border-slate-800" },
-        e('div', { className: "space-y-1 pr-1 border-r border-slate-800" }, e('div', {className:"text-[9px] font-bold text-purple-400 uppercase text-center mb-1"}, "BASELINE"), (r.baseline || []).map((s, i) => e('div', {key:i, className:"text-[9px] bg-slate-900 p-2 rounded border border-purple-900/10"}, `${s.action}`))),
-        e('div', { className: "space-y-1 pl-1" }, e('div', {className:"text-[9px] font-bold text-emerald-400 uppercase text-center mb-1"}, "ACTUAL"), (r.log || []).map((s, i) => e('div', {key:i, className:"text-[9px] bg-slate-900 p-2 rounded border border-emerald-900/10"}, e('div',{},s.action), s.screenshot && e('img', {src:s.screenshot, className:"mt-1 rounded"}))))
+    runs.map(r => e('div', { key: r.id, className: "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden" },
+      e('button', { className: "p-4 w-full text-left flex justify-between", onClick: () => setSel(sel === r.id ? null : r.id) },
+        e('span', { className: "font-bold" }, `Audit: ${r.id.slice(0,8)} · ${r.status}`), e('span', {}, sel === r.id ? "Hide" : "Show steps")),
+      sel === r.id && e('div', { className: "space-y-2 p-3" },
+        (r.log || []).map((step, i) => e('div', { key: i, className: "bg-slate-950 p-3 rounded border border-slate-800" },
+          e('div', { className: "text-xs font-bold" }, `#${step.order} ${step.label || step.action} · ${step.status}`),
+          e('div', { className: "text-xs break-all" }, `Input: ${step.value || "—"} · Selector: ${JSON.stringify(step.selector || {})}`),
+          step.error && e('div', { className: "text-xs text-red-300" }, step.error),
+          step.screenshot && e('img', { src: step.screenshot, alt: `Screenshot for step ${step.order}`, className: "mt-2 max-w-full rounded" })
+        ))
       )
     ))
   );
@@ -633,8 +685,6 @@ function Github() {
       const result = await API.post("/api/library/publish", {});
       setInfo(result);
       setError("");
-      // Also force sync
-      await API.post("/api/sync/github", {});
     } catch (err) {
       setError(err.message);
     } finally {
@@ -646,7 +696,7 @@ function Github() {
     try {
       const result = await API.post("/api/sync/github", {});
       setError("");
-      alert(result.message || "Pushed to main immediately ⚡");
+      alert(result.message || "Pushed to the active branch immediately ⚡");
       load();
     } catch (err) {
       setError(err.message);
@@ -655,57 +705,45 @@ function Github() {
     }
   };
   const repositoryUrl = (info && info.repository_url) || "https://github.com/Raheelatta1984/testforge";
-  const tree = repositoryUrl + "/tree/main/library";
+  const tree = repositoryUrl + "/tree/" + encodeURIComponent((info && info.branch) || "HEAD") + "/library";
   const projects = (info && info.projects) || [];
   return e('div', { className: "py-8 px-5 bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl space-y-4" },
     e('div', {className:"text-5xl text-center"}, "🐙"),
     e('div', { className: "flex justify-center gap-2" },
       e('h2', {className:"font-bold text-xl text-indigo-300 text-center"}, "GITHUB LIBRARY"),
-      e('span', { className: "fast-badge" }, "MAIN ONLY ⚡")
+      e('span', { className: "fast-badge" }, "CURRENT BRANCH ⚡")
     ),
-    e('p', {className:"text-sm text-slate-400"}, "Projects, variables, recordings stored in library/ folder of main branch only. Dashboard loads super fast from catalog. Creating project or saving recording commits and pushes to main immediately with description. Repeated steps auto-compress."),
+    e('p', {className:"text-sm text-slate-400"}, "Projects, variables, recordings stored in library/ folder of current branch only. Dashboard loads super fast from catalog. Creating project or saving recording commits and pushes to the active branch immediately with description. Each step remains editable."),
     info && e('div', { className: "text-xs text-slate-400 font-mono space-y-1" },
-      e('div', {}, "Branch main (forced) ⚡"),
+      e('div', {}, "Branch " + (info.branch || "—")),
+      e('div', { className: info.remote_verification?.synced ? "text-emerald-400" : "text-amber-300" }, info.remote_verification?.synced ? "Remote verified: fully synced" : "Remote not verified / sync pending"),
       e('div', {}, "Revision " + (info.revision || "—")),
-      e('div', {}, info.publish_enabled ? "Push to main enabled ⚡" : "Push disabled"),
-      info.dirty && e('div', { className: "text-amber-300" }, "Unpublished changes - will push to main immediately"),
+      e('div', {}, info.publish_enabled ? "Push to the active branch enabled ⚡" : "Push disabled"),
+      info.dirty && e('div', { className: "text-amber-300" }, "Unpublished changes - will push to the active branch immediately"),
       fastInfo && e('div', { className: "text-emerald-400" }, `Fast load: ${fastInfo.load_time || "cached"} from catalog ⚡`)
     ),
     e('div', { className: "space-y-2" },
-      projects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center" }, "No projects in main yet."),
+      projects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center" }, "No projects in the branch yet."),
       projects.map(project => e('div', { key: project.id, className: "p-3 bg-slate-950 rounded-xl border border-slate-800" },
         e('div', { className: "flex justify-between" },
           e('div', { className: "font-bold text-sm" }, project.name),
-          e('span', { className: "text-[8px] bg-emerald-900 px-1 rounded" }, "MAIN")
+          e('span', { className: "text-[8px] bg-emerald-900 px-1 rounded" }, "BRANCH")
         ),
         e('div', { className: "text-[10px] text-slate-500 font-mono" }, project.repository_path),
         (project.variables || []).length > 0 && e('div', { className: "text-[10px] text-indigo-300 mt-1" }, "Variables: " + project.variables.join(", ") + " (reusable)"),
         (project.recordings || []).map(rec => e('div', { key: rec.id, className: "text-[10px] text-slate-400 mt-1 flex justify-between" },
-          e('span', {}, rec.name + " · " + rec.step_count + " steps" + (rec.step_count > 5 ? " · 🔁 deduped" : "")),
-          e('span', { className: "text-emerald-400" }, "main")
+          e('span', {}, rec.name + " · " + rec.step_count + " steps"),
+          e('span', { className: "text-emerald-400" }, "branch")
         ))
       ))
     ),
     error && e('p', { role: "alert", className: "text-sm text-red-300" }, error),
     e('div', { className: "flex flex-col gap-2" },
-      e('a', { href: tree, target: "_blank", rel: "noopener noreferrer", className: "text-center bg-slate-700 px-8 py-3 rounded-2xl font-bold" }, "OPEN LIBRARY ON GITHUB MAIN"),
-      e('button', { type: "button", onClick: publish, disabled: publishing, className: "bg-indigo-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "PUSHING TO MAIN…⚡" : "PUSH LIBRARY TO GITHUB MAIN ⚡"),
-      e('button', { type: "button", onClick: sync, disabled: publishing, className: "bg-emerald-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "SYNCING…⚡" : "FORCE SYNC TO MAIN NOW ⚡")
+      e('a', { href: tree, target: "_blank", rel: "noopener noreferrer", className: "text-center bg-slate-700 px-8 py-3 rounded-2xl font-bold" }, "OPEN LIBRARY ON GITHUB BRANCH"),
+      e('button', { type: "button", onClick: publish, disabled: publishing, className: "bg-indigo-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "PUSHING…⚡" : "PUSH LIBRARY TO GITHUB ⚡"),
+      e('button', { type: "button", onClick: sync, disabled: publishing, className: "bg-emerald-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "SYNCING…⚡" : "VERIFY / SYNC NOW ⚡")
     ),
-    e('div', { className: "bg-slate-950 p-3 rounded-xl border border-slate-800 text-[10px] text-slate-500" },
-      e('p', { className: "font-bold text-slate-400" }, "✅ Fixes applied:"),
-      e('ul', { className: "list-disc ml-4 mt-1 space-y-1" },
-        e('li', {}, "Projects load super fast via catalog cache ⚡"),
-        e('li', {}, "Variables visible in Projects & Recording tabs for reuse"),
-        e('li', {}, "Recording FAST mode: low CPU, 150ms polling, adaptive preview"),
-        e('li', {}, "Repeated steps auto-compress: 'follow last steps x times' 🔁"),
-        e('li', {}, "Smooth save: debounced export, retry logs, local fallback"),
-        e('li', {}, "Immediate push to main with description, only main branch"),
-        e('li', {}, "Library recordings load super fast from catalog"),
-        e('li', {}, "Execution queue proceeds immediately, window displays"),
-        e('li', {}, "Force push to main if difference, merge if required")
-      )
-    )
+    e('p', { className: "text-xs text-slate-500" }, "Pushes are verified against the remote branch. Unavailable GitHub or a rejected push remains pending and is retried after one minute.")
   );
 }
 

@@ -12,6 +12,7 @@ import base64
 import datetime
 import os
 import time
+from pathlib import Path
 
 from playwright.async_api import async_playwright
 
@@ -116,6 +117,12 @@ async def replay_step(page, step, variables):
         return
     if action in ("press", "key", "key_press"):
         await page.keyboard.press(value or selector.get("key") or "Enter")
+        return
+    if action == "save_variable":
+        name = raw
+        if not name or not selector.get("primary"):
+            raise RuntimeError("Save variable needs a name and input selector")
+        variables[name] = await page.locator(selector["primary"]).first.input_value(timeout=3000)
         return
     raise RuntimeError(f"Unsupported action: {action}")
 
@@ -260,6 +267,7 @@ async def execute_run(run_id, on_event, on_frame=None):
                 # Video disabled for speed unless explicitly enabled (saves CPU)
                 if video_ok() and os.environ.get("TF_ENABLE_VIDEO", "0") == "1":
                     context_kwargs["record_video_dir"] = run_dir
+                    context_kwargs["record_video_size"] = {"width": min(vw, 640), "height": min(vh, 400)}
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
                 preview = Preview(page, on_jpeg=publish).start()
@@ -267,11 +275,13 @@ async def execute_run(run_id, on_event, on_frame=None):
                 try:
                     total = len(steps)
                     for index, step in enumerate(steps, 1):
-                        percent = int(index / total * 100)
+                        percent = int((index - 1) / total * 100)
                         entry = {
                             "order": step.get("order") or index,
                             "action": step.get("action"),
                             "label": step.get("label") or step.get("action"),
+                            "value": step.get("value"),
+                            "selector": step.get("selector"),
                             "status": "running",
                             "percent": percent,
                         }
@@ -282,13 +292,16 @@ async def execute_run(run_id, on_event, on_frame=None):
                                 # Skip log actions
                                 if (step.get("action") or "").lower() == "log":
                                     entry["status"] = "passed"
-                                    entry["percent"] = percent
+                                    entry["percent"] = int(index / total * 100)
                                 else:
                                     await replay_step(page, step, variables)
-                                    shot_name = f"step-{index}.jpg"
+                                    shot_name = f"step-{index}.png"
                                     shot_path = os.path.join(run_dir, shot_name)
                                     try:
-                                        await page.screenshot(path=shot_path, type="jpeg", quality=35)
+                                        from app.images import compact_png
+                                        png = await page.screenshot(type="png", animations="disabled")
+                                        optimized = await asyncio.to_thread(compact_png, png)
+                                        await asyncio.to_thread(Path(shot_path).write_bytes, optimized)
                                         entry["screenshot"] = f"/api/runs/screenshot/{run_id}/{shot_name}"
                                     except Exception:
                                         pass
@@ -297,7 +310,7 @@ async def execute_run(run_id, on_event, on_frame=None):
                                     except Exception:
                                         pass
                                     entry["status"] = "passed"
-                                    entry["percent"] = percent
+                                    entry["percent"] = int(index / total * 100)
                         except Exception as exc:
                             entry["status"] = "failed"
                             entry["error"] = str(exc).splitlines()[0][:500]
@@ -310,7 +323,7 @@ async def execute_run(run_id, on_event, on_frame=None):
                             break
                         log_entries.append(entry)
                         await on_event(entry)
-                        _save(run_id, progress_pct=percent, execution_log=list(log_entries))
+                        _save(run_id, progress_pct=entry["percent"], execution_log=list(log_entries))
                 finally:
                     await preview.stop()
                     video_path = None

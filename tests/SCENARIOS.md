@@ -28,8 +28,17 @@ Add a check by editing `tests/test_unit.py` (ID in the method name, `test_UT_ARE
 
 ## Unit scenarios
 
+Workflow regressions: `UT-FLOW-01` asserts duplicate actions retain individual order and PNGs; `UT-FLOW-02` checks idempotent save, editing and screenshot access; `UT-FLOW-03` checks generated formats and spreadsheet injection protection; `UT-FLOW-04` checks placeholders are typed as resolved values but stored as placeholders; `UT-FLOW-05` checks new/existing variable capture preserves prior steps; `UT-FLOW-06` checks compact PNG output.
+
+
 | ID | Scenario | Expected result |
 | --- | --- | --- |
+| UT-FLOW-01 | Individual recording steps | Every action is saved in order, with a PNG screenshot reference. |
+| UT-FLOW-02 | Save and edit | Stop without a live session succeeds; edited input persists and screenshot access is scoped. |
+| UT-FLOW-03 | Export formats | CSV/XLSX, Jenkins, BDD and Playwright templates are created; formula-like inputs are escaped. |
+| UT-FLOW-04 | Runtime variables | Recorder types resolved values and preserves the placeholder for replay. |
+| UT-FLOW-05 | Capture variable | New and existing variables take the focused input value without losing recording steps. |
+| UT-FLOW-06 | Compact PNG | Optimized screenshots remain valid PNG and never grow. |
 | UT-BOOT-01 | Import the recorder and the executor | Both modules load. This is the regression where `IS_TERMUX`, `interpolate`, and `CICD_INTERVAL` were missing and both features were offline. |
 | UT-BOOT-02 | Config contract | `IS_TERMUX` is a bool, `CICD_INTERVAL` is a positive int, and `interpolate` is `apply_variables`. |
 | UT-BOOT-03 | Run model columns | `recording_id`, `execution_log`, `progress_pct`, and `rog_monitor_log` exist. `target_id` and `rog_investigation` do not. |
