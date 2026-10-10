@@ -1,0 +1,398 @@
+{
+  "started": "2026-10-10T12:52:45+00:00",
+  "finished": "2026-10-10T12:52:54+00:00",
+  "revision": "41e5ee5",
+  "python": "3.11.2",
+  "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+  "passed": 48,
+  "failed": 0,
+  "skipped": 0,
+  "total": 48,
+  "ok": true,
+  "scenarios": [
+    {
+      "id": "UT-BOOT-01",
+      "title": "test_UT_BOOT_01_modules_import",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BOOT-02",
+      "title": "test_UT_BOOT_02_config_contract",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BOOT-03",
+      "title": "test_UT_BOOT_03_run_columns_match_the_model",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-01",
+      "title": "test_UT_BRW_01_libs_do_not_leak",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-02",
+      "title": "test_UT_BRW_02_missing_binary_raises",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-03",
+      "title": "test_UT_BRW_03_install_hint",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-04",
+      "title": "test_UT_BRW_04_video_disabled_for_override",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-DOC-01",
+      "title": "test_UT_DOC_01_catalog_ids_match",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-01",
+      "title": "test_UT_REP_01_navigate_interpolates",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-02",
+      "title": "test_UT_REP_02_click_selector",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-03",
+      "title": "test_UT_REP_03_click_coordinate_fallback",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-04",
+      "title": "test_UT_REP_04_click_without_target",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-05",
+      "title": "test_UT_REP_05_type_interpolates",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-06",
+      "title": "test_UT_REP_06_fill_replaces",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-07",
+      "title": "test_UT_REP_07_press_key",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-08",
+      "title": "test_UT_REP_08_unsupported_action",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-09",
+      "title": "test_UT_REP_09_navigate_without_url",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-01",
+      "title": "test_UT_RUN_01_no_steps_fails_closed",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-02",
+      "title": "test_UT_RUN_02_missing_recording",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-SEC-01",
+      "title": "test_UT_SEC_01_redact_password",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-01",
+      "title": "test_UT_URL_01_blank_sample_app",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-02",
+      "title": "test_UT_URL_02_relative_loopback",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-03",
+      "title": "test_UT_URL_03_scheme_less_https",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-04",
+      "title": "test_UT_URL_04_external_unchanged",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-05",
+      "title": "test_UT_URL_05_file_scheme_rejected",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-06",
+      "title": "test_UT_URL_06_preview_host_rewritten",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-07",
+      "title": "test_UT_URL_07_other_local_port_preserved",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-08",
+      "title": "test_UT_URL_08_query_preserved",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-01",
+      "title": "test_UT_VAR_01_known_keys",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-02",
+      "title": "test_UT_VAR_02_unknown_key_kept",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-03",
+      "title": "test_UT_VAR_03_empty_text",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-04",
+      "title": "test_UT_VAR_04_inner_whitespace",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "LB-API-01",
+      "title": "Health reports the recorder and the executor",
+      "status": "passed",
+      "seconds": 0.006,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-02",
+      "title": "Creating a project without a name is rejected",
+      "status": "passed",
+      "seconds": 0.004,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-03",
+      "title": "A project can be created and listed",
+      "status": "passed",
+      "seconds": 0.042,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-04",
+      "title": "Variables can be created, updated, and deleted",
+      "status": "passed",
+      "seconds": 0.035,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-05",
+      "title": "AI rephrase trims and punctuates text without an API key",
+      "status": "passed",
+      "seconds": 0.002,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-06",
+      "title": "Screenshot paths cannot escape the artifacts directory",
+      "status": "passed",
+      "seconds": 0.005,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-07",
+      "title": "A run cannot be queued for an unknown recording",
+      "status": "passed",
+      "seconds": 0.004,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-08",
+      "title": "Running a recording with no steps fails before a browser opens",
+      "status": "passed",
+      "seconds": 0.04,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-09",
+      "title": "A recording aimed at another local port is stored unchanged",
+      "status": "passed",
+      "seconds": 0.014,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-10",
+      "title": "Diagnostics stays readable and the write probe succeeds",
+      "status": "passed",
+      "seconds": 0.007,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-REC-04",
+      "title": "Stopping a session that is not running is idempotent",
+      "status": "passed",
+      "seconds": 0.018,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-REC-01",
+      "title": "Starting a recording shows a live browser frame",
+      "status": "passed",
+      "seconds": 1.384,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-REC-02",
+      "title": "Clicks, typing, and a key press are saved with selectors",
+      "status": "passed",
+      "seconds": 1.09,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-REC-03",
+      "title": "Clicks, typing, and a key press are saved with selectors (covered)",
+      "layer": "library",
+      "status": "passed",
+      "seconds": 1.09,
+      "error": null
+    },
+    {
+      "id": "LB-RUN-01",
+      "title": "Replay of a literal recording passes and the page shows the typed name",
+      "status": "passed",
+      "seconds": 2.206,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-RUN-02",
+      "title": "Replay interpolates {{user}} at execution time, not record time",
+      "status": "passed",
+      "seconds": 2.259,
+      "error": null,
+      "layer": "library"
+    }
+  ]
+}

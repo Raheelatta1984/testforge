@@ -6,6 +6,15 @@
 - **Execution:** Live CDP screencast window in 'Runs' tab with completion % and visual diff potential.
 - **Maintenance:** Reset branch with `git fetch origin && git reset --hard origin/main` to fix sync issues.
 
+## Testing
+The harness runs the unit suite and the library scenarios (the same recorder and runner the dashboard uses). From the repository root:
+
+```bash
+python -m tests.harness
+```
+
+Scenarios are documented in `tests/SCENARIOS.md`. Each run writes a timestamped report under `logs/`, and `logs/index.md` lists them. Chromium is required for the browser scenarios; unit tests run without it.
+
 ## Record and run
 Open a project, then the record tab. Leave the page blank to open the built-in sample app, or enter the application URL. The remote Chromium picture is polled over HTTP (so it still works when a proxy drops websockets). Click the picture to click in the browser, type with the text box, then SAVE. In the library, RUN replays those steps and the Runs tab shows the live browser plus each step.
 

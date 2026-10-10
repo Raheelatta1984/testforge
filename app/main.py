@@ -71,8 +71,9 @@ def browser_url(url: str, request: Request | None = None) -> str:
     """Turn a dashboard URL into one the server-side browser can open.
 
     The preview host (https://…e2b.app) is not reachable from the browser we
-    launch. Same-app links are rewritten to loopback. Relative paths, including
-    the sample app, always stay on this process.
+    launch, so links to this same app are rewritten to loopback. A different
+    local port is a different application and must be left alone — rewriting
+    every localhost URL onto PORT broke recordings of apps on :3000.
     """
     raw = (url or "").strip()
     if not raw:
@@ -84,17 +85,28 @@ def browser_url(url: str, request: Request | None = None) -> str:
     parsed = urlparse(raw)
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=422, detail="Start URL must be http or https")
+
     host = (parsed.hostname or "").lower()
     request_host = ""
     if request is not None:
         request_host = request.headers.get("host", "").split(":")[0].lower()
-    own_hosts = {"localhost", "127.0.0.1", "0.0.0.0"}
-    if request_host:
-        own_hosts.add(request_host)
-    if host in own_hosts:
+    app_port = int(_server_port(request))
+    same_app = False
+    if request_host and host == request_host and host not in {"localhost", "127.0.0.1", "0.0.0.0"}:
+        # Public preview host. Its external port (usually 443) is not the
+        # port this process is bound to.
+        same_app = True
+    elif host in {"localhost", "127.0.0.1", "0.0.0.0"}:
+        if parsed.port is None:
+            same_app = (parsed.scheme == "http" and app_port == 80) or (
+                parsed.scheme == "https" and app_port == 443
+            )
+        else:
+            same_app = parsed.port == app_port
+    if same_app:
         path = parsed.path or "/"
         query = f"?{parsed.query}" if parsed.query else ""
-        return f"http://127.0.0.1:{_server_port(request)}{path}{query}"
+        return f"http://127.0.0.1:{app_port}{path}{query}"
     return raw
 
 
