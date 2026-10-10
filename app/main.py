@@ -1,20 +1,29 @@
-import asyncio, os, traceback, io, zipfile, datetime
+import asyncio, os, io, zipfile, datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
-# CRITICAL BOOT ORDER
-app = FastAPI(title="TestForge Titan ERP")
+from app.config import ARTIFACTS, DEMO_MODE
+from app.db import (
+    SessionLocal, engine, init_db, Project, Recording, RecordingStep, Variable, Run,
+)
+
+# Browser-dependent features are optional at boot so the dashboard and its API
+# remain usable if the browser runtime is unavailable.
+try:
+    from app.recorder import RecorderSession
+except Exception as exc:
+    RecorderSession = None
+    print(f"RECORDER UNAVAILABLE: {exc}")
 
 try:
-    from app.config import ARTIFACTS, DEMO_MODE
-    from app.db import (SessionLocal, init_db, Project, Recording, RecordingStep, Variable, Run)
-    from app.recorder import RecorderSession
-    from app.executor import execute_run_task
-except Exception as e:
-    print(f"BOOTSTRAP FAILURE: {e}")
-    traceback.print_exc()
+    from app.executor import execute_run as execute_run_task
+except Exception as exc:
+    execute_run_task = None
+    print(f"RUN EXECUTOR UNAVAILABLE: {exc}")
 
+app = FastAPI(title="TestForge Titan ERP")
 init_db()
 RUN_STREAMS = {}
 
@@ -24,17 +33,45 @@ async def broadcast_run(run_id, payload):
             try: q.put_nowait(payload)
             except: pass
 
+@app.get("/api/health")
+def health():
+    """Readiness check used to verify a deployment and its database connection."""
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database is unavailable") from exc
+    return {
+        "status": "ok",
+        "database": "ok",
+        "revision": os.environ.get("RENDER_GIT_COMMIT", "local"),
+    }
+
 @app.get("/api/projects")
 def get_projects():
-    db = SessionLocal()
-    return db.query(Project).all()
+    with SessionLocal() as db:
+        return db.query(Project).order_by(Project.created_at.desc()).all()
 
-@app.post("/api/projects")
+@app.post("/api/projects", status_code=201)
 def create_project(body: dict):
-    db = SessionLocal()
-    p = Project(name=body['name'], base_url=body.get('base_url', ''))
-    db.add(p); db.commit(); db.refresh(p)
-    return p
+    name = body.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise HTTPException(status_code=422, detail="Project name is required")
+    name = name.strip()
+
+    base_url = body.get("base_url", "")
+    if not isinstance(base_url, str):
+        raise HTTPException(status_code=422, detail="Application URL must be text")
+    base_url = base_url.strip()
+    if len(name) > 200 or len(base_url) > 500:
+        raise HTTPException(status_code=422, detail="Project name or application URL is too long")
+
+    with SessionLocal() as db:
+        project = Project(name=name, base_url=base_url)
+        db.add(project)
+        db.commit()
+        db.refresh(project)
+        return project
 
 @app.get("/api/variables")
 def get_vars(project_id: str):
@@ -67,18 +104,29 @@ def get_jenkins(rid: str):
     return PlainTextResponse(script)
 
 @app.post("/api/runs")
-def queue_run(body: dict):
-    db = SessionLocal()
-    run = Run(recording_id=body['target_id'], status="queued")
-    db.add(run); db.commit(); db.refresh(run)
-    rid = run.id
-    db.close()
-    
+async def queue_run(body: dict):
+    if execute_run_task is None:
+        raise HTTPException(status_code=503, detail="Run executor is unavailable")
+    target_id = body.get("target_id")
+    with SessionLocal() as db:
+        recording = db.get(Recording, target_id)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        run = Run(recording_id=recording.id, status="queued")
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        rid = run.id
+
     async def task_wrapper():
-        async def on_frame(d): await broadcast_run(rid, {"type":"frame", "data":d})
-        async def on_evt(e): await broadcast_run(rid, e)
-        await execute_run_task(rid, on_evt, on_frame=on_frame)
-        
+        async def on_frame(data):
+            await broadcast_run(rid, {"type": "frame", "data": data})
+
+        async def on_event(event):
+            await broadcast_run(rid, event)
+
+        await execute_run_task(rid, on_event, on_frame=on_frame)
+
     asyncio.create_task(task_wrapper())
     return {"run_id": rid}
 

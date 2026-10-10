@@ -21,11 +21,21 @@
 <script>
 const { useState, useEffect, useRef } = React;
 const e = React.createElement;
+async function apiRequest(url, options = {}) {
+  const response = await fetch(url, options);
+  let payload = null;
+  try { payload = await response.json(); } catch (_) {}
+  if (!response.ok) {
+    const detail = payload && (payload.detail || payload.message);
+    throw new Error(detail || `Request failed (${response.status})`);
+  }
+  return payload;
+}
 const API = {
-  get: u => fetch(u).then(r => r.json()),
-  post: (u, b) => fetch(u, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}).then(r => r.json()),
-  patch: (u, b) => fetch(u, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}).then(r => r.json()),
-  del: u => fetch(u, {method:'DELETE'}).then(r => r.json())
+  get: u => apiRequest(u),
+  post: (u, b) => apiRequest(u, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
+  patch: (u, b) => apiRequest(u, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
+  del: u => apiRequest(u, {method:'DELETE'})
 };
 
 function AiInput({ value, onChange, placeholder, isArea }) {
@@ -151,13 +161,68 @@ function Library({ project, onRun }) {
 function Projects({ setActiveProject }) {
   const [projs, setProjs] = useState([]);
   const [name, setName] = useState("");
-  useEffect(() => { API.get("/api/projects").then(setProjs); }, []);
+  const [baseUrl, setBaseUrl] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    try {
+      const result = await API.get("/api/projects");
+      setProjs(Array.isArray(result) ? result : []);
+      setError("");
+    } catch (err) {
+      setError(`Unable to load projects: ${err.message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, []);
+
+  const create = async (event) => {
+    event.preventDefault();
+    if (!name.trim()) {
+      setError("Enter a project name before creating it.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setNotice("");
+    try {
+      const project = await API.post("/api/projects", {
+        name: name.trim(),
+        base_url: baseUrl.trim()
+      });
+      setProjs(prev => [project, ...prev.filter(item => item.id !== project.id)]);
+      setName("");
+      setBaseUrl("");
+      setNotice(`Project “${project.name}” created.`);
+    } catch (err) {
+      setError(`Could not create project: ${err.message}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return e('div', { className: "space-y-4" },
-    e('div', { className: "bg-slate-900 p-6 rounded-3xl border border-slate-800" },
-      e(AiInput, { value: name, onChange: e => setName(e.target.value), placeholder: "Project Name" }),
-      e('button', { onClick: async () => { await API.post("/api/projects", { name }); setName(""); API.get("/api/projects").then(setProjs); }, className: "w-full bg-indigo-600 mt-4 py-3 rounded-xl font-bold shadow-xl" }, "CREATE ERP PROJECT")
+    e('form', { onSubmit: create, className: "bg-slate-900 p-6 rounded-3xl border border-slate-800" },
+      e('h2', { className: "font-bold text-lg text-indigo-300 mb-4" }, "Create a test project"),
+      e('label', { className: "block text-xs text-slate-400 mb-1", htmlFor: "project-name" }, "Project name"),
+      e('input', { id: "project-name", required: true, maxLength: 200, value: name, onChange: evt => setName(evt.target.value), placeholder: "e.g. Customer Portal", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e('label', { className: "block text-xs text-slate-400 mt-3 mb-1", htmlFor: "project-url" }, "Application URL (optional)"),
+      e('input', { id: "project-url", type: "url", maxLength: 500, value: baseUrl, onChange: evt => setBaseUrl(evt.target.value), placeholder: "https://example.com", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e('button', { type: "submit", disabled: saving, className: "w-full bg-indigo-600 disabled:opacity-60 mt-4 py-3 rounded-xl font-bold shadow-xl" }, saving ? "CREATING…" : "CREATE PROJECT"),
+      error && e('p', { role: "alert", className: "mt-3 text-sm text-red-300" }, error),
+      notice && e('p', { role: "status", className: "mt-3 text-sm text-emerald-300" }, notice)
     ),
-    projs.map(p => e('div', { key: p.id, onClick: () => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); }, className: "p-5 bg-slate-900 rounded-3xl border border-slate-800 mb-3 shadow-md hover:border-indigo-500 transition-all cursor-pointer font-bold text-sm" }, p.name))
+    loading && e('p', { className: "text-sm text-slate-400" }, "Loading projects…"),
+    !loading && projs.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No projects yet. Create one above to get started."),
+    projs.map(p => e('div', { key: p.id, onClick: () => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); }, className: "p-5 bg-slate-900 rounded-3xl border border-slate-800 mb-3 shadow-md hover:border-indigo-500 transition-all cursor-pointer font-bold text-sm" },
+      e('div', {}, p.name),
+      p.base_url && e('div', { className: "text-[10px] text-slate-500 font-normal mt-1" }, p.base_url)
+    ))
   );
 }
 
@@ -204,10 +269,13 @@ function Artifacts() {
 }
 
 function Github() {
-  return e('div', { className: "text-center py-20 bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl" },
-    e('div', {className:"text-6xl mb-4"}, "🐙"),
-    e('h2', {className:"font-bold text-xl mb-4 text-indigo-300"}, "AI ROG SYNC SYSTEM"),
-    e('a', { href: "/api/sync/github", className: "bg-indigo-600 px-10 py-4 rounded-2xl font-bold shadow-xl shadow-indigo-900/30" }, "DOWNLOAD SYNC PACKAGE")
+  const repositoryUrl = "https://github.com/Raheelatta1984/testforge";
+  return e('div', { className: "text-center py-16 px-5 bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl space-y-5" },
+    e('div', {className:"text-6xl"}, "🐙"),
+    e('h2', {className:"font-bold text-xl text-indigo-300"}, "GITHUB & SYNC"),
+    e('p', {className:"text-sm text-slate-400"}, "Open the TestForge source repository on GitHub. TestForge projects are stored separately and are not imported from this code repository."),
+    e('a', { href: repositoryUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-block bg-slate-700 px-8 py-3 rounded-2xl font-bold" }, "OPEN SOURCE REPOSITORY"),
+    e('div', {}, e('a', { href: "/api/sync/github", className: "inline-block bg-indigo-600 px-8 py-3 rounded-2xl font-bold shadow-xl shadow-indigo-900/30" }, "DOWNLOAD SYNC PACKAGE"))
   );
 }
 
