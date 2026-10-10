@@ -12,7 +12,7 @@
 ## Run from OCI Cloud Shell
 
 ```bash
-git clone --depth 1 --branch arena/0fd55ef4-testforge \
+git clone --depth 1 --branch main \
   https://github.com/Raheelatta1984/testforge.git
 cd testforge
 bash deploy/oracle/provision.sh
