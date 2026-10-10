@@ -1,0 +1,201 @@
+{
+  "scenarios": [
+    {
+      "id": "LB-API-01",
+      "title": "Health reports the recorder and the executor",
+      "requires": "api",
+      "steps": [
+        {"action": "health"}
+      ]
+    },
+    {
+      "id": "LB-API-02",
+      "title": "Creating a project without a name is rejected",
+      "requires": "api",
+      "steps": [
+        {"action": "expect_http", "method": "POST", "path": "/api/projects", "body": {"name": "  "}, "status": 422, "detail_contains": "name"}
+      ]
+    },
+    {
+      "id": "LB-API-03",
+      "title": "A project can be created and listed",
+      "requires": "api",
+      "steps": [
+        {"action": "create_project", "name": "Library catalog", "base_url": "https://example.com", "save": "project"},
+        {"action": "list_projects", "contains_name": "Library catalog"}
+      ]
+    },
+    {
+      "id": "LB-API-04",
+      "title": "Variables can be created, updated, and deleted",
+      "requires": "api",
+      "steps": [
+        {"action": "create_project", "name": "Vars", "base_url": "", "save": "project"},
+        {"action": "create_variable", "project": "$project", "name": "user", "value": "Ada", "save": "var"},
+        {"action": "patch_variable", "variable": "$var", "value": "Grace"},
+        {"action": "delete_variable", "variable": "$var"}
+      ]
+    },
+    {
+      "id": "LB-API-05",
+      "title": "AI rephrase trims and punctuates text without an API key",
+      "requires": "api",
+      "steps": [
+        {"action": "expect_http", "method": "POST", "path": "/api/ai/rephrase", "body": {"text": "  click   continue  "}, "status": 200, "json_field": "rephrased", "json_equals": "Click continue."}
+      ]
+    },
+    {
+      "id": "LB-API-06",
+      "title": "Screenshot paths cannot escape the artifacts directory",
+      "requires": "api",
+      "steps": [
+        {"action": "expect_http", "method": "GET", "path": "/api/runs/screenshot/not-a-run/..%2F..%2Fetc%2Fpasswd", "status": 404},
+        {"action": "expect_http", "method": "GET", "path": "/api/runs/screenshot/missing-run/step-1.jpg", "status": 404}
+      ]
+    },
+    {
+      "id": "LB-API-07",
+      "title": "A run cannot be queued for an unknown recording",
+      "requires": "api",
+      "steps": [
+        {"action": "expect_http", "method": "POST", "path": "/api/runs", "body": {"target_id": "missing"}, "status": 404, "detail_contains": "Recording"}
+      ]
+    },
+    {
+      "id": "LB-API-08",
+      "title": "Running a recording with no steps fails before a browser opens",
+      "requires": "api",
+      "steps": [
+        {"action": "create_project", "name": "Empty run", "base_url": "/demo.html", "save": "project"},
+        {"action": "create_recording", "project": "$project", "name": "No steps", "start_url": "/demo.html", "save": "rec"},
+        {"action": "queue_run", "recording": "$rec", "save": "run"},
+        {"action": "wait_run", "run": "$run", "expect_status": "error", "error_contains": "no steps"}
+      ]
+    },
+    {
+      "id": "LB-API-09",
+      "title": "A recording aimed at another local port is stored unchanged",
+      "requires": "api",
+      "steps": [
+        {"action": "create_project", "name": "Other port", "base_url": "", "save": "project"},
+        {"action": "create_recording", "project": "$project", "name": "Local app", "start_url": "http://127.0.0.1:3000/app", "save": "rec", "expect_start_url": "http://127.0.0.1:3000/app"},
+        {"action": "assert_repository", "recording": "$rec"}
+      ]
+    },
+    {
+      "id": "LB-API-10",
+      "title": "Diagnostics stays readable and the write probe succeeds",
+      "requires": "api",
+      "steps": [
+        {"action": "diagnostics"}
+      ]
+    },
+    {
+      "id": "LB-REC-04",
+      "title": "Stopping a session that is not running is idempotent",
+      "requires": "api",
+      "steps": [
+        {"action": "create_project", "name": "Stop", "base_url": "", "save": "project"},
+        {"action": "create_recording", "project": "$project", "name": "Stop me", "start_url": "/demo.html", "save": "rec"},
+        {"action": "stop_session", "recording": "$rec"},
+        {"action": "stop_session", "recording": "$rec"},
+        {"action": "session_status", "recording": "$rec", "expect_status": "absent"}
+      ]
+    },
+    {
+      "id": "LB-REC-01",
+      "title": "Starting a recording shows a live browser frame",
+      "requires": "browser",
+      "steps": [
+        {"action": "create_project", "name": "See browser", "base_url": "/demo.html", "save": "project"},
+        {"action": "create_recording", "project": "$project", "name": "Visible", "start_url": "/demo.html", "save": "rec", "expect_start_url_contains": "127.0.0.1"},
+        {"action": "start_session", "recording": "$rec"},
+        {"action": "wait_frame", "recording": "$rec", "min_bytes": 4000, "min_width": 800, "min_height": 500},
+        {"action": "stop_session", "recording": "$rec"}
+      ]
+    },
+    {
+      "id": "LB-REC-02",
+      "title": "Clicks, typing, and a key press are saved with selectors",
+      "requires": "browser",
+      "also_covers": ["LB-REC-03"],
+      "steps": [
+        {"action": "create_project", "name": "Capture", "base_url": "/demo.html", "save": "project"},
+        {"action": "create_recording", "project": "$project", "name": "Capture flow", "start_url": "/demo.html", "save": "rec"},
+        {"action": "start_session", "recording": "$rec"},
+        {"action": "wait_frame", "recording": "$rec", "min_bytes": 4000, "min_width": 800, "min_height": 500},
+        {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 140}, "expect_action": "click", "expect_selector": "#name"},
+        {"action": "input", "recording": "$rec", "body": {"type": "text", "text": "Quinn"}, "expect_action": "type"},
+        {"action": "input", "recording": "$rec", "body": {"type": "key", "key": "Enter"}, "expect_action": "press"},
+        {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 200}, "expect_action": "click", "expect_selector": "#go"},
+        {"action": "assert_actions", "recording": "$rec", "actions": ["navigate", "click", "type", "press", "click"]},
+        {"action": "stop_session", "recording": "$rec"},
+        {"action": "assert_repository", "recording": "$rec"}
+      ]
+    },
+    {
+      "id": "LB-RUN-01",
+      "title": "Replay of a literal recording passes and the page shows the typed name",
+      "requires": "browser",
+      "steps": [
+        {"action": "create_project", "name": "Replay", "base_url": "/demo.html", "save": "project"},
+        {"action": "create_recording", "project": "$project", "name": "Literal", "start_url": "/demo.html", "save": "rec"},
+        {"action": "start_session", "recording": "$rec"},
+        {"action": "wait_frame", "recording": "$rec", "min_bytes": 4000},
+        {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 140}},
+        {"action": "input", "recording": "$rec", "body": {"type": "text", "text": "Quinn"}},
+        {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 200}},
+        {"action": "stop_session", "recording": "$rec"},
+        {"action": "queue_run", "recording": "$rec", "save": "run"},
+        {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Quinn"},
+        {"action": "assert_live_frame", "run": "$run", "min_bytes": 4000},
+        {"action": "jenkins_contains", "recording": "$rec", "text": "navigate"}
+      ]
+    },
+    {
+      "id": "LB-RUN-02",
+      "title": "Replay interpolates {{user}} at execution time, not record time",
+      "requires": "browser",
+      "steps": [
+        {"action": "create_project", "name": "Interp", "base_url": "/demo.html", "save": "project"},
+        {"action": "create_variable", "project": "$project", "name": "user", "value": "Ada"},
+        {"action": "create_recording", "project": "$project", "name": "Variable", "start_url": "/demo.html", "save": "rec"},
+        {"action": "start_session", "recording": "$rec"},
+        {"action": "wait_frame", "recording": "$rec", "min_bytes": 4000},
+        {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 140}},
+        {"action": "input", "recording": "$rec", "body": {"type": "text", "text": "{{user}}"}, "expect_value": "{{user}}"},
+        {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 200}},
+        {"action": "stop_session", "recording": "$rec"},
+        {"action": "queue_run", "recording": "$rec", "save": "run"},
+        {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Ada"}
+      ]
+    },
+    {
+      "id": "LB-LIB-01",
+      "title": "The dashboard library is the repository catalog",
+      "requires": "api",
+      "steps": [
+        {"action": "library_contains", "project_id": "qa-sample-app", "recording_id": "qa-hello-literal", "resources": ["Jenkinsfile"], "variable": "user"},
+        {"action": "library_contains", "project_id": "qa-sample-app", "recording_id": "qa-hello-variable", "resources": ["Jenkinsfile"]}
+      ]
+    },
+    {
+      "id": "LB-LIB-02",
+      "title": "Replay the repository recording qa-hello-literal",
+      "requires": "browser",
+      "steps": [
+        {"action": "queue_run", "recording": "qa-hello-literal", "save": "run"},
+        {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Quinn"}
+      ]
+    },
+    {
+      "id": "LB-LIB-03",
+      "title": "Replay the repository recording that interpolates {{user}}",
+      "requires": "browser",
+      "steps": [
+        {"action": "queue_run", "recording": "qa-hello-variable", "save": "run"},
+        {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Ada"}
+      ]
+    }
+  ]
+}

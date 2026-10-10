@@ -1,0 +1,27 @@
+{
+  "source": "repository",
+  "projects": [
+    {
+      "id": "qa-sample-app",
+      "name": "TestForge Sample App",
+      "path": "library/projects/qa-sample-app/project.json",
+      "variables": ["user"],
+      "recordings": [
+        {
+          "id": "qa-hello-literal",
+          "name": "Hello literal",
+          "step_count": 4,
+          "resources": ["Jenkinsfile"],
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json"
+        },
+        {
+          "id": "qa-hello-variable",
+          "name": "Hello variable",
+          "step_count": 4,
+          "resources": ["Jenkinsfile"],
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,114 @@
+INFO:     Started server process [3610]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:45129 (Press CTRL+C to quit)
+--- TITAN ERP SYSTEM BOOTED ---
+LOGS: /tmp/tf-library-s5uapgz6/artifacts/system_logs
+ROG DATABASE INITIALIZED
+INFO:     127.0.0.1:36868 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36870 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36872 - "POST /api/projects HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:36876 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:36878 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36892 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:36900 - "POST /api/variables HTTP/1.1" 201 Created
+INFO:     127.0.0.1:36916 - "PATCH /api/variables/ad9a6a33-bf6d-4c52-8229-4dce6768507b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36924 - "DELETE /api/variables/ad9a6a33-bf6d-4c52-8229-4dce6768507b HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36938 - "POST /api/ai/rephrase HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36954 - "GET /api/runs/screenshot/not-a-run/../../etc/passwd HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36970 - "GET /api/runs/screenshot/missing-run/step-1.jpg HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36972 - "POST /api/runs HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:36980 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:36990 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37002 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37004 - "GET /api/runs/8257b4b6-0435-427a-849c-cd676e821505 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37008 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37014 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37030 - "GET /api/diagnostics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37044 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37058 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37072 - "POST /api/recordings/37f92790-aaf0-4c47-8826-33e9bf5c569f/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37074 - "POST /api/recordings/37f92790-aaf0-4c47-8826-33e9bf5c569f/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37086 - "GET /api/recordings/37f92790-aaf0-4c47-8826-33e9bf5c569f/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37090 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37102 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:37112 - "POST /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37128 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37144 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/frame?t=1791636767.7724357 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:37154 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:37156 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/frame?t=1791636768.0780606 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48116 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48128 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/frame?t=1791636768.3825474 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48138 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48152 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48164 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/frame?t=1791636768.6870146 HTTP/1.1" 204 No Content
+INFO:ROG_TITAN:RECORDER LIVE 9b0118f6-3038-4096-9595-38a7e0e729cc http://127.0.0.1:45129/demo.html
+INFO:     127.0.0.1:48174 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48178 - "GET /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/frame?t=1791636768.992405 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48194 - "POST /api/recordings/9b0118f6-3038-4096-9595-38a7e0e729cc/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48210 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48218 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48226 - "POST /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48230 - "GET /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48238 - "GET /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/frame?t=1791636769.1238556 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48246 - "GET /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48250 - "GET /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/frame?t=1791636769.442864 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48252 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER LIVE b03da486-4726-400b-b35d-ebf21ac1ac34 http://127.0.0.1:45129/demo.html
+INFO:     127.0.0.1:48258 - "GET /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48266 - "GET /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/frame?t=1791636769.7478344 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48274 - "POST /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48280 - "POST /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48294 - "POST /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48304 - "POST /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48308 - "GET /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48310 - "POST /api/recordings/b03da486-4726-400b-b35d-ebf21ac1ac34/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48324 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48330 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48334 - "POST /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48346 - "GET /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48350 - "GET /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/frame?t=1791636770.2142327 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48358 - "GET /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48372 - "GET /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/frame?t=1791636770.5181785 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48382 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER LIVE 51841e38-46e3-4b03-979e-5072dc343abc http://127.0.0.1:45129/demo.html
+INFO:     127.0.0.1:48396 - "GET /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48408 - "GET /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/frame?t=1791636770.821736 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48422 - "POST /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48428 - "POST /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48432 - "POST /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48436 - "POST /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48440 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48454 - "GET /api/runs/33003e45-28a4-44e3-9141-8fb069ec382f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48460 - "GET /api/runs/33003e45-28a4-44e3-9141-8fb069ec382f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48468 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48478 - "GET /api/runs/33003e45-28a4-44e3-9141-8fb069ec382f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48490 - "GET /api/runs/33003e45-28a4-44e3-9141-8fb069ec382f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48498 - "GET /api/runs/33003e45-28a4-44e3-9141-8fb069ec382f/live.jpg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48508 - "GET /api/recordings/51841e38-46e3-4b03-979e-5072dc343abc/jenkins HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48510 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48516 - "POST /api/variables HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48532 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48534 - "POST /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48540 - "GET /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48552 - "GET /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/frame?t=1791636772.4196362 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48556 - "GET /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48570 - "GET /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/frame?t=1791636772.7238054 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:48572 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER LIVE 85c49d7e-241f-4bda-9974-7d88dd17dbe5 http://127.0.0.1:45129/demo.html
+INFO:     127.0.0.1:48578 - "GET /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48590 - "GET /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/frame?t=1791636773.0275788 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48600 - "POST /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48602 - "POST /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48604 - "POST /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48618 - "POST /api/recordings/85c49d7e-241f-4bda-9974-7d88dd17dbe5/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48622 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:     127.0.0.1:48632 - "GET /api/runs/7af3bd67-2ae7-440e-93a1-7bcd226496e8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48638 - "GET /api/runs/7af3bd67-2ae7-440e-93a1-7bcd226496e8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48644 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48656 - "GET /api/runs/7af3bd67-2ae7-440e-93a1-7bcd226496e8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48672 - "GET /api/runs/7af3bd67-2ae7-440e-93a1-7bcd226496e8 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [3610]

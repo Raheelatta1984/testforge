@@ -37,4 +37,4 @@ bash deploy/oracle/provision.sh
 
 ## Important
 
-This script provisions infrastructure. Application installation is a separate step because TestForge first needs an ARM-compatible production container and fixes for the current recording/execution inconsistencies.
+This script provisions infrastructure. Application installation is a separate step because TestForge still needs an ARM-compatible production container. Recording and execution themselves run through the dashboard once that container is up.

@@ -1,0 +1,114 @@
+2026-10-10T13:18:30+00:00 chromium: /tmp/cr/chromium
+2026-10-10T13:18:30+00:00 server: starting on 127.0.0.1:33977
+2026-10-10T13:18:30+00:00 server: healthy {'status': 'ok', 'database': 'ok', 'recorder': True, 'executor': True, 'revision': 'local', 'library': 'repository'}
+2026-10-10T13:18:30+00:00 BEGIN LB-API-01 Health reports the recorder and the executor
+2026-10-10T13:18:30+00:00   step 1 health
+2026-10-10T13:18:30+00:00 PASS LB-API-01 in 0.00s
+2026-10-10T13:18:30+00:00 BEGIN LB-API-02 Creating a project without a name is rejected
+2026-10-10T13:18:30+00:00   step 1 expect_http
+2026-10-10T13:18:30+00:00 PASS LB-API-02 in 0.00s
+2026-10-10T13:18:30+00:00 BEGIN LB-API-03 A project can be created and listed
+2026-10-10T13:18:30+00:00   step 1 create_project
+2026-10-10T13:18:30+00:00   step 2 list_projects
+2026-10-10T13:18:30+00:00 PASS LB-API-03 in 0.03s
+2026-10-10T13:18:30+00:00 BEGIN LB-API-04 Variables can be created, updated, and deleted
+2026-10-10T13:18:30+00:00   step 1 create_project
+2026-10-10T13:18:30+00:00   step 2 create_variable
+2026-10-10T13:18:31+00:00   step 3 patch_variable
+2026-10-10T13:18:31+00:00   step 4 delete_variable
+2026-10-10T13:18:31+00:00 PASS LB-API-04 in 0.06s
+2026-10-10T13:18:31+00:00 BEGIN LB-API-05 AI rephrase trims and punctuates text without an API key
+2026-10-10T13:18:31+00:00   step 1 expect_http
+2026-10-10T13:18:31+00:00 PASS LB-API-05 in 0.00s
+2026-10-10T13:18:31+00:00 BEGIN LB-API-06 Screenshot paths cannot escape the artifacts directory
+2026-10-10T13:18:31+00:00   step 1 expect_http
+2026-10-10T13:18:31+00:00   step 2 expect_http
+2026-10-10T13:18:31+00:00 PASS LB-API-06 in 0.00s
+2026-10-10T13:18:31+00:00 BEGIN LB-API-07 A run cannot be queued for an unknown recording
+2026-10-10T13:18:31+00:00   step 1 expect_http
+2026-10-10T13:18:31+00:00 PASS LB-API-07 in 0.00s
+2026-10-10T13:18:31+00:00 BEGIN LB-API-08 Running a recording with no steps fails before a browser opens
+2026-10-10T13:18:31+00:00   step 1 create_project
+2026-10-10T13:18:31+00:00   step 2 create_recording
+2026-10-10T13:18:31+00:00   step 3 queue_run
+2026-10-10T13:18:31+00:00   step 4 wait_run
+2026-10-10T13:18:31+00:00 PASS LB-API-08 in 0.06s
+2026-10-10T13:18:31+00:00 BEGIN LB-API-09 A recording aimed at another local port is stored unchanged
+2026-10-10T13:18:31+00:00   step 1 create_project
+2026-10-10T13:18:31+00:00   step 2 create_recording
+2026-10-10T13:18:31+00:00   step 3 assert_repository
+2026-10-10T13:18:31+00:00 PASS LB-API-09 in 0.06s
+2026-10-10T13:18:31+00:00 BEGIN LB-API-10 Diagnostics stays readable and the write probe succeeds
+2026-10-10T13:18:31+00:00   step 1 diagnostics
+2026-10-10T13:18:31+00:00 PASS LB-API-10 in 0.00s
+2026-10-10T13:18:31+00:00 BEGIN LB-REC-04 Stopping a session that is not running is idempotent
+2026-10-10T13:18:31+00:00   step 1 create_project
+2026-10-10T13:18:31+00:00   step 2 create_recording
+2026-10-10T13:18:31+00:00   step 3 stop_session
+2026-10-10T13:18:31+00:00   step 4 stop_session
+2026-10-10T13:18:31+00:00   step 5 session_status
+2026-10-10T13:18:31+00:00 PASS LB-REC-04 in 0.05s
+2026-10-10T13:18:31+00:00 BEGIN LB-REC-01 Starting a recording shows a live browser frame
+2026-10-10T13:18:31+00:00   step 1 create_project
+2026-10-10T13:18:31+00:00   step 2 create_recording
+2026-10-10T13:18:31+00:00   step 3 start_session
+2026-10-10T13:18:31+00:00   step 4 wait_frame
+2026-10-10T13:18:32+00:00     frame 13663 bytes (1280, 800)
+2026-10-10T13:18:32+00:00   step 5 stop_session
+2026-10-10T13:18:32+00:00 PASS LB-REC-01 in 1.08s
+2026-10-10T13:18:32+00:00 BEGIN LB-REC-02 Clicks, typing, and a key press are saved with selectors
+2026-10-10T13:18:32+00:00   step 1 create_project
+2026-10-10T13:18:32+00:00   step 2 create_recording
+2026-10-10T13:18:32+00:00   step 3 start_session
+2026-10-10T13:18:32+00:00   step 4 wait_frame
+2026-10-10T13:18:33+00:00     frame 13663 bytes (1280, 800)
+2026-10-10T13:18:33+00:00   step 5 input
+2026-10-10T13:18:33+00:00   step 6 input
+2026-10-10T13:18:33+00:00   step 7 input
+2026-10-10T13:18:33+00:00   step 8 input
+2026-10-10T13:18:33+00:00   step 9 assert_actions
+2026-10-10T13:18:33+00:00   step 10 stop_session
+2026-10-10T13:18:33+00:00   step 11 assert_repository
+2026-10-10T13:18:33+00:00 PASS LB-REC-02 in 1.27s
+2026-10-10T13:18:33+00:00 BEGIN LB-RUN-01 Replay of a literal recording passes and the page shows the typed name
+2026-10-10T13:18:33+00:00   step 1 create_project
+2026-10-10T13:18:33+00:00   step 2 create_recording
+2026-10-10T13:18:33+00:00   step 3 start_session
+2026-10-10T13:18:33+00:00   step 4 wait_frame
+2026-10-10T13:18:34+00:00     frame 13663 bytes (1280, 800)
+2026-10-10T13:18:34+00:00   step 5 input
+2026-10-10T13:18:34+00:00   step 6 input
+2026-10-10T13:18:34+00:00   step 7 input
+2026-10-10T13:18:34+00:00   step 8 stop_session
+2026-10-10T13:18:34+00:00   step 9 queue_run
+2026-10-10T13:18:34+00:00   step 10 wait_run
+2026-10-10T13:18:35+00:00   step 11 assert_live_frame
+2026-10-10T13:18:35+00:00   step 12 jenkins_contains
+2026-10-10T13:18:35+00:00 PASS LB-RUN-01 in 2.36s
+2026-10-10T13:18:35+00:00 BEGIN LB-RUN-02 Replay interpolates {{user}} at execution time, not record time
+2026-10-10T13:18:35+00:00   step 1 create_project
+2026-10-10T13:18:35+00:00   step 2 create_variable
+2026-10-10T13:18:35+00:00   step 3 create_recording
+2026-10-10T13:18:36+00:00   step 4 start_session
+2026-10-10T13:18:36+00:00   step 5 wait_frame
+2026-10-10T13:18:36+00:00     frame 13663 bytes (1280, 800)
+2026-10-10T13:18:36+00:00   step 6 input
+2026-10-10T13:18:36+00:00   step 7 input
+2026-10-10T13:18:36+00:00   step 8 input
+2026-10-10T13:18:37+00:00   step 9 stop_session
+2026-10-10T13:18:37+00:00   step 10 queue_run
+2026-10-10T13:18:37+00:00   step 11 wait_run
+2026-10-10T13:18:38+00:00 PASS LB-RUN-02 in 2.47s
+2026-10-10T13:18:38+00:00 BEGIN LB-LIB-01 The dashboard library is the repository catalog
+2026-10-10T13:18:38+00:00   step 1 library_contains
+2026-10-10T13:18:38+00:00   step 2 library_contains
+2026-10-10T13:18:38+00:00 PASS LB-LIB-01 in 0.03s
+2026-10-10T13:18:38+00:00 BEGIN LB-LIB-02 Replay the repository recording qa-hello-literal
+2026-10-10T13:18:38+00:00   step 1 queue_run
+2026-10-10T13:18:38+00:00   step 2 wait_run
+2026-10-10T13:18:39+00:00 PASS LB-LIB-02 in 1.28s
+2026-10-10T13:18:39+00:00 BEGIN LB-LIB-03 Replay the repository recording that interpolates {{user}}
+2026-10-10T13:18:39+00:00   step 1 queue_run
+2026-10-10T13:18:39+00:00   step 2 wait_run
+2026-10-10T13:18:40+00:00 PASS LB-LIB-03 in 1.28s
+2026-10-10T13:18:41+00:00 server: stopped

@@ -1,100 +1,243 @@
-import os, asyncio, traceback, datetime
-from playwright.async_api import async_playwright, expect
-from app.config import ARTIFACTS, CICD_INTERVAL
-from app.browser import launch_kwargs
-from app.db import SessionLocal, Run, Recording, Variable, resolve_variables, interpolate
+"""Replay a saved recording in a fresh browser and stream the picture back.
+
+Run rows are keyed by `recording_id`. Progress lives in `progress_pct` and the
+step log in `execution_log`. Those names match the models — an older revision
+of this file wrote `target_id` / `log` / `rog_investigation`, which do not
+exist, so every run died before a browser opened.
+"""
+
+import asyncio
+import base64
+import datetime
+import os
+
+from playwright.async_api import async_playwright
+
+from app.browser import Preview, explain_launch_error, launch_kwargs, video_ok
+from app.config import ARTIFACTS, logger
+from app.db import Recording, Run, SessionLocal, interpolate, resolve_variables
+from app.library_store import playback_url
 
 execution_lock = asyncio.Semaphore(1)
+LIVE_FRAMES = {}
 
-# --- ROG AGENT LAYER ---
 
-async def rog_monitor_investigate(run_id, error_trace):
-    db = SessionLocal()
-    run = db.get(Run, run_id)
-    run.rog_investigation = f"ROG MONITOR: Failure caught.\nTRACE: {error_trace[:500]}\nACTION: Handover to ROG DEVOPS."
-    db.commit(); db.close()
-    await rog_devops_self_heal(run_id)
+def live_frame(run_id):
+    return LIVE_FRAMES.get(run_id)
 
-async def rog_devops_self_heal(run_id):
-    db = SessionLocal()
-    run = db.get(Run, run_id)
-    run.rog_investigation += "\nROG DEVOPS: Checking environment... Port 8000 stable. Cleaning artifacts... Handing to ROG QA."
-    db.commit(); db.close()
-    await rog_qa_validator(run_id)
 
-async def rog_qa_validator(run_id):
-    db = SessionLocal()
-    run = db.get(Run, run_id)
-    run.rog_investigation += "\nROG QA: Performing regression validation... Status updated to FAILED_AUDITED."
-    run.status = "failed_audited"
-    db.commit(); db.close()
+def _step_dict(step):
+    return {
+        "order": step.order,
+        "action": step.action,
+        "label": step.label,
+        "value": step.value,
+        "selector": step.selector if isinstance(step.selector, dict) else None,
+    }
 
-# --- EXECUTION ---
 
-async def locate(page, selector):
-    if not selector or 'primary' not in selector: return page.locator("body")
+def _save(run_id, **fields):
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        if run is None:
+            return
+        for key, value in fields.items():
+            setattr(run, key, value)
+        db.commit()
+
+
+async def _click(page, selector):
+    selector = selector or {}
+    primary = selector.get("primary")
+    if primary:
+        loc = page.locator(primary)
+        try:
+            count = await loc.count()
+            if count >= 1:
+                await loc.first.click(timeout=4000)
+                return
+        except Exception:
+            pass
+    if selector.get("x") is not None and selector.get("y") is not None:
+        await page.mouse.click(float(selector["x"]), float(selector["y"]))
+        return
+    raise RuntimeError("Click has no selector and no coordinates")
+
+
+async def _focus(page, selector):
     try:
-        loc = page.locator(selector['primary']).first
-        await loc.wait_for(state="visible", timeout=3000)
-        return loc
-    except: return page.locator("body")
+        await _click(page, selector)
+    except Exception:
+        if selector and selector.get("x") is not None:
+            await page.mouse.click(float(selector["x"]), float(selector["y"]))
+
+
+async def replay_step(page, step, variables):
+    action = (step.get("action") or "").lower()
+    raw = step.get("value")
+    value = interpolate(raw, variables) if raw else None
+    selector = step.get("selector") or {}
+    if action == "navigate":
+        url = playback_url(value or "")
+        if not url:
+            raise RuntimeError("Navigate step has no URL")
+        await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        return
+    if action == "click":
+        await _click(page, selector)
+        return
+    if action in ("fill", "type", "text"):
+        if selector:
+            await _focus(page, selector)
+        if action == "fill" and selector.get("primary"):
+            await page.locator(selector["primary"]).first.fill(value or "", timeout=4000)
+        else:
+            await page.keyboard.type(value or "")
+        return
+    if action in ("press", "key", "key_press"):
+        await page.keyboard.press(value or selector.get("key") or "Enter")
+        return
+    raise RuntimeError(f"Unsupported action: {action}")
+
 
 async def execute_run(run_id, on_event, on_frame=None):
     async with execution_lock:
-        db = SessionLocal(); run = db.get(Run, run_id)
-        if not run: return
-        run.status = "running"; db.commit()
-        run_dir = os.path.join(ARTIFACTS, "runs", run_id); os.makedirs(run_dir, exist_ok=True)
+        with SessionLocal() as db:
+            run = db.get(Run, run_id)
+            if run is None:
+                return
+            recording = db.get(Recording, run.recording_id)
+            if recording is None:
+                run.status = "error"
+                run.rog_monitor_log = "Recording not found"
+                run.finished_at = datetime.datetime.utcnow()
+                db.commit()
+                await on_event({"type": "done", "status": "error", "error": "Recording not found"})
+                return
+            steps = [_step_dict(step) for step in recording.steps]
+            start_url = recording.start_url
+            variables = resolve_variables(db, recording.project_id)
+            run.status = "running"
+            run.progress_pct = 0
+            db.commit()
+
+        run_dir = os.path.join(ARTIFACTS, "runs", run_id)
+        os.makedirs(run_dir, exist_ok=True)
         log_entries = []
+        status = "passed"
+        error_text = None
+
+        if not steps:
+            status = "error"
+            error_text = "This recording has no steps. Record at least one action, then run it again."
+            _save(
+                run_id,
+                status=status,
+                rog_monitor_log=error_text,
+                finished_at=datetime.datetime.utcnow(),
+                execution_log=[],
+            )
+            await on_event({"type": "done", "status": status, "error": error_text})
+            return
+
+        def publish(data: bytes):
+            LIVE_FRAMES[run_id] = data
+            try:
+                with open(os.path.join(run_dir, "live.jpg"), "wb") as handle:
+                    handle.write(data)
+            except OSError:
+                pass
+            if on_frame is not None:
+                payload = base64.b64encode(data).decode("ascii")
+                result = on_frame(payload)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+
         try:
-            target = db.get(Recording, run.target_id)
-            variables = resolve_variables(db, project_id=target.project_id)
-            async with async_playwright() as p:
-                browser = await p.chromium.launch(**launch_kwargs())
-                ctx = await browser.new_context(record_video_dir=run_dir, viewport={"width":1280, "height":800})
-                page = await ctx.new_page()
-                cdp = await ctx.new_cdp_session(page)
-                if on_frame:
-                    await cdp.send("Page.startScreencast", {"format": "jpeg", "quality": 40})
-                    cdp.on("Page.screencastFrame", lambda p: asyncio.create_task(on_frame(p["data"])))
-                
-                for idx, step in enumerate(target.steps, 1):
-                    p_val = int((idx / len(target.steps)) * 100)
-                    entry = {"order": step.order, "action": step.action, "label": step.label, "status": "running", "percent": p_val}
-                    await on_event(entry)
-                    try:
-                        if step.action == "navigate": await page.goto(interpolate(step.value, variables))
-                        elif step.action == "click": await (await locate(page, step.selector)).click()
-                        elif step.action == "fill": await (await locate(page, step.selector)).fill(interpolate(step.value, variables))
-                        shot_name = f"step-{idx}.jpg"
-                        await page.screenshot(path=os.path.join(run_dir, shot_name), quality=30)
-                        entry["status"] = "passed"; entry["screenshot"] = f"/api/runs/screenshot/{run_id}/{shot_name}"
-                    except Exception as e:
-                        entry["status"] = "failed"; entry["error"] = str(e); log_entries.append(entry)
+            async with async_playwright() as playwright:
+                browser = await playwright.chromium.launch(**launch_kwargs())
+                context_kwargs = {"viewport": {"width": 1280, "height": 800}, "device_scale_factor": 1}
+                if video_ok():
+                    context_kwargs["record_video_dir"] = run_dir
+                context = await browser.new_context(**context_kwargs)
+                page = await context.new_page()
+                preview = Preview(page, on_jpeg=publish).start()
+                video = page.video
+                try:
+                    total = len(steps)
+                    for index, step in enumerate(steps, 1):
+                        percent = int(index / total * 100)
+                        entry = {
+                            "order": step.get("order") or index,
+                            "action": step.get("action"),
+                            "label": step.get("label") or step.get("action"),
+                            "status": "running",
+                            "percent": percent,
+                        }
                         await on_event(entry)
-                        await rog_monitor_investigate(run_id, str(e))
-                        return
-                    log_entries.append(entry); await on_event(entry)
-                run.status = "passed"; await browser.close()
-        except Exception as e:
-            run.status = "error"; await rog_monitor_investigate(run_id, str(e))
-        finally:
-            run.log = log_entries; db.commit(); db.close()
-            await on_event({"type": "done", "status": run.status})
+                        try:
+                            async with preview.lock:
+                                await replay_step(page, step, variables)
+                                shot_name = f"step-{index}.jpg"
+                                shot_path = os.path.join(run_dir, shot_name)
+                                try:
+                                    await page.screenshot(path=shot_path, type="jpeg", quality=45)
+                                    entry["screenshot"] = f"/api/runs/screenshot/{run_id}/{shot_name}"
+                                except Exception:
+                                    pass
+                                try:
+                                    entry["excerpt"] = (await page.inner_text("body"))[:400]
+                                except Exception:
+                                    pass
+                            entry["status"] = "passed"
+                            entry["percent"] = percent
+                        except Exception as exc:
+                            entry["status"] = "failed"
+                            entry["error"] = str(exc).splitlines()[0][:500]
+                            entry["percent"] = percent
+                            log_entries.append(entry)
+                            await on_event(entry)
+                            status = "failed"
+                            error_text = entry["error"]
+                            _save(run_id, status="failed", progress_pct=percent, execution_log=list(log_entries))
+                            break
+                        log_entries.append(entry)
+                        await on_event(entry)
+                        _save(run_id, progress_pct=percent, execution_log=list(log_entries))
+                finally:
+                    await preview.stop()
+                    video_path = None
+                    try:
+                        await context.close()
+                        if video is not None:
+                            video_path = await video.path()
+                    except Exception:
+                        video_path = None
+                    try:
+                        await browser.close()
+                    except Exception:
+                        pass
+                    if video_path and os.path.isfile(video_path):
+                        _save(run_id, video_path=video_path)
+        except Exception as exc:
+            status = "error"
+            error_text = explain_launch_error(exc)
+            logger.exception("RUN FAILED %s", run_id)
 
-# --- CI/CD ROG AGENT ---
-async def cicd_rog_agent():
-    print("ROG AGENT: CI/CD Pipeline Online.")
-    while True:
-        try:
-            db = SessionLocal()
-            recs = db.query(Recording).all()
-            for r in recs:
-                if not db.query(Run).filter_by(target_id=r.id).first():
-                    run = Run(target_id=r.id, status="queued")
-                    db.add(run); db.commit()
-            db.close()
-        except: pass
-        await asyncio.sleep(CICD_INTERVAL)
-
-asyncio.create_task(cicd_rog_agent())
+        fields = {
+            "status": status,
+            "execution_log": log_entries,
+            "finished_at": datetime.datetime.utcnow(),
+            "progress_pct": 100 if status == "passed" else None,
+        }
+        # Don't wipe a progress value already stored on failure.
+        if fields["progress_pct"] is None:
+            fields.pop("progress_pct")
+        if error_text:
+            fields["rog_monitor_log"] = f"Execution failed: {error_text[:800]}"
+            fields["rog_devops_log"] = "Browser session closed. The run was not retried automatically."
+            fields["rog_qa_log"] = "QA: marked failed. Open the step log and screenshots."
+        else:
+            fields["rog_qa_log"] = "QA: every recorded step completed."
+        _save(run_id, **fields)
+        await on_event({"type": "done", "status": status, "error": error_text, "log": log_entries})

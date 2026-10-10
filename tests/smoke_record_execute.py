@@ -1,0 +1,16 @@
+"""Compatibility entry. The supported runner is the harness.
+
+    python -m tests.harness
+"""
+
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from tests.harness import main
+
+if __name__ == "__main__":
+    raise SystemExit(main())
