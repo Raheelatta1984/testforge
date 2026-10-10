@@ -21,6 +21,7 @@ from playwright.async_api import async_playwright
 
 from app.browser import Preview, explain_launch_error, launch_kwargs
 from app.config import ARTIFACTS, logger
+from app.guardrails import browser_budget
 from app.db import RecordingStep, SessionLocal, resolve_variables, interpolate, Variable, VAR_REGEX
 from app import library_store
 
@@ -147,6 +148,8 @@ class RecorderSession:
         self._export_task = None
         self._save_logs = []  # for debugging save issues
         self._image_tasks = set()
+        # Permit for this session's Chromium, from the budget shared with runs.
+        self._browser_slot = None
 
     def add_listener(self, callback):
         self.listeners.append(callback)
@@ -166,6 +169,10 @@ class RecorderSession:
     async def start(self):
         os.makedirs(os.path.join(ARTIFACTS, "rec", self.recording_id), exist_ok=True)
         try:
+            # Wait for the browser budget before launching. Without this a
+            # recording session and a run could each hold a Chromium and take the
+            # instance over its memory limit.
+            self._browser_slot = await browser_budget.acquire(f"rec:{self.recording_id}")
             self._pw = await async_playwright().start()
             self.browser = await self._pw.chromium.launch(**launch_kwargs())
             self.context = await self.browser.new_context(
@@ -461,6 +468,10 @@ class RecorderSession:
             except Exception:
                 pass
             self._pw = None
+        # Hand the browser permit back last, once the process is really gone.
+        if self._browser_slot is not None:
+            slot, self._browser_slot = self._browser_slot, None
+            browser_budget.release(slot)
 
     async def _flush_export(self):
         """Wait for the debounced export without ever raising at the caller.

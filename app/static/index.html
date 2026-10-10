@@ -78,7 +78,7 @@ function App() {
     setLiveWindow(next);
     localStorage.setItem("tf_live_window", next ? "1" : "0");
   };
-  const tabs = [["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["github","🐙"]];
+  const tabs = [["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"]];
 
   return e('div', { className: "h-full flex flex-col" },
     e('header', { className: "p-4 border-b border-slate-800 flex justify-between bg-slate-950/80 backdrop-blur" },
@@ -94,7 +94,8 @@ function App() {
       tab === "record" && e(Recorder, { project: activeProject }),
       tab === "library" && e(Library, { project: activeProject, liveWindow, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId, liveWindow, setLiveWindow: toggleLiveWindow }),
-      tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts), tab === "github" && e(Github)
+      tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts),
+      tab === "logs" && e(Logs), tab === "github" && e(Github)
     ),
     e('nav', { className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex" },
       tabs.map(([k, icon]) => e('button', { key: k, onClick: () => setTab(k), className: `nav-btn ${tab===k?'active':''}` }, icon))
@@ -330,7 +331,15 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
 
   const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
   const loadQueue = () => API.get("/api/runs/queue/status").then(setQueueInfo).catch(() => {});
-  useEffect(() => { load(); loadQueue(); const t = setInterval(() => { load(); loadQueue(); }, 3000); return () => clearInterval(t); }, []);
+  useEffect(() => {
+    load(); loadQueue();
+    // A background tab must not keep polling: the service is small and every
+    // poll is a database read plus a serialisation.
+    const t = setInterval(() => { if (!document.hidden) { load(); loadQueue(); } }, 3000);
+    const onVisible = () => { if (!document.hidden) { load(); loadQueue(); } };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { clearInterval(t); document.removeEventListener("visibilitychange", onVisible); };
+  }, []);
 
   useEffect(() => {
     if (!runId) return undefined;
@@ -674,7 +683,8 @@ function Variables({ project }) {
 function Comparison() {
   const [runs, setRuns] = useState([]);
   const [sel, setSel] = useState(null);
-  useEffect(() => { API.get("/api/runs").then(setRuns).catch(() => {}); }, []);
+  // `full` is what pulls the per-step log; keep it to the most recent runs.
+  useEffect(() => { API.get("/api/runs?limit=10&full=true").then(setRuns).catch(() => {}); }, []);
   return e('div', { className: "space-y-4" },
     runs.map(r => e('div', { key: r.id, className: "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden" },
       e('button', { className: "p-4 w-full text-left flex justify-between", onClick: () => setSel(sel === r.id ? null : r.id) },
@@ -693,7 +703,9 @@ function Comparison() {
 
 function Artifacts() {
   const [runs, setRuns] = useState([]);
-  useEffect(() => { API.get("/api/runs").then(setRuns).catch(() => {}); }, []);
+  // Screenshots are fetched per run by the browser, so the list itself stays
+  // short and the service only ever serves the images you scroll to.
+  useEffect(() => { API.get("/api/runs?limit=10&full=true").then(setRuns).catch(() => {}); }, []);
   const withMedia = runs.filter(r => r.video_path || (r.log || []).some(step => step.screenshot));
   return e("div", { className: "space-y-4" },
     withMedia.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No artifacts yet. Run a recording to capture screenshots. Execution window displays immediately."),
@@ -707,6 +719,131 @@ function Artifacts() {
         ))
       )
     ))
+  );
+}
+
+
+const LOG_FILES = ["results.md", "harness.log", "unit.log", "scenarios.log", "server.log"];
+
+function parseMarkdownTable(text) {
+  const rows = [];
+  let headers = null;
+  for (const raw of (text || "").split("\n")) {
+    const line = raw.trim();
+    if (!line.startsWith("|")) continue;
+    const cells = line.slice(1, -1).split("|").map(c => c.trim());
+    if (cells.every(c => /^:?-{2,}:?$/.test(c))) continue;
+    if (!headers) { headers = cells; continue; }
+    const row = {};
+    headers.forEach((h, i) => { row[h] = cells[i] || ""; });
+    rows.push(row);
+  }
+  return rows;
+}
+
+function Logs() {
+  const [source, setSource] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(null);
+  const [files, setFiles] = useState({});
+  const [busy, setBusy] = useState("");
+
+  // Read a path out of the repository. raw.githubusercontent.com first; some
+  // networks block it, and the contents API serves the same bytes.
+  const fromGithub = async (src, path) => {
+    try {
+      const raw = await fetch(`${src.base}/${path}`, { cache: "no-store" });
+      if (raw.ok) return await raw.text();
+    } catch (_) { /* fall through to the API */ }
+    const api = await fetch(
+      `https://api.github.com/repos/${src.slug}/contents/${path}?ref=${encodeURIComponent(src.branch)}`,
+      { cache: "no-store", headers: { Accept: "application/vnd.github.raw+json" } }
+    );
+    if (!api.ok) throw new Error(`GitHub returned ${api.status} for ${path}`);
+    return await api.text();
+  };
+
+  useEffect(() => {
+    let stop = false;
+    (async () => {
+      try {
+        // The only request this tab makes to the service: coordinates.
+        const src = await API.get("/api/logs/source");
+        if (stop) return;
+        setSource(src);
+        if (!src.available) { setError(src.reason || "Log location unknown"); setLoading(false); return; }
+        const text = await fromGithub(src, "logs/index.md");
+        if (stop) return;
+        setRows(parseMarkdownTable(text));
+        setError("");
+      } catch (err) {
+        if (!stop) setError(err.message);
+      } finally {
+        if (!stop) setLoading(false);
+      }
+    })();
+    return () => { stop = true; };
+  }, []);
+
+  const openRun = async (folder) => {
+    if (open === folder) { setOpen(null); return; }
+    setOpen(folder); setFiles({}); setBusy(folder);
+    for (const name of LOG_FILES) {
+      fromGithub(source, `logs/${folder}/${name}`)
+        .then(text => setFiles(prev => ({ ...prev, [name]: text })))
+        .catch(() => {});   // a run may simply not have every file
+    }
+    setBusy("");
+  };
+
+  const folderOf = (row) => {
+    const match = /\(([^)]+)\/results\.md\)/.exec(row["Folder"] || "");
+    return match ? match[1] : (row["Folder"] || "").replace(/[[\]]/g, "");
+  };
+
+  return e("div", { className: "space-y-4" },
+    e("div", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-2" },
+      e("div", { className: "flex justify-between items-center" },
+        e("h2", { className: "font-bold text-lg text-indigo-300" }, "Harness logs 📜"),
+        e("span", { className: "fast-badge" }, "FROM GITHUB")
+      ),
+      e("p", { className: "text-sm text-slate-400" },
+        "Read straight from the repository by your browser. This deployment never reads, stores or serves these files, so opening this tab puts no load on the service."),
+      source && source.available && e("p", { className: "text-[10px] font-mono text-slate-500 break-all" },
+        `${source.slug} @ ${source.branch}`)
+    ),
+    loading && e("p", { className: "text-sm text-slate-400" }, "Fetching log index from GitHub…"),
+    error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),
+    !loading && !error && rows.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-6" },
+      "No committed harness runs on this branch yet."),
+    rows.map((row, i) => {
+      const folder = folderOf(row);
+      const isOpen = open === folder;
+      return e("div", { key: folder || i, className: "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden" },
+        e("button", { className: "p-4 w-full text-left flex justify-between items-center gap-2", onClick: () => openRun(folder) },
+          e("div", {},
+            e("div", { className: "font-bold text-xs font-mono" }, row["Started"] || folder),
+            e("div", { className: "text-[10px] text-slate-400 mt-0.5" },
+              `${row["Passed"] || 0} passed · ${row["Failed"] || 0} failed · ${row["Skipped"] || 0} skipped · rev ${row["Revision"] || "?"}`)
+          ),
+          e("span", { className: "text-[10px] px-2 py-1 rounded font-bold " +
+            ((row["Result"] || "").toUpperCase() === "PASS" ? "bg-emerald-900 text-emerald-200" : "bg-red-900 text-red-200") },
+            row["Result"] || "?")
+        ),
+        isOpen && e("div", { className: "p-3 space-y-2 border-t border-slate-800" },
+          busy === folder && e("p", { className: "text-xs text-slate-400" }, "Fetching from GitHub…"),
+          Object.keys(files).length === 0 && busy !== folder && e("p", { className: "text-xs text-slate-500" }, "No log files found for this run."),
+          Object.entries(files).map(([name, text]) => e("details", { key: name, open: name === "results.md", className: "bg-slate-950 rounded border border-slate-800" },
+            e("summary", { className: "text-[10px] font-mono p-2 cursor-pointer text-indigo-300" }, name),
+            e("pre", { className: "text-[9px] p-2 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap text-slate-300" }, text)
+          )),
+          e("a", { href: `https://github.com/${source.slug}/tree/${source.branch}/logs/${folder}`, target: "_blank", rel: "noopener noreferrer",
+                   className: "block text-center text-[10px] text-indigo-300 underline pt-1" }, "Open this run on GitHub")
+        )
+      );
+    })
   );
 }
 

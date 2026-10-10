@@ -1485,6 +1485,37 @@ def status() -> dict:
     }
 
 
+_REPO_REF: dict[str, Any] = {}
+
+
+def repo_ref() -> dict:
+    """Where the dashboard should read committed logs from, cached.
+
+    Deliberately cheap: two local git calls, no `ls-remote` and no tree walk, so
+    asking for it cannot load the server. Returns `slug` (owner/repo) and
+    `branch`, which is all a browser needs to build a raw.githubusercontent.com
+    URL. Nothing here touches the network.
+    """
+    cached = _REPO_REF.get("value")
+    if cached is not None and (time.time() - _REPO_REF.get("ts", 0)) < 300:
+        return cached
+    root = git_root()
+    slug = None
+    branch = None
+    if root is not None:
+        try:
+            branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root)
+            url = _https_repo(_run_git(["remote", "get-url", os.environ.get("TF_GIT_REMOTE", "origin")], root))
+            match = re.search(r"github\.com[/:]([^/\s]+/[^/\s]+)$", url)
+            slug = match.group(1) if match else None
+        except PublishError as exc:
+            logger.info("REPO REF %s", exc)
+    value = {"slug": slug, "branch": branch, "available": bool(slug and branch)}
+    _REPO_REF["value"] = value
+    _REPO_REF["ts"] = time.time()
+    return value
+
+
 def playback_url(url: str) -> str:
     """Resolve a repository-relative page onto this server. Other hosts stay put."""
     raw = (url or "").strip()

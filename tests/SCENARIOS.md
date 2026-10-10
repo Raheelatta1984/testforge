@@ -92,7 +92,21 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-SAVE-02 | Export raises on save | `stop()` still closes the browser and records the failure in the session save log. |
 | UT-GIT-01 | No git checkout | `status()` reports `git_state=no-checkout` with a reason instead of a silent `branch: null`, and `remote_library_status()` explains the missing checkout. |
 | UT-GIT-02 | Library disk report | `status()` reports `projects_on_disk`, `project_dirs`, `catalog_present` and `library_dir`. |
+| UT-MEM-01 | Browser budget serialises | With one permit, a second browser waits for the first to finish; counters return to zero and the peak never exceeds the limit. |
+| UT-MEM-02 | Cancelled waiter | Cancelling a waiter before it gets a slot does not permanently lose a permit. |
+| UT-MEM-03 | Live frame cap | The oldest frame is evicted past the cap and every frame ages out by TTL. |
+| UT-MEM-04 | Run buffer cap | Per-run events and the number of buffered runs are both capped; a new frame replaces the previous one. |
+| UT-MEM-05 | Shared budget | `app.executor` and `app.recorder` hold the same `BrowserBudget`, so recording cannot open a second Chromium during a run. |
+| UT-MEM-06 | Two runs, one browser | Two concurrent `execute_run` calls never have two browsers open at once. |
+| UT-MEM-07 | Artifact export cap | `GET /api/sync/github` returns 413 rather than buffering more than `TF_MAX_ZIP_BYTES`. |
+| UT-MEM-08 | Artifact export streams | Within the cap the endpoint returns a valid zip streamed from disk. |
+| UT-API-01 | Run list is bounded | `GET /api/runs` omits `execution_log` by default, honours `limit`, and clamps it to `MAX_RUN_LIST_LIMIT`; `full=true` restores the log. |
+| UT-LOG-01 | Logs come from GitHub | `/api/logs/source` returns raw.githubusercontent.com coordinates only - no log bodies, so the service never reads or serves them. |
+| UT-LOG-02 | Branch validation | A branch of `../etc` is rejected with 422; `main` is accepted. |
+| UT-LOG-03 | No git checkout | `/api/logs/source` reports `available: false` with a reason instead of a broken URL. |
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
+
+Resource guardrails (`UT-MEM-*`) cover the limits that keep a 512MB instance inside its memory ceiling: one Chromium shared by recording and execution, bounded live frames, bounded run event buffers, a bounded run list, and an artifact export that streams instead of buffering.
 
 ## Library scenarios
 

@@ -11,10 +11,51 @@ projects:
       repo: https://github.com/Raheelatta1984/testforge
       branch: main
       plan: free
-      envVars:
-      - key: API_Key
-        sync: false
       region: singapore
       dockerContext: .
       dockerfilePath: ./Dockerfile
       autoDeployTrigger: commit
+      # One instance. The in-process guardrails (browser budget, frame and
+      # buffer caps) only hold for a single process; a second replica would each
+      # run their own Chromium against the same 512MB plan.
+      numInstances: 1
+      # Point the health probe at the cheap endpoint. Without this Render probes
+      # "/", which is served from the static mount and says nothing about whether
+      # the database or the browser runtime came up.
+      healthCheckPath: /api/health
+      envVars:
+      - key: API_Key
+        sync: false
+      # --- resource guardrails -------------------------------------------
+      # Chromium is the memory ceiling on this plan, so only ever one of them,
+      # shared by recording and execution.
+      - key: TF_MAX_BROWSERS
+        value: "1"
+      - key: TF_BROWSER_SINGLE_PROCESS
+        value: "1"
+      - key: TF_BROWSER_MODE
+        value: bundled
+      - key: TF_VIEWPORT_WIDTH
+        value: "1024"
+      - key: TF_VIEWPORT_HEIGHT
+        value: "640"
+      # Slower, smaller preview frames. Nothing is rendered at all while no
+      # client is watching a run.
+      - key: TF_PREVIEW_INTERVAL
+        value: "0.25"
+      - key: TF_VIEWER_RECHECK
+        value: "0.25"
+      - key: TF_JPEG_QUALITY
+        value: "30"
+      # Bounded in-memory state, so a long-lived worker cannot grow into an OOM.
+      - key: TF_MAX_LIVE_FRAME_RUNS
+        value: "3"
+      - key: TF_MAX_RUN_BUFFER_RUNS
+        value: "6"
+      - key: TF_MAX_RUN_BUFFER_EVENTS
+        value: "60"
+      - key: TF_RUN_LIST_LIMIT
+        value: "25"
+      # Artifact export is streamed from disk and refuses to exceed this.
+      - key: TF_MAX_ZIP_BYTES
+        value: "67108864"

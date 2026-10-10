@@ -987,5 +987,282 @@ class ExecutorWindowTests(unittest.TestCase):
 
 
 
+class GuardrailTests(unittest.TestCase):
+    """The limits that keep the hosted instance inside its memory ceiling."""
+
+    def test_UT_MEM_01_browser_budget_serialises_and_counts(self):
+        from app.guardrails import BrowserBudget
+        budget = BrowserBudget(1)
+        order = []
+
+        async def worker(name, delay):
+            async with budget.slot(name):
+                order.append("in:" + name)
+                await asyncio.sleep(delay)
+                order.append("out:" + name)
+
+        async def exercise():
+            await asyncio.gather(worker("a", 0.05), worker("b", 0.01))
+
+        asyncio.run(exercise())
+        # With one permit, b cannot start until a has finished.
+        self.assertEqual(order, ["in:a", "out:a", "in:b", "out:b"])
+        report = budget.report()
+        self.assertEqual(report["active"], 0, "permits must be handed back")
+        self.assertEqual(report["waiting"], 0)
+        self.assertEqual(report["peak"], 1, "never more than the limit")
+
+    def test_UT_MEM_02_cancelled_waiter_does_not_leak_a_permit(self):
+        from app.guardrails import BrowserBudget
+        budget = BrowserBudget(1)
+
+        async def exercise():
+            held = await budget.acquire("holder")
+            pending = asyncio.create_task(budget.acquire("waiter"))
+            await asyncio.sleep(0.02)
+            self.assertEqual(budget.report()["waiting"], 1)
+            pending.cancel()
+            try:
+                await pending
+            except asyncio.CancelledError:
+                pass
+            budget.release(held)
+
+        asyncio.run(exercise())
+        self.assertEqual(budget.report()["waiting"], 0)
+        self.assertEqual(budget.report()["active"], 0)
+
+    def test_UT_MEM_03_live_frames_are_bounded_and_expire(self):
+        from app.guardrails import BoundedFrames
+        frames = BoundedFrames(limit=2, ttl=0.05)
+        frames.put("r1", b"a" * 100)
+        frames.put("r2", b"b" * 100)
+        frames.put("r3", b"c" * 100)
+        self.assertIsNone(frames.get("r1"), "oldest frame must be evicted")
+        self.assertEqual(frames.get("r3"), b"c" * 100)
+        self.assertEqual(frames.report()["runs"], 2)
+        import time as _time
+        _time.sleep(0.08)
+        self.assertIsNone(frames.get("r2"), "frames must age out even under the cap")
+        frames.put("r4", b"d")
+        frames.forget("r4")
+        self.assertIsNone(frames.get("r4"))
+
+    def test_UT_MEM_04_run_buffers_are_bounded(self):
+        from app.guardrails import BoundedRunBuffers
+        buffers = BoundedRunBuffers(max_runs=2, max_events=3)
+        for index in range(10):
+            buffers.append("run-a", {"type": "step", "order": index})
+        self.assertEqual([item["order"] for item in buffers.get("run-a")], [7, 8, 9],
+                         "the event cap must hold and keep the newest events")
+        # A frame replaces the previous frame rather than accumulating.
+        buffers.append("run-a", {"type": "frame", "data": "one"})
+        buffers.append("run-a", {"type": "frame", "data": "two"})
+        self.assertEqual([i for i in buffers.get("run-a") if i["type"] == "frame"][-1]["data"], "two")
+        self.assertEqual(len([i for i in buffers.get("run-a") if i["type"] == "frame"]), 1)
+        # Now exceed the run cap: the oldest run must go.
+        buffers.append("run-b", {"type": "status"})
+        buffers.append("run-c", {"type": "status"})
+        self.assertEqual(buffers.report()["runs"], 2, "run cap must hold")
+        self.assertEqual(buffers.get("run-a"), [], "oldest run must be evicted")
+        self.assertEqual(buffers.get("run-c"), [{"type": "status"}])
+        buffers.forget("run-b")
+        self.assertEqual(buffers.get("run-b"), [])
+
+    def test_UT_MEM_05_recorder_and_executor_share_one_budget(self):
+        """A recording session and a run must not each hold a Chromium."""
+        import app.executor as executor
+        import app.recorder as recorder
+        self.assertIs(executor.browser_budget, recorder.browser_budget)
+
+    def test_UT_MEM_06_two_runs_never_hold_a_browser_at_once(self):
+        import app.executor as executor
+        from app.guardrails import BrowserBudget
+        from tests.fakes import FakePage, FakePlaywright
+        from app.db import Project, Recording, RecordingStep
+
+        with SessionLocal() as db:
+            project = Project(name="budget-runs", base_url="")
+            db.add(project); db.commit(); db.refresh(project)
+            run_ids = []
+            for index in range(2):
+                recording = Recording(project_id=project.id, name=f"b{index}",
+                                      start_url="http://127.0.0.1/demo.html")
+                db.add(recording); db.commit(); db.refresh(recording)
+                db.add(RecordingStep(recording_id=recording.id, order=1, action="navigate",
+                                     value="/demo.html", label="Open"))
+                db.commit()
+                run = Run(recording_id=recording.id, status="queued")
+                db.add(run); db.commit(); db.refresh(run)
+                run_ids.append(run.id)
+
+        # Track how many fake browsers are open simultaneously.
+        concurrent = {"now": 0, "peak": 0}
+        original_launch = None
+
+        class CountingPlaywright(FakePlaywright):
+            async def launch(self, **kwargs):
+                concurrent["now"] += 1
+                concurrent["peak"] = max(concurrent["peak"], concurrent["now"])
+                try:
+                    return await super().launch(**kwargs)
+                finally:
+                    concurrent["now"] -= 1
+
+        original_budget = executor.browser_budget
+        executor.browser_budget = BrowserBudget(1)
+        original_pw = executor.async_playwright
+        executor.async_playwright = lambda: CountingPlaywright(FakePage(known=[]))
+
+        async def on_event(event):
+            await asyncio.sleep(0.02)
+
+        async def exercise():
+            await asyncio.gather(*[
+                executor.execute_run(rid, on_event, display_window=False,
+                                     viewer_count=lambda: 0)
+                for rid in run_ids
+            ])
+
+        try:
+            asyncio.run(exercise())
+        finally:
+            executor.browser_budget = original_budget
+            executor.async_playwright = original_pw
+        self.assertEqual(concurrent["peak"], 1, "two runs must not open two browsers")
+
+
+class RunListGuardrailTests(unittest.TestCase):
+    def _make_runs(self, count):
+        from app.db import Project, Recording, RecordingStep
+        with SessionLocal() as db:
+            project = Project(name="run-list", base_url="")
+            db.add(project); db.commit(); db.refresh(project)
+            ids = []
+            for index in range(count):
+                recording = Recording(project_id=project.id, name=f"l{index}",
+                                      start_url="http://127.0.0.1/demo.html")
+                db.add(recording); db.commit(); db.refresh(recording)
+                db.add(RecordingStep(recording_id=recording.id, order=1, action="navigate",
+                                     value="/demo.html", label="Open",
+                                     selector={"primary": "#x" * 50}))
+                db.commit()
+                ids.append(recording.id)
+            return ids
+
+    def test_UT_API_01_run_list_is_bounded_and_light_by_default(self):
+        from fastapi.testclient import TestClient
+        from app import guardrails
+        from app.main import app
+        self._make_runs(3)
+        with TestClient(app) as client:
+            rows = client.get("/api/runs").json()
+            self.assertLessEqual(len(rows), guardrails.DEFAULT_RUN_LIST_LIMIT)
+            for row in rows:
+                self.assertNotIn("execution_log", row,
+                                 "the polled list must not carry every step")
+                self.assertIn("step_count", row)
+            heavy = client.get("/api/runs?limit=2&full=true").json()
+            self.assertEqual(len(heavy), 2, "limit must be honoured")
+            self.assertIn("execution_log", heavy[0])
+            capped = client.get("/api/runs?limit=100000").json()
+            self.assertLessEqual(len(capped), guardrails.MAX_RUN_LIST_LIMIT)
+
+
+class LogsSourceTests(unittest.TestCase):
+    def test_UT_LOG_01_logs_are_pointed_at_github_not_this_server(self):
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+        original = library_store.repo_ref
+        library_store.repo_ref = lambda: {"slug": "acme/testforge", "branch": "main", "available": True}
+        try:
+            with TestClient(app) as client:
+                payload = client.get("/api/logs/source").json()
+        finally:
+            library_store.repo_ref = original
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["base"], "https://raw.githubusercontent.com/acme/testforge/main")
+        self.assertEqual(payload["index"],
+                         "https://raw.githubusercontent.com/acme/testforge/main/logs/index.md")
+        # Coordinates only: the service must not read or serve the log bodies.
+        self.assertNotIn("content", payload)
+        self.assertNotIn("files", payload)
+
+    def test_UT_LOG_02_logs_source_rejects_a_bad_branch(self):
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+        original = library_store.repo_ref
+        library_store.repo_ref = lambda: {"slug": "acme/testforge", "branch": "main", "available": True}
+        try:
+            with TestClient(app) as client:
+                self.assertEqual(client.get("/api/logs/source?branch=..%2Fetc").status_code, 422)
+                self.assertEqual(client.get("/api/logs/source?branch=main").status_code, 200)
+        finally:
+            library_store.repo_ref = original
+
+    def test_UT_LOG_03_logs_source_explains_a_missing_checkout(self):
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+        original = library_store.repo_ref
+        library_store.repo_ref = lambda: {"slug": None, "branch": None, "available": False}
+        try:
+            with TestClient(app) as client:
+                payload = client.get("/api/logs/source").json()
+        finally:
+            library_store.repo_ref = original
+        self.assertFalse(payload["available"])
+        self.assertIn("checkout", payload["reason"].lower())
+
+
+class ArtifactExportTests(unittest.TestCase):
+    def test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world(self):
+        import os
+        from fastapi.testclient import TestClient
+        from app import guardrails
+        from app.config import ARTIFACTS
+        from app.main import app
+        folder = os.path.join(ARTIFACTS, "runs", "zip-guard")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "big.bin"), "wb") as handle:
+            handle.write(b"x" * 4096)
+        original = guardrails.MAX_ZIP_BYTES
+        guardrails.MAX_ZIP_BYTES = 1024
+        try:
+            with TestClient(app) as client:
+                response = client.get("/api/sync/github")
+                self.assertEqual(response.status_code, 413)
+                self.assertIn("exceed", response.json()["detail"])
+        finally:
+            guardrails.MAX_ZIP_BYTES = original
+
+    def test_UT_MEM_08_artifact_export_streams_within_the_cap(self):
+        import io
+        import os
+        import zipfile
+        from fastapi.testclient import TestClient
+        from app import guardrails
+        from app.config import ARTIFACTS
+        from app.main import app
+        folder = os.path.join(ARTIFACTS, "runs", "zip-ok")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "small.txt"), "w", encoding="utf-8") as handle:
+            handle.write("hello")
+        original = guardrails.MAX_ZIP_BYTES
+        guardrails.MAX_ZIP_BYTES = 64 * 1024 * 1024
+        try:
+            with TestClient(app) as client:
+                response = client.get("/api/sync/github")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.headers["content-type"], "application/zip")
+                archive = zipfile.ZipFile(io.BytesIO(response.content))
+                self.assertIn("runs/zip-ok/small.txt", archive.namelist())
+        finally:
+            guardrails.MAX_ZIP_BYTES = original
+
+
+
 if __name__ == "__main__":
     unittest.main()

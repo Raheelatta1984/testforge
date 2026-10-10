@@ -1,12 +1,14 @@
-import asyncio, os, io, zipfile, base64, re, time
+import asyncio, os, tempfile, zipfile, base64, re, time
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
+from starlette.background import BackgroundTask
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
+from app import guardrails
 from app.config import ARTIFACTS
 from app.errors import redact
 from app.db import (
@@ -40,20 +42,16 @@ except Exception as exc:
 app = FastAPI(title="TestForge Titan ERP - Optimized")
 init_db()
 try:
-    # Fast startup: try fast path, fallback to full materialize only if needed
-    # This avoids slow loading on boot
-    fast_projects = library_store.list_projects_fast()
-    if fast_projects is None:
-        library_store.materialize_all()
-    else:
-        # Still materialize in background for DB sync, but don't block startup
-        # For now, do quick materialize with cache check (fast if no changes)
+    # Both branches of the old fast path called materialize_all(), so the branch
+    # was decoration and boot walked the whole library tree twice over. The
+    # catalog alone is enough to serve the dashboard; the database is filled in
+    # on the first request that actually needs it.
+    if library_store.list_projects_fast() is None:
         library_store.materialize_all()
     # Network publication runs in the retry worker, never on the startup path.
 except Exception as exc:
     print(f"LIBRARY LOAD FAILED: {redact(exc)}")
 RUN_STREAMS = {}
-RUN_BUFFERS = {}
 # run_id -> whether that run was queued with the live window on. Bounded, so a
 # long-lived worker does not accumulate one entry per run forever.
 RUN_WINDOWS = {}
@@ -174,15 +172,20 @@ def _recording_dict(recording: Recording, with_steps: bool = False) -> dict:
     return payload
 
 
-def _run_dict(run: Run) -> dict:
-    log = run.execution_log or []
-    return {
+def _run_dict(run: Run, with_log: bool = True) -> dict:
+    """Serialise a run.
+
+    `execution_log` holds every step with its selector, excerpt and screenshot
+    path, so it dominates the payload. The list endpoint leaves it out by
+    default; the dashboard polls that list every few seconds.
+    """
+    log = (run.execution_log or []) if with_log else []
+    payload = {
         "id": run.id,
         "recording_id": run.recording_id,
         "status": run.status,
         "progress_pct": run.progress_pct or 0,
-        "execution_log": log,
-        "log": log,
+        "step_count": len(run.execution_log or []),
         "video_path": run.video_path,
         "rog_monitor_log": run.rog_monitor_log,
         "rog_devops_log": run.rog_devops_log,
@@ -191,15 +194,16 @@ def _run_dict(run: Run) -> dict:
         "finished_at": run.finished_at,
         "display_window": RUN_WINDOWS.get(run.id, True),
     }
+    if with_log:
+        payload["execution_log"] = log
+        payload["log"] = log
+    return payload
 
 
 async def broadcast_run(run_id, payload):
-    buf = RUN_BUFFERS.setdefault(run_id, [])
-    if payload.get("type") == "frame":
-        buf[:] = [item for item in buf if item.get("type") != "frame"]
-    buf.append(payload)
-    if len(buf) > 200:
-        del buf[:-200]
+    # Bounded: an unbounded buffer per run is a slow leak that only shows up as
+    # an OOM restart days later.
+    guardrails.run_buffers.append(run_id, payload)
     for queue in list(RUN_STREAMS.get(run_id, [])):
         try:
             queue.put_nowait(payload)
@@ -230,6 +234,8 @@ def health():
         "library": "repository",
         "optimized": True,
         "library_publish_enabled": library_store.publish_enabled(),
+        # Cheap, allocation-free, and it is what Render's health check hits.
+        "guardrails": guardrails.report(),
     }
 
 
@@ -301,6 +307,29 @@ def create_project(body: dict):
         ) from exc
 
 
+def _memory_report() -> dict:
+    """Resident memory of this process, so a slow leak is visible before the OOM."""
+    report = {"rss_bytes": None, "rss_mb": None, "limit_bytes": None}
+    try:
+        with open("/proc/self/status", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if line.startswith("VmRSS:"):
+                    report["rss_bytes"] = int(line.split()[1]) * 1024
+                    break
+    except OSError:
+        pass
+    if report["rss_bytes"]:
+        report["rss_mb"] = round(report["rss_bytes"] / (1024 * 1024), 1)
+    try:
+        with open("/sys/fs/cgroup/memory.max", "r", encoding="utf-8") as handle:
+            raw = handle.read().strip()
+            if raw.isdigit():
+                report["limit_bytes"] = int(raw)
+    except OSError:
+        pass
+    return report
+
+
 def _probe_project_write():
     """Try writing a throwaway project inside a transaction that is rolled back."""
     db = SessionLocal()
@@ -331,7 +360,9 @@ def diagnostics():
             "library_publish_enabled": library_store.publish_enabled(),
             "adaptive_preview": True,
             "smooth_save": True,
-        }
+        },
+        "guardrails": guardrails.report(),
+        "memory": _memory_report(),
     }
     try:
         with engine.connect() as connection:
@@ -800,9 +831,17 @@ async def queue_run(body: dict):
 
 
 @app.get("/api/runs")
-def get_runs():
+def get_runs(limit: int | None = None, full: bool = False):
+    """Recent runs, newest first.
+
+    Bounded on purpose: returning every run ever recorded with its full log is
+    what made the dashboard's 3-second poll grow without limit.
+    """
+    cap = guardrails.DEFAULT_RUN_LIST_LIMIT if limit is None else limit
+    cap = max(1, min(int(cap), guardrails.MAX_RUN_LIST_LIMIT))
     with SessionLocal() as db:
-        return [_run_dict(run) for run in db.query(Run).order_by(Run.created_at.desc()).all()]
+        rows = db.query(Run).order_by(Run.created_at.desc()).limit(cap).all()
+        return [_run_dict(run, with_log=full) for run in rows]
 
 
 @app.get("/api/runs/{run_id}")
@@ -948,14 +987,47 @@ def sync_github():
 
 @app.get("/api/sync/github")
 def get_sync():
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as archive:
-        for root, _, files in os.walk(ARTIFACTS):
-            for name in files:
-                full = os.path.join(root, name)
-                archive.write(full, os.path.relpath(full, ARTIFACTS))
-    buf.seek(0)
-    return Response(buf.read(), media_type="application/zip")
+    """Download the artifact tree, streamed from disk.
+
+    This used to build the whole archive in a BytesIO and return `buf.read()`,
+    so a single request could hold every screenshot and video the service has
+    ever produced in RAM. That is a one-request OOM. Build to a temp file and
+    stream it, and refuse to grow past a cap.
+    """
+    handle = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
+    path = handle.name
+    total = 0
+    try:
+        with zipfile.ZipFile(handle, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for root, _, files in os.walk(ARTIFACTS):
+                for name in files:
+                    full = os.path.join(root, name)
+                    try:
+                        size = os.path.getsize(full)
+                    except OSError:
+                        continue
+                    if total + size > guardrails.MAX_ZIP_BYTES:
+                        raise HTTPException(
+                            status_code=413,
+                            detail=(
+                                f"Artifact export would exceed "
+                                f"{guardrails.MAX_ZIP_BYTES // (1024 * 1024)}MB. "
+                                "Download a single run instead."
+                            ),
+                        )
+                    total += size
+                    archive.write(full, os.path.relpath(full, ARTIFACTS))
+    except HTTPException:
+        handle.close()
+        os.unlink(path)
+        raise
+    except Exception as exc:
+        handle.close()
+        os.unlink(path)
+        raise HTTPException(status_code=500, detail=f"Could not build the export: {redact(exc)}") from exc
+    handle.close()
+    return FileResponse(path, media_type="application/zip", filename="testforge-artifacts.zip",
+                        background=BackgroundTask(os.unlink, path))
 
 
 @app.websocket("/ws/record/{rid}")
@@ -1022,7 +1094,7 @@ async def ws_run(ws: WebSocket, run_id: str):
     await ws.accept()
     queue = asyncio.Queue()
     RUN_STREAMS.setdefault(run_id, []).append(queue)
-    for event in list(RUN_BUFFERS.get(run_id, [])):
+    for event in guardrails.run_buffers.get(run_id):
         queue.put_nowait(event)
     # Immediately send queued status so window displays (requirement 8)
     try:
@@ -1040,10 +1112,53 @@ async def ws_run(ws: WebSocket, run_id: str):
     except Exception:
         pass
     finally:
-        try:
-            RUN_STREAMS[run_id].remove(queue)
-        except ValueError:
-            pass
+        queues = RUN_STREAMS.get(run_id)
+        if queues is not None:
+            try:
+                queues.remove(queue)
+            except ValueError:
+                pass
+            if not queues:
+                RUN_STREAMS.pop(run_id, None)
+
+
+@app.get("/api/logs/source")
+def logs_source(branch: str | None = None):
+    """Where to read harness logs, so the dashboard can fetch them from GitHub.
+
+    Returns coordinates only. The logs themselves are fetched by the browser
+    straight from raw.githubusercontent.com, which keeps them off this instance
+    entirely - no disk read, no bandwidth, no memory.
+    """
+    ref = library_store.repo_ref()
+    wanted = (branch or ref.get("branch") or "").strip()
+    # Every slash-separated segment must start alphanumerically, so "../etc" and
+    # friends cannot be smuggled into the raw.githubusercontent.com URL.
+    safe_branch = re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]*(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*", wanted
+    )
+    if wanted and (not safe_branch or ".." in wanted):
+        raise HTTPException(status_code=422, detail="Branch name is not valid")
+    slug = ref.get("slug")
+    if not slug:
+        return {
+            "available": False,
+            "reason": "No git checkout here, so the log location is unknown.",
+            "slug": None,
+            "branch": None,
+            "base": None,
+            "index": None,
+        }
+    base = f"https://raw.githubusercontent.com/{slug}/{wanted}"
+    return {
+        "available": True,
+        "slug": slug,
+        "branch": wanted,
+        "base": base,
+        "index": f"{base}/logs/index.md",
+        "api": f"https://api.github.com/repos/{slug}/contents/logs?ref={wanted}",
+        "note": "Fetched by your browser directly from GitHub. This service never reads or serves the logs.",
+    }
 
 
 @app.post("/api/ai/rephrase")

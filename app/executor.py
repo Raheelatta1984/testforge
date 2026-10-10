@@ -17,15 +17,12 @@ from pathlib import Path
 
 from playwright.async_api import async_playwright
 
+from app import guardrails
 from app.browser import Preview, explain_launch_error, launch_kwargs, video_ok
 from app.config import ARTIFACTS, logger
 from app.db import Recording, Run, SessionLocal, interpolate, resolve_variables
+from app.guardrails import browser_budget, live_frames
 from app.library_store import playback_url
-
-execution_lock = asyncio.Semaphore(1)
-LIVE_FRAMES = {}
-RUN_QUEUE = []  # for immediate display
-RUN_QUEUE_LOCK = asyncio.Lock()
 
 # Per-step body-text excerpt kept for the run audit and the library scenarios.
 # It is the only per-step work that is not required to replay, so it is the one
@@ -45,7 +42,8 @@ async def _persist_shot(directory, name, data):
 
 
 def live_frame(run_id):
-    return LIVE_FRAMES.get(run_id)
+    """Last frame for a run, from the bounded store. None once it ages out."""
+    return live_frames.get(run_id)
 
 
 def _step_dict(step):
@@ -222,7 +220,9 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
     await on_event({"type": "status", "status": "queued", "percent": 0, "message": "Queued, starting immediately..."})
     _save(run_id, status="queued", progress_pct=0, execution_log=[])
 
-    async with execution_lock:
+    # One browser slot for the whole run, shared with the recorder: two Chromium
+    # processes at once is what took the hosted instance over its memory limit.
+    async with browser_budget.slot(f"run:{run_id}"):
         start_time = time.time()
         with SessionLocal() as db:
             run = db.get(Run, run_id)
@@ -265,7 +265,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             return
 
         def publish(data: bytes):
-            LIVE_FRAMES[run_id] = data
+            live_frames.put(run_id, data)
             try:
                 with open(os.path.join(run_dir, "live.jpg"), "wb") as handle:
                     handle.write(data)

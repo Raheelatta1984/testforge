@@ -19,6 +19,9 @@ Rephrased as a senior QA automation engineer's acceptance criteria. The reposito
 | 13 | The execution tab has a working toggle for the live browser window, and a run passes either way. | `display_window` flows from the Runs tab through `POST /api/runs` into `execute_run`; off means no preview loop at all. `UT-RUN-04`, `UT-RUN-05`. |
 | 14 | The GitHub tab states *why* it reads the way it does. A deployment with no git checkout must report the cause, not bare `—` for branch and revision. | `status()` returns `git_state`, `git_error`, `status_reason` and a disk report; the panel renders them and disables the push button with an explanation. `UT-GIT-01`, `UT-GIT-02`. The image must ship `library/` or a fresh container legitimately has no projects. |
 
+| 15 | The deployment stays inside its memory ceiling. One Chromium at a time across recording and execution; live frames, run buffers and run lists are bounded; the artifact export streams from disk and refuses to exceed a cap. | `app/guardrails.py`, `/api/diagnostics` reports the limits plus RSS and the cgroup ceiling. `UT-MEM-01`…`UT-MEM-08`, `UT-API-01`. Real memory headroom must still be watched on the instance. |
+| 16 | Harness logs are displayed from the GitHub repository, not from this server. The service supplies only the coordinates; the browser fetches the files from `raw.githubusercontent.com`. | `GET /api/logs/source` plus the Logs tab. Branch names are validated so a traversal cannot reach the URL. `UT-LOG-01`…`UT-LOG-03`. Requires the logs to be committed to the branch being viewed. |
+
 ## Validation
 
 Run `.venv/bin/python -m tests.test_unit` or `python -m tests.harness`. Browser-dependent scenarios need Chromium (`playwright install chromium`) and a reachable test application. Run deployed browser tests and measure click-to-step latency and PNG sizes before marking those performance targets verified.
