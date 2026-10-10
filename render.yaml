@@ -9,6 +9,7 @@ projects:
       name: UI-Test-Forge
       runtime: docker
       repo: https://github.com/Raheelatta1984/testforge
+      branch: main
       plan: free
       envVars:
       - key: API_Key
