@@ -8,6 +8,12 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       TF_ARTIFACTS: /app/artifacts
       TF_MCP_ARGS: '-y @playwright/mcp@latest --headless --isolated --caps=vision'
+      # Publishing without a git checkout: name the repository and supply a token.
+      # Leave TF_GITHUB_REPO empty and the GitHub tab reports publishing disabled
+      # instead of guessing where to push.
+      TF_GITHUB_REPO: ${TF_GITHUB_REPO:-}
+      TF_GITHUB_TOKEN: ${TF_GITHUB_TOKEN:-}
+      TF_GITHUB_BRANCH: ${TF_GITHUB_BRANCH:-main}
     volumes:
       - testforge-data:/app/artifacts
     restart: unless-stopped

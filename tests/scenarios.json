@@ -196,6 +196,47 @@
         {"action": "queue_run", "recording": "qa-hello-variable", "save": "run"},
         {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Ada"}
       ]
+    },
+    {
+      "id": "LB-API-11",
+      "title": "The execution queue reports and clears entries that will never run",
+      "requires": "api",
+      "steps": [
+        {"action": "queue_hygiene"}
+      ]
+    },
+    {
+      "id": "LB-API-12",
+      "title": "Batch selection is validated before a browser is launched",
+      "requires": "api",
+      "steps": [
+        {"action": "batch_validation"}
+      ]
+    },
+    {
+      "id": "LB-API-13",
+      "title": "The Logs tab has a source even without a git checkout",
+      "requires": "api",
+      "steps": [
+        {"action": "logs_fallback"}
+      ]
+    },
+    {
+      "id": "LB-API-14",
+      "title": "Publishing state is reported consistently and never promises a phantom retry",
+      "requires": "api",
+      "steps": [
+        {"action": "publish_contract"}
+      ]
+    },
+    {
+      "id": "LB-BAT-01",
+      "title": "One browser replays both committed recordings in a batch",
+      "requires": "browser",
+      "steps": [
+        {"action": "start_batch", "recording_ids": ["qa-hello-literal", "qa-hello-variable"], "screenshots": "failure", "name": "Harness batch", "save": "batch"},
+        {"action": "wait_batch", "batch": "$batch", "expect_status": "passed", "expect_browsers": 1}
+      ]
     }
   ]
 }

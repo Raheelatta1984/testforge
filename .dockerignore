@@ -1,0 +1,17 @@
+# The build context only needs requirements.txt, app/, library/ and logs/.
+# Keeping .git and the local virtualenv out of it makes the image build faster
+# and stops a developer's .venv (with its host-specific binaries) reaching the
+# 512MB deployment by accident.
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.py[cod]
+artifacts
+tests
+docs
+Dockerfile
+docker-compose.yml
+render.yaml
+.DS_Store

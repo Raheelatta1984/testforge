@@ -82,19 +82,51 @@ class Run(Base):
     __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     recording_id: Mapped[str] = mapped_column(ForeignKey("recordings.id"))
-    status: Mapped[str] = mapped_column(String(50), default="queued") # queued, running, failed, passed, investigating
+    status: Mapped[str] = mapped_column(String(50), default="queued") # queued, running, failed, passed, investigating, cancelled
     progress_pct: Mapped[int] = mapped_column(Integer, default=0)
     execution_log: Mapped[list] = mapped_column(JSON, default=list)
     video_path: Mapped[str] = mapped_column(String(1000), nullable=True)
-    
+
     # ROG AGENT INVESTIGATION
     rog_monitor_log: Mapped[str] = mapped_column(Text, nullable=True)
     rog_devops_log: Mapped[str] = mapped_column(Text, nullable=True)
     rog_qa_log: Mapped[str] = mapped_column(Text, nullable=True)
-    
+
+    # Queue hygiene and batch execution. All nullable: rows written by an older
+    # revision keep working, and repair_schema() adds the columns to a database
+    # that was created before they existed.
+    batch_id: Mapped[str] = mapped_column(String(36), nullable=True)   # Batch this run belongs to
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # when the browser actually took it
+    cancel_reason: Mapped[str] = mapped_column(String(500), nullable=True) # why the queue dropped it
+
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     recording: Mapped["Recording"] = relationship(back_populates="runs")
+
+
+class Batch(Base):
+    """One adaptive batch execution of many recordings through a single browser.
+
+    A batch is a row of its own so the dashboard can show progress and a report
+    after the worker that created it is long gone (or was restarted mid-flight).
+    """
+
+    __tablename__ = "batches"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    name: Mapped[str] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="queued")  # queued, running, passed, partial, failed, cancelled, error
+    total: Mapped[int] = mapped_column(Integer, default=0)
+    done: Mapped[int] = mapped_column(Integer, default=0)
+    passed: Mapped[int] = mapped_column(Integer, default=0)
+    failed: Mapped[int] = mapped_column(Integer, default=0)
+    skipped: Mapped[int] = mapped_column(Integer, default=0)
+    progress_pct: Mapped[int] = mapped_column(Integer, default=0)
+    options: Mapped[dict] = mapped_column(JSON, default=dict)
+    report: Mapped[dict] = mapped_column(JSON, default=dict)   # timings, pacing profile, resources
+    error: Mapped[str] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
 # Result of the most recent schema check. Exposed by /api/diagnostics so a bad
 # deployment can be diagnosed from the dashboard instead of the server logs.

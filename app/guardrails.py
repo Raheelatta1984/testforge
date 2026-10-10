@@ -11,6 +11,8 @@ module exists because something was previously unbounded:
 * ``GET /api/sync/github`` zipped the entire artifact tree into RAM in one go.
 * ``GET /api/runs`` returned every run with its full log, and the dashboard
   polled it every few seconds.
+* Batch execution could claim every recording in the library at once, and the
+  Logs tab could be asked to serve an arbitrarily large file from disk.
 
 Everything here is a plain number with an environment override, so an operator
 can tune the deployment without reading the call sites.
@@ -53,6 +55,36 @@ MAX_ZIP_BYTES = _int("TF_MAX_ZIP_BYTES", 64 * 1024 * 1024)
 # --- List endpoints ---------------------------------------------------------
 DEFAULT_RUN_LIST_LIMIT = _int("TF_RUN_LIST_LIMIT", 25)
 MAX_RUN_LIST_LIMIT = _int("TF_RUN_LIST_MAX", 100)
+
+# --- Batch execution --------------------------------------------------------
+# A batch replays many recordings through ONE browser. The caps below are what
+# keep "many" from becoming an unbounded request: how much work one batch may
+# claim, how much of it is kept in memory, and how many batches may exist at once.
+MAX_BATCH_RECORDINGS = _int("TF_BATCH_MAX_RECORDINGS", 40)
+MAX_CONCURRENT_BATCHES = _int("TF_MAX_BATCHES", 1)
+BATCH_LOG_ENTRIES = _int("TF_BATCH_LOG_ENTRIES", 200)
+MAX_BATCH_REPORTS = _int("TF_BATCH_REPORTS", 40)
+BATCH_LIST_LIMIT = _int("TF_BATCH_LIST_LIMIT", 20)
+
+
+def _flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Sharing one browser context across same-origin recordings keeps a login warm and
+# avoids a context per recording. Turn it off for strict isolation.
+BATCH_SHARE_SESSION = _flag("TF_BATCH_SHARE_SESSION", True)
+# One escalated retry for a timeout or a network error, never for a missing selector.
+BATCH_RETRY_TRANSIENT = _flag("TF_BATCH_RETRY_TRANSIENT", True)
+
+# --- Local log reader -------------------------------------------------------
+# Used only when a deployment has no git checkout to read committed logs from.
+# Bounded so the Logs tab cannot be turned into a way to read this instance dry.
+MAX_LOG_FILE_BYTES = _int("TF_MAX_LOG_FILE_BYTES", 256 * 1024)
+MAX_LOG_INDEX_ROWS = _int("TF_MAX_LOG_INDEX_ROWS", 40)
 
 
 class BrowserBudget:
@@ -237,10 +269,41 @@ class BoundedRunBuffers:
         }
 
 
+class BatchBudget:
+    """How many batches may execute at once.
+
+    The browser budget already serialises Chromium, so a second batch would only
+    sit waiting while holding its run rows in the queue. Refusing it up front is
+    cheaper than queueing it, and the caller can tell the user why.
+    """
+
+    def __init__(self, limit: int):
+        self.limit = max(1, int(limit))
+        self.active = 0
+        self.peak = 0
+        self.rejected = 0
+
+    def acquire(self) -> bool:
+        if self.active >= self.limit:
+            self.rejected += 1
+            return False
+        self.active += 1
+        self.peak = max(self.peak, self.active)
+        return True
+
+    def release(self) -> None:
+        self.active = max(0, self.active - 1)
+
+    def report(self) -> dict:
+        return {"limit": self.limit, "active": self.active, "peak": self.peak,
+                "rejected": self.rejected}
+
+
 # Singletons shared by the recorder, the executor and the API.
 browser_budget = BrowserBudget(MAX_CONCURRENT_BROWSERS)
 live_frames = BoundedFrames(MAX_LIVE_FRAME_RUNS, LIVE_FRAME_TTL)
 run_buffers = BoundedRunBuffers(MAX_RUN_BUFFER_RUNS, MAX_RUN_BUFFER_EVENTS)
+batch_budget = BatchBudget(MAX_CONCURRENT_BATCHES)
 
 
 def report() -> dict:
@@ -252,4 +315,8 @@ def report() -> dict:
         "run_buffers": run_buffers.report(),
         "max_zip_bytes": MAX_ZIP_BYTES,
         "run_list_limit": DEFAULT_RUN_LIST_LIMIT,
+        "batch": batch_budget.report(),
+        "batch_max_recordings": MAX_BATCH_RECORDINGS,
+        "batch_log_entries": BATCH_LOG_ENTRIES,
+        "max_log_file_bytes": MAX_LOG_FILE_BYTES,
     }

@@ -59,3 +59,45 @@ projects:
       # Artifact export is streamed from disk and refuses to exceed this.
       - key: TF_MAX_ZIP_BYTES
         value: "67108864"
+      # --- publishing without a git checkout --------------------------------
+      # The container is built from app/ and library/, so it has no .git and
+      # cannot `git push`. Naming the repository and supplying a token lets it
+      # publish library/ through the GitHub REST API instead. With no repository
+      # named, publishing stays disabled - a stray CI token cannot push anywhere.
+      - key: TF_GITHUB_REPO
+        value: Raheelatta1984/testforge
+      - key: TF_GITHUB_BRANCH
+        value: main
+      # A fine-grained or classic token scoped to this repository's contents.
+      - key: TF_GITHUB_TOKEN
+        sync: false
+      # --- queue hygiene ----------------------------------------------------
+      # A deploy restarts the service, and runs queued before it can never finish.
+      - key: TF_QUEUE_ORPHAN_GRACE
+        value: "120"
+      - key: TF_QUEUE_STALE_MINUTES
+        value: "30"
+      - key: TF_QUEUE_SWEEP_SECONDS
+        value: "300"
+      - key: TF_RUN_RETENTION_DAYS
+        value: "14"
+      # --- batch execution --------------------------------------------------
+      # One browser for the whole batch; screenshots only when a step fails.
+      - key: TF_BATCH_SCREENSHOTS
+        value: failure
+      - key: TF_BATCH_MAX_RECORDINGS
+        value: "40"
+      - key: TF_MAX_BATCHES
+        value: "1"
+      # Relaunch the browser between recordings rather than be killed by the plan.
+      - key: TF_BATCH_MAX_RSS_MB
+        value: "420"
+      # --- logs tab ---------------------------------------------------------
+      # Committed logs are read from GitHub by the browser; these bound the
+      # fallback that reads the reports shipped inside the image.
+      - key: TF_LOGS_BRANCH
+        value: main
+      - key: TF_MAX_LOG_FILE_BYTES
+        value: "262144"
+      - key: TF_MAX_LOG_INDEX_ROWS
+        value: "40"

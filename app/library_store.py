@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from app.config import logger
+from app import github_api
 from app.db import (
     Project,
     Recording,
@@ -83,11 +84,55 @@ def library_dir() -> Path:
     return path
 
 
-def publish_enabled() -> bool:
+def publish_mode() -> str:
+    """How a save can reach GitHub: ``checkout``, ``api`` or ``disabled``.
+
+    ``checkout`` is the normal case — the library sits inside a git working tree
+    and is committed and pushed with the git binary. ``api`` covers the hosted
+    container, which is built from ``app/`` and ``library/`` only and therefore has
+    no ``.git``: there the GitHub REST API commits the same files, provided
+    ``TF_GITHUB_REPO`` and a token are configured. ``disabled`` means neither, and
+    every message the dashboard shows must say so instead of promising a retry.
+    """
     flag = os.environ.get("TF_LIBRARY_PUBLISH")
     if flag is not None and flag.strip() != "":
-        return flag.strip().lower() in {"1", "true", "yes", "on"}
-    return git_root() is not None
+        if flag.strip().lower() not in {"1", "true", "yes", "on"}:
+            return "disabled"
+        return "checkout" if git_root() is not None else ("api" if github_api.enabled() else "disabled")
+    if git_root() is not None:
+        return "checkout"
+    return "api" if github_api.enabled() else "disabled"
+
+
+def publish_enabled() -> bool:
+    return publish_mode() != "disabled"
+
+
+def publish_disabled_reason() -> str | None:
+    """Why a save cannot be published, in the words the dashboard should show.
+
+    Composed rather than either/or: a deployment can have no checkout *and* have
+    publishing switched off, and reporting only one of the two sends the operator
+    looking in the wrong place.
+    """
+    if publish_mode() != "disabled":
+        return None
+    parts: list[str] = []
+    if git_root() is None:
+        parts.append(
+            "No .git directory at or above the library folder, so there is no "
+            "branch to publish to; the library is served from local files."
+        )
+    flag = os.environ.get("TF_LIBRARY_PUBLISH")
+    if flag is not None and flag.strip().lower() in {"0", "false", "no", "off"}:
+        parts.append("Publishing is also switched off with TF_LIBRARY_PUBLISH=0.")
+    else:
+        api = github_api.describe()
+        parts.append(
+            api.get("reason")
+            or "No GitHub API credentials are configured (TF_GITHUB_REPO with TF_GITHUB_TOKEN)."
+        )
+    return " ".join(parts)
 
 
 def git_root() -> Path | None:
@@ -841,13 +886,22 @@ def _discard_project(project_id: str) -> None:
 
 
 def _publish_current_branch(message: str) -> bool:
-    """Publish only the checked-out branch; never merge/rebase or touch main.
+    """Publish the library and verify it landed; never merge/rebase or touch main.
+
+    Two mechanisms, one contract:
+
+    * a git checkout — commit ``library/`` on the checked-out branch and push it;
+    * no checkout — commit the same files through the GitHub REST API
+      (:mod:`app.github_api`), which is what the hosted container has to use.
 
     A successful push is verified against the remote ref before it is reported.
-    Failed pushes retain the local commit for the next retry.
+    Failed pushes keep the local files for the next retry.
     """
-    if not publish_enabled():
+    mode = publish_mode()
+    if mode == "disabled":
         return False
+    if mode == "api":
+        return _publish_over_api(message)
     root = git_root()
     if root is None:
         raise PublishError("Library is not inside a git checkout")
@@ -874,22 +928,71 @@ def _publish_current_branch(message: str) -> bool:
     return True
 
 
+# Last API push, so the dashboard can show the commit it produced without another
+# network round trip. Bounded to one entry.
+_LAST_API_PUSH: dict[str, Any] = {}
+# Cached remote head for API mode. `status()` must stay cheap: it is read by the
+# GitHub tab and by /api/diagnostics, and neither should wait on api.github.com.
+_API_HEAD: dict[str, Any] = {"sha": None, "ts": 0.0, "branch": None}
+_API_HEAD_TTL = 60.0
+
+
+def last_api_push() -> dict:
+    return dict(_LAST_API_PUSH)
+
+
+def _remember_api_head(sha: str | None, branch_name: str | None) -> None:
+    _API_HEAD.update({"sha": sha, "ts": time.time(), "branch": branch_name})
+
+
+def cached_api_head() -> str | None:
+    if _API_HEAD.get("sha") and (time.time() - float(_API_HEAD.get("ts") or 0)) < _API_HEAD_TTL:
+        return str(_API_HEAD["sha"])
+    return None
+
+
+def _publish_over_api(message: str) -> bool:
+    """Commit the library through the GitHub REST API and verify the branch ref."""
+    try:
+        report = github_api.publish(message, library_dir())
+    except github_api.GitHubAPIError as exc:
+        raise PublishError(str(exc)) from exc
+    _LAST_API_PUSH.clear()
+    _LAST_API_PUSH.update(report)
+    _remember_api_head(report.get("remote_sha") or report.get("local_sha"), report.get("branch"))
+    if report.get("published"):
+        logger.info("LIBRARY PUBLISHED VIA API %s file(s) -> %s@%s",
+                    report.get("total"), report.get("branch"), str(report.get("commit"))[:7])
+        return True
+    # "Nothing to do" is a success: the remote already matches this instance.
+    return report.get("state") == "synced"
+
+
 def remote_library_status() -> dict:
     """Read the remote ref, not a possibly stale local tracking branch.
 
     Always carries a `state` and a human-readable `reason`, because a bare
-    `synced: false` tells the dashboard nothing it can act on.
+    `synced: false` tells the dashboard nothing it can act on. With no checkout it
+    asks the GitHub API instead of giving up, and only reports `no-checkout` when
+    there is no way to publish at all.
     """
     root = git_root()
     if root is None:
+        if github_api.enabled():
+            report = github_api.remote_status(library_root=library_dir())
+            _remember_api_head(report.get("remote_sha"), report.get("branch"))
+            report.setdefault("branch", github_api.branch())
+            return report
         return {
             "synced": False,
             "state": "no-checkout",
+            "mode": "disabled",
             "error": "No git checkout",
             "reason": (
-                "No .git directory was found at or above the library folder, so "
-                "there is no branch to verify or publish to. Mount or copy a git "
-                "checkout (or set TF_GIT_REMOTE with credentials) to enable pushing."
+                "No .git directory was found at or above the library folder, and no "
+                "GitHub API credentials are configured, so there is no branch to "
+                "verify or publish to. Mount or copy a git checkout, or set "
+                "TF_GITHUB_REPO with TF_GITHUB_TOKEN to publish over the GitHub API."
             ),
         }
     remote = os.environ.get("TF_GIT_REMOTE", "origin")
@@ -913,11 +1016,13 @@ def remote_library_status() -> dict:
             state, reason = "synced", "Remote branch SHA matches local HEAD."
         return {"branch": branch, "local_sha": local, "remote_sha": remote_sha,
                 "dirty": dirty, "synced": bool(remote_sha == local and not dirty),
-                "state": state, "reason": reason}
+                "state": state, "reason": reason, "mode": "checkout"}
     except PublishError as exc:
         return {
             "synced": False,
             "state": "unreachable",
+            "mode": "checkout",
+            "branch": None,
             "error": str(exc),
             "reason": f"Could not read remote {remote}: {exc}",
         }
@@ -928,18 +1033,92 @@ def _publish_unlocked(message: str) -> bool:
     return _publish_current_branch(message)
 
 
+# The retry loop in app.main waits this long between attempts. It is part of the
+# wording the dashboard shows, so the two must not drift apart.
+PUBLISH_RETRY_SECONDS = int(os.environ.get("TF_PUBLISH_RETRY_SECONDS", "60") or 60)
+
+
+def publish_outcome(published: bool, error: str | None = None) -> dict:
+    """One honest description of what happened to a save.
+
+    The dashboard used to build this sentence itself and always promised a retry,
+    including when publishing was disabled and nothing would ever retry. Every
+    caller now returns these fields and the UI prints `publish_message` verbatim.
+    """
+    mode = publish_mode()
+    enabled = mode != "disabled"
+    error = error or last_publish_error()
+    branch = None
+    if mode == "checkout":
+        root = git_root()
+        try:
+            branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root) if root else None
+        except (PublishError, OSError):
+            # A checkout on an unmounted volume is still a checkout; the branch is
+            # simply unknown here, and the message must not fail because of that.
+            branch = None
+    elif mode == "api":
+        branch = github_api.branch()
+    where = f"{github_api.repo_slug() or 'the repository'}@{branch}" if branch else "the repository"
+    if published:
+        state = "published"
+        message = f"Published to {where} ({'git push' if mode == 'checkout' else 'GitHub API'})."
+        retry = False
+    elif not enabled:
+        state = "local-only"
+        message = (
+            "Saved locally. GitHub publishing is disabled in this deployment: no push "
+            "is scheduled and no retry will run. " + (publish_disabled_reason() or "")
+        ).strip()
+        retry = False
+    else:
+        state = "retry-pending"
+        detail = f" ({error})" if error else ""
+        message = (
+            f"Saved locally. The push to {where} did not complete{detail} and will be "
+            f"retried in {PUBLISH_RETRY_SECONDS}s."
+        )
+        retry = True
+    return {
+        "published": bool(published),
+        "publish_error": None if published else (
+            (publish_disabled_reason() if not enabled else error) or "Push not verified"
+        ),
+        "publish_state": state,
+        "publish_mode": mode,
+        "publish_enabled": enabled,
+        "publish_branch": branch,
+        "retry_scheduled": retry,
+        "retry_in_seconds": PUBLISH_RETRY_SECONDS if retry else None,
+        "publish_message": message,
+    }
+
+
 def publish_pending() -> bool:
     with LOCK:
         return _publish_unlocked("Save library changes")
 
 
+# Why the most recent publish attempt did not complete. `_finish` swallows the
+# PublishError on purpose (the local save succeeded), but the dashboard still has
+# to say what went wrong instead of a generic "not verified".
+_LAST_PUBLISH_ERROR: dict[str, Any] = {"error": None}
+
+
+def last_publish_error() -> str | None:
+    return _LAST_PUBLISH_ERROR.get("error")
+
+
 def _finish(message: str) -> bool:
     _write_catalog()
     try:
-        return _publish_unlocked(message)
+        published = _publish_unlocked(message)
     except PublishError as exc:
         logger.warning("LIBRARY SAVED LOCALLY; PUSH PENDING: %s", exc)
+        _LAST_PUBLISH_ERROR["error"] = str(exc)
         return False
+    _LAST_PUBLISH_ERROR["error"] = None if published else "Push completed but the remote branch did not match"
+    return published
 
 
 def create_project(name: str, base_url: str) -> dict:
@@ -957,7 +1136,7 @@ def create_project(name: str, base_url: str) -> dict:
                 db.refresh(project)
                 project_id = project.id
             payload = _write_project_files(project_id)
-            payload["published"] = _finish(f"Save library project {name} - {base_url}")
+            payload.update(publish_outcome(_finish(f"Save library project {name} - {base_url}")))
             return payload
         except Exception:
             if project_id:
@@ -992,7 +1171,7 @@ def create_recording(project_id: str, name: str, start_url: str, parent_id: str 
                 db.refresh(recording)
                 recording_id = recording.id
             payload = _write_recording_files(recording_id)
-            payload["published"] = _finish(f"Save library recording {name} - Project {project_id}")
+            payload.update(publish_outcome(_finish(f"Save library recording {name} - Project {project_id}")))
             return payload
         except Exception:
             if recording_id:
@@ -1042,7 +1221,7 @@ def create_variable(project_id: str, name: str, value: str) -> dict:
             _write_project_files(project_id)
             published = _finish(f"Save library variable {name} - Project {project_id}")
             saved = next(item for item in list_variables(project_id) if item["id"] == variable_id)
-            saved["published"] = published
+            saved.update(publish_outcome(published))
             return saved
         except Exception:
             if variable_id:
@@ -1140,20 +1319,16 @@ def export_recording(recording_id: str, *, publish: bool = False) -> dict | None
 
         if publish:
             try:
-                payload["published"] = _finish(f"Save library recording {payload['name']} - {payload['id']} - {datetime.utcnow().isoformat()}Z")
-                if not payload["published"]:
-                    payload["publish_error"] = ("Push not verified; saved locally for retry" if publish_enabled()
-                                                else "GitHub publishing is disabled")
+                published = _finish(f"Save library recording {payload['name']} - {payload['id']} - {datetime.utcnow().isoformat()}Z")
+                payload.update(publish_outcome(published))
             except PublishError as pe:
-                # Even if publish fails, file is saved locally - log and return with published=False
+                # Even if publish fails, the file is saved locally: report that
+                # honestly, with a retry only when a retry will actually happen.
                 logger.warning("PUBLISH FAILED %s %s", recording_id, pe)
-                # Don't fail the whole save, just mark not published - will retry later
-                payload["published"] = False
-                payload["publish_error"] = str(pe)
-                # Still write catalog
+                payload.update(publish_outcome(False, str(pe)))
                 try:
                     _write_catalog()
-                except:
+                except Exception:
                     pass
         else:
             try:
@@ -1228,6 +1403,8 @@ def compress_recording(recording_id: str, *, publish: bool = True) -> dict:
             "changed": len(compressed) != before,
             "steps": payload.get("steps") or [],
             "published": bool(payload.get("published")),
+            "publish_message": payload.get("publish_message"),
+            "retry_scheduled": bool(payload.get("retry_scheduled")),
         }
 
 
@@ -1404,15 +1581,35 @@ def _library_disk_report() -> dict:
 
 def status() -> dict:
     root = git_root()
+    mode = publish_mode()
     branch = None
     revision = None
-    remote_url = "https://github.com/Raheelatta1984/testforge"
+    remote_url = f"https://github.com/{github_api.repo_slug() or github_api.DEFAULT_REPO}"
     dirty = False
     git_state = "ok"
     git_error = None
-    if root is None:
+    git_note = None
+    if root is None and mode == "api":
+        # No checkout, but the GitHub API can still publish: report the branch and
+        # the last verified revision instead of a wall of dashes.
+        git_state = "api"
+        branch = github_api.branch()
+        slug = github_api.repo_slug()
+        remote_url = f"https://github.com/{slug}" if slug else remote_url
+        head = cached_api_head()
+        revision = head[:7] if head else None
+        last = last_api_push()
+        if last.get("commit"):
+            revision = str(last["commit"])[:7]
+        git_note = (
+            f"No git checkout here: this instance publishes {slug}@{branch} through "
+            "the GitHub API. Saves are committed and verified against that branch."
+        )
+        if revision is None:
+            git_note += " The revision is read on the first verify or push."
+    elif root is None:
         git_state = "no-checkout"
-        git_error = (
+        git_error = publish_disabled_reason() or (
             "No .git directory at or above the library folder. A container image "
             "built from app/ only has no checkout, so there is no branch to "
             "publish to; the library is served from local files."
@@ -1455,7 +1652,7 @@ def status() -> dict:
     disk = _library_disk_report()
     if projects_error:
         reason = f"Library listing failed: {projects_error}"
-    elif git_state != "ok":
+    elif git_state == "no-checkout" or git_state == "unavailable":
         reason = git_error
     elif not projects:
         reason = (
@@ -1465,9 +1662,22 @@ def status() -> dict:
         )
     else:
         reason = None
+    api_info = github_api.describe()
     return {
         "source": "repository",
         "publish_enabled": publish_enabled(),
+        # How a save reaches GitHub: "checkout" (git push), "api" (REST commit) or
+        # "disabled". The dashboard keys its wording off this, so it can never
+        # promise a retry that nothing will perform.
+        "publish_mode": mode,
+        "publish_disabled_reason": publish_disabled_reason(),
+        "api_publish": {
+            "available": api_info["available"],
+            "slug": api_info["slug"],
+            "branch": api_info["branch"],
+            "reason": api_info["reason"],
+        },
+        "last_api_push": last_api_push() or None,
         "branch": branch,
         "revision": revision,
         "remote": os.environ.get("TF_GIT_REMOTE", "origin"),
@@ -1478,7 +1688,8 @@ def status() -> dict:
         # Diagnostics: the dashboard used to render bare dashes with no cause.
         "git_state": git_state,
         "git_error": git_error,
-        "git_available": git_state == "ok",
+        "git_note": git_note,
+        "git_available": git_state in ("ok", "api"),
         "projects_error": projects_error,
         "status_reason": reason,
         **disk,
@@ -1495,6 +1706,12 @@ def repo_ref() -> dict:
     asking for it cannot load the server. Returns `slug` (owner/repo) and
     `branch`, which is all a browser needs to build a raw.githubusercontent.com
     URL. Nothing here touches the network.
+
+    Without a checkout the coordinates come from configuration instead
+    (`TF_GITHUB_REPO` / `TF_GIT_REMOTE` and `TF_GITHUB_BRANCH` / `TF_LOGS_BRANCH`),
+    because reading a public repository needs no token and no git binary. A
+    deployment that configures neither reports `available: false` with a reason,
+    and the Logs tab falls back to the reports on this instance's own disk.
     """
     cached = _REPO_REF.get("value")
     if cached is not None and (time.time() - _REPO_REF.get("ts", 0)) < 300:
@@ -1502,18 +1719,36 @@ def repo_ref() -> dict:
     root = git_root()
     slug = None
     branch = None
+    via = None
     if root is not None:
         try:
             branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root)
             url = _https_repo(_run_git(["remote", "get-url", os.environ.get("TF_GIT_REMOTE", "origin")], root))
             match = re.search(r"github\.com[/:]([^/\s]+/[^/\s]+)$", url)
             slug = match.group(1) if match else None
+            via = "checkout" if slug and branch else None
         except PublishError as exc:
             logger.info("REPO REF %s", exc)
-    value = {"slug": slug, "branch": branch, "available": bool(slug and branch)}
+    if not (slug and branch):
+        slug = slug or github_api.repo_slug()
+        branch = (os.environ.get("TF_LOGS_BRANCH") or "").strip() or (branch if via == "checkout" else None) \
+            or github_api.branch()
+        via = "config" if slug else None
+    value = {
+        "slug": slug,
+        "branch": branch,
+        "available": bool(slug and branch),
+        "via": via,
+        "repository_url": f"https://github.com/{slug}" if slug else None,
+    }
     _REPO_REF["value"] = value
     _REPO_REF["ts"] = time.time()
     return value
+
+
+def invalidate_repo_ref() -> None:
+    """Drop the cached coordinates, e.g. after a push changed the branch."""
+    _REPO_REF.clear()
 
 
 def playback_url(url: str) -> str:

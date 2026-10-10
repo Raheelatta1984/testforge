@@ -1,4 +1,5 @@
 import asyncio, os, tempfile, zipfile, base64, re, time
+from datetime import datetime
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
@@ -8,12 +9,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import guardrails
+from app import guardrails, logs_local, run_queue
 from app.config import ARTIFACTS
 from app.errors import redact
 from app.db import (
     SCHEMA_STATUS, SessionLocal, engine, init_db, repair_schema,
-    Project, Recording, RecordingStep, Run,
+    Batch, Project, Recording, RecordingStep, Run,
 )
 from app.library_store import LibraryError, NotFound, PublishError
 from app import library_store
@@ -38,6 +39,18 @@ except Exception as exc:
     live_frame = lambda _run_id: None
     EXECUTOR_ERROR = redact(exc)
     print(f"RUN EXECUTOR UNAVAILABLE: {EXECUTOR_ERROR}")
+
+# Batch execution is optional for the same reason: it drives the same browser
+# stack, and the dashboard must stay usable when that stack is missing.
+BATCH_ERROR = None
+try:
+    from app import batch_runner
+    from app.batch_runner import execute_batch as execute_batch_task
+except Exception as exc:
+    batch_runner = None
+    execute_batch_task = None
+    BATCH_ERROR = redact(exc)
+    print(f"BATCH EXECUTOR UNAVAILABLE: {BATCH_ERROR}")
 
 app = FastAPI(title="TestForge Titan ERP - Optimized")
 init_db()
@@ -191,7 +204,12 @@ def _run_dict(run: Run, with_log: bool = True) -> dict:
         "rog_devops_log": run.rog_devops_log,
         "rog_qa_log": run.rog_qa_log,
         "created_at": run.created_at,
+        "started_at": run.started_at,
         "finished_at": run.finished_at,
+        "batch_id": run.batch_id,
+        # Set when queue hygiene cancelled a run: without it the row reads
+        # "cancelled" and gives the operator no way to know why.
+        "cancel_reason": run.cancel_reason,
         "display_window": RUN_WINDOWS.get(run.id, True),
     }
     if with_log:
@@ -212,9 +230,23 @@ async def broadcast_run(run_id, payload):
 
 
 @app.on_event("startup")
-async def retry_unpublished_library():
+async def boot_hygiene():
+    """Two things must happen before the dashboard starts polling.
+
+    * A restart leaves every `queued` and `running` row behind with no worker to
+      finish it. Those runs are cancelled here so the queue shows what will really
+      happen instead of a pending count that never moves.
+    * The publish retry loop and the queue sweeper start once per process.
+    """
     if library_store.publish_enabled():
         schedule_publish_retry()
+    try:
+        reaped = await asyncio.to_thread(run_queue.reap_orphans)
+        if reaped.get("cancelled"):
+            print(f"QUEUE HYGIENE: cancelled {reaped['cancelled']} orphaned run(s) at boot")
+    except Exception as exc:
+        print(f"QUEUE HYGIENE FAILED: {redact(exc)}")
+    run_queue.start_sweeper()
 
 
 @app.get("/api/health")
@@ -230,10 +262,12 @@ def health():
         "database": "ok",
         "recorder": RecorderSession is not None,
         "executor": execute_run_task is not None,
+        "batch_executor": execute_batch_task is not None,
         "revision": os.environ.get("RENDER_GIT_COMMIT", "local"),
         "library": "repository",
         "optimized": True,
         "library_publish_enabled": library_store.publish_enabled(),
+        "library_publish_mode": library_store.publish_mode(),
         # Cheap, allocation-free, and it is what Render's health check hits.
         "guardrails": guardrails.report(),
     }
@@ -354,11 +388,15 @@ def diagnostics():
         "tables": {},
         "recorder": "ok" if RecorderSession is not None else f"unavailable: {RECORDER_ERROR}",
         "executor": "ok" if execute_run_task is not None else f"unavailable: {EXECUTOR_ERROR}",
+        "batch_executor": "ok" if execute_batch_task is not None else f"unavailable: {BATCH_ERROR}",
         "optimizations": {
             "fast_projects": True,
             "individual_steps": True,
             "library_publish_enabled": library_store.publish_enabled(),
+            "library_publish_mode": library_store.publish_mode(),
             "adaptive_preview": True,
+            "adaptive_batch_execution": execute_batch_task is not None,
+            "queue_hygiene": True,
             "smooth_save": True,
         },
         "guardrails": guardrails.report(),
@@ -383,15 +421,27 @@ def diagnostics():
         report["database"] = f"unavailable: {redact(exc)}"
         report["status"] = "degraded"
     report["write_probe"] = _probe_project_write()
+    library_status = library_store.status()
     report["library"] = {
         "source": "repository",
-        "publish_enabled": library_store.publish_enabled(),
+        "publish_enabled": library_status.get("publish_enabled"),
+        "publish_mode": library_status.get("publish_mode"),
+        "publish_disabled_reason": library_status.get("publish_disabled_reason"),
+        "api_publish": library_status.get("api_publish"),
+        "last_api_push": library_status.get("last_api_push"),
         "path": "library",
-        "push_branch": library_store.status().get("branch"),
+        "push_branch": library_status.get("branch"),
+        "git_state": library_status.get("git_state"),
+    }
+    report["queue"] = run_queue.snapshot(limit=5)
+    report["logs"] = {
+        "local_dir": str(logs_local.logs_dir()),
+        "local_available": logs_local.available(),
+        "repo_ref": library_store.repo_ref(),
     }
     if not report["write_probe"]["ok"]:
         report["status"] = "degraded"
-    if RecorderSession is None or execute_run_task is None:
+    if RecorderSession is None or execute_run_task is None or execute_batch_task is None:
         report["status"] = "degraded"
     return report
 
@@ -625,35 +675,54 @@ async def stop_recording(rid: str):
         # Smooth save with detailed logs
         saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True)
     except LibraryError as exc:
-        # Even if publish fails, recording is saved locally - return with warning
-        # This makes save smooth per requirement 5
+        # Even if publish fails, the recording is saved locally: report that with
+        # the real outcome instead of failing the save.
         try:
-            # Try again without publish to ensure local save
             saved_local = await asyncio.to_thread(library_store.export_recording, rid, publish=False)
-            schedule_publish_retry()
-            return {
-                "ok": True,
-                "published": False,
-                "publish_error": str(exc),
-                "repository_path": saved_local.get("repository_path") if saved_local else None,
-                "save_logs": save_logs,
-                "message": f"Recording saved locally but branch push failed: {exc}. Will retry.",
-                "retry_branch": library_store.status().get("branch")
-            }
-        except Exception as e2:
+        except Exception:
             raise _library_http(exc) from exc
+        outcome = await asyncio.to_thread(library_store.publish_outcome, False, str(exc))
+        if outcome["retry_scheduled"]:
+            schedule_publish_retry()
+        name = (saved_local or {}).get("name") or rid
+        return {
+            "ok": True,
+            "repository_path": (saved_local or {}).get("repository_path"),
+            "save_logs": save_logs,
+            "branch": outcome.get("publish_branch"),
+            "retry_branch": outcome.get("publish_branch"),
+            "description": f"AI recording {name} finished and was saved locally",
+            "message": outcome["publish_message"],
+            **outcome,
+        }
     if saved is None:
         raise HTTPException(status_code=404, detail="Recording not found")
-    if not saved.get("published"):
+    # A retry is only promised when something will perform one. With publishing
+    # disabled the old wording ("will retry in 1 minute") described a loop that
+    # was never started, so the dashboard waited for a push that could not happen.
+    if saved.get("retry_scheduled") or (not saved.get("published") and library_store.publish_enabled()):
         schedule_publish_retry()
+    name = saved.get("name") or rid
+    published = bool(saved.get("published"))
     return {
         "ok": True,
-        "published": bool(saved.get("published")),
+        "published": published,
         "repository_path": saved.get("repository_path"),
         "save_logs": save_logs,
-        "branch": library_store.status().get("branch"),
+        "branch": saved.get("publish_branch") or library_store.status().get("branch"),
         "publish_error": saved.get("publish_error"),
-        "description": f"AI recording {saved.get('name') or rid} saved locally"
+        "publish_state": saved.get("publish_state"),
+        "publish_mode": saved.get("publish_mode"),
+        "publish_enabled": saved.get("publish_enabled"),
+        "retry_scheduled": bool(saved.get("retry_scheduled")),
+        "retry_in_seconds": saved.get("retry_in_seconds"),
+        "publish_message": saved.get("publish_message"),
+        "message": saved.get("publish_message"),
+        "description": (
+            f"AI recording {name} finished and was published to "
+            f"{saved.get('publish_branch') or 'the repository'}"
+            if published else f"AI recording {name} finished and was saved locally"
+        ),
     }
 
 
@@ -671,7 +740,7 @@ def schedule_publish_retry():
 
     async def retry():
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(max(5, library_store.PUBLISH_RETRY_SECONDS))
             try:
                 await asyncio.to_thread(library_store.publish_pending)
                 verified = await asyncio.to_thread(library_store.remote_library_status)
@@ -718,9 +787,12 @@ async def edit_recording_step(rid: str, step_id: str, body: dict):
             step.selector = body["selector"]
         db.commit()
         result = _step_dict(step)
-    saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True)
-    result["published"] = bool(saved and saved.get("published"))
-    if not result["published"]:
+    saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True) or {}
+    for key in ("published", "publish_message", "publish_state", "publish_error",
+                "retry_scheduled", "retry_in_seconds", "publish_enabled"):
+        result[key] = saved.get(key)
+    result["published"] = bool(result.get("published"))
+    if saved.get("retry_scheduled"):
         schedule_publish_retry()
     return result
 
@@ -736,7 +808,7 @@ async def compress_recording_steps(rid: str):
         result = await asyncio.to_thread(library_store.compress_recording, rid)
     except LibraryError as exc:
         raise _library_http(exc) from exc
-    if not result["published"]:
+    if result.get("retry_scheduled"):
         schedule_publish_retry()
     return result
 
@@ -781,6 +853,23 @@ async def queue_run(body: dict):
     if rec is None:
         if not library_store.materialize_recording(target_id):
             raise HTTPException(status_code=404, detail="Recording not found")
+    # Queue hygiene: with one browser a second queued run of the same recording
+    # only waits behind the first. Reuse it unless the caller insists.
+    if not body.get("force"):
+        existing = await asyncio.to_thread(run_queue.duplicate_of, target_id)
+        if existing:
+            _remember_run_window(existing["run_id"], display_window)
+            return {
+                "run_id": existing["run_id"],
+                "status": "queued",
+                "deduplicated": True,
+                "queued_for_seconds": existing["age_seconds"],
+                "message": (
+                    "This recording is already queued and has not started yet, so the "
+                    "existing run was reused instead of queueing a second one."
+                ),
+                "display_window": display_window,
+            }
     with SessionLocal() as db:
         recording = db.get(Recording, target_id)
         if recording is None:
@@ -821,13 +910,326 @@ async def queue_run(body: dict):
                     db.commit()
             await broadcast_run(rid, {"type": "done", "status": "error", "error": redact(exc)})
 
-    asyncio.create_task(task_wrapper())
+    task = asyncio.create_task(task_wrapper())
+    # The queue reaper only cancels runs that nobody owns, so ownership has to be
+    # recorded the moment the worker exists and dropped the moment it finishes.
+    run_queue.register(rid, task)
+    task.add_done_callback(lambda _done: run_queue.unregister(rid))
     return {
         "run_id": rid,
         "status": "queued",
+        "deduplicated": False,
         "message": "Execution queue started immediately",
         "display_window": display_window,
     }
+
+
+# --- Adaptive batch execution ---------------------------------------------
+# A batch replays many recordings through ONE browser, with step budgets learned
+# from previous runs and screenshots only where they are worth the CPU. See
+# app/batch_runner.py for why each of those is the cheap choice.
+
+
+class _BatchHandle:
+    """Ownership token for every run of a batch.
+
+    The queue reaper asks this whether a run still has a worker, and asks it to
+    stop a run that is being cleared. For a batch, "stop" means "do not start the
+    next recording", not "kill the task": killing it mid-replay would leave a
+    browser open.
+    """
+
+    def __init__(self, task, batch_id):
+        self.task = task
+        self.batch_id = batch_id
+
+    def done(self):
+        return self.task is None or self.task.done()
+
+    def cancel(self):
+        if batch_runner is not None:
+            batch_runner.request_cancel(self.batch_id)
+
+
+def _select_batch_recordings(body: dict) -> tuple[list[dict], list[str]]:
+    """Resolve what a batch should replay: explicit ids, one project, or everything."""
+    wanted = body.get("recording_ids")
+    project_id = body.get("project_id")
+    selected: list[dict] = []
+    unknown: list[str] = []
+
+    if isinstance(wanted, (list, tuple)) and wanted:
+        for item in wanted:
+            if not isinstance(item, str) or not item.strip():
+                continue
+            recording_id = item.strip()
+            recording = library_store.get_recording(recording_id)
+            if recording is None:
+                library_store.materialize_recording(recording_id)
+                recording = library_store.get_recording(recording_id)
+            if recording is None:
+                unknown.append(recording_id)
+                continue
+            selected.append({
+                "id": recording["id"],
+                "name": recording.get("name") or recording["id"],
+                "start_url": recording.get("start_url") or "",
+                "project_id": recording.get("project_id"),
+                "step_count": recording.get("step_count") or len(recording.get("steps") or []),
+            })
+    elif project_id:
+        for recording in library_store.list_recordings(str(project_id)):
+            selected.append({
+                "id": recording["id"],
+                "name": recording.get("name") or recording["id"],
+                "start_url": recording.get("start_url") or "",
+                "project_id": project_id,
+                "step_count": recording.get("step_count") or 0,
+            })
+    elif body.get("all"):
+        for recording in library_store.list_all_recordings_fast():
+            selected.append({
+                "id": recording["id"],
+                "name": recording.get("name") or recording["id"],
+                "start_url": recording.get("start_url") or "",
+                "project_id": recording.get("project_id"),
+                "step_count": recording.get("step_count") or 0,
+            })
+
+    # Same recording twice in one batch is a mistake, not a feature.
+    seen: set[str] = set()
+    unique = []
+    for item in selected:
+        if item["id"] in seen:
+            continue
+        seen.add(item["id"])
+        unique.append(item)
+    return unique, unknown
+
+
+def _batch_dict(batch: Batch, runs=None, with_report: bool = True, full: bool = False) -> dict:
+    payload = {
+        "id": batch.id,
+        "name": batch.name,
+        "status": batch.status,
+        "total": batch.total or 0,
+        "done": batch.done or 0,
+        "passed": batch.passed or 0,
+        "failed": batch.failed or 0,
+        "skipped": batch.skipped or 0,
+        "progress_pct": batch.progress_pct or 0,
+        "options": batch.options or {},
+        "error": batch.error,
+        "created_at": batch.created_at,
+        "started_at": batch.started_at,
+        "finished_at": batch.finished_at,
+    }
+    if with_report:
+        payload["report"] = batch.report or {}
+    if runs is not None:
+        payload["runs"] = [_run_dict(run, with_log=full) for run in runs]
+    return payload
+
+
+@app.post("/api/runs/batch", status_code=201)
+async def start_batch(body: dict | None = None):
+    """Queue one adaptive batch execution.
+
+    Body: ``recording_ids`` (list) or ``project_id`` or ``all`` to select what to
+    replay, plus ``name``, ``display_window``, ``screenshots``
+    (``none``/``failure``/``changes``/``all``), ``share_session``,
+    ``retry_transient``. One browser serves the whole batch, so a second batch is
+    refused while one is executing rather than queued behind it.
+    """
+    if execute_batch_task is None:
+        raise HTTPException(status_code=503, detail=f"Batch executor is unavailable: {BATCH_ERROR}")
+    body = body or {}
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Body must be an object")
+    if not (body.get("recording_ids") or body.get("project_id") or body.get("all")):
+        raise HTTPException(
+            status_code=422,
+            detail="Select recordings for the batch: recording_ids, project_id or all=true",
+        )
+    selected, unknown = await asyncio.to_thread(_select_batch_recordings, body)
+    if not selected:
+        detail = "No recordings matched."
+        if unknown:
+            detail = f"No recordings matched. Unknown recording id(s): {', '.join(unknown[:10])}"
+        raise HTTPException(status_code=404, detail=detail)
+    cap = guardrails.MAX_BATCH_RECORDINGS
+    if len(selected) > cap:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{len(selected)} recordings were selected but a batch is limited to {cap}. "
+                "Split the batch or raise TF_BATCH_MAX_RECORDINGS."
+            ),
+        )
+    if not guardrails.batch_budget.acquire():
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Another batch is already executing (limit {guardrails.batch_budget.limit}). "
+                "Wait for it to finish or cancel it first."
+            ),
+        )
+
+    screenshots = str(body.get("screenshots") or batch_runner.DEFAULT_SCREENSHOTS).lower()
+    if screenshots not in batch_runner.SCREENSHOT_MODES:
+        guardrails.batch_budget.release()
+        raise HTTPException(
+            status_code=422,
+            detail=f"screenshots must be one of {', '.join(batch_runner.SCREENSHOT_MODES)}",
+        )
+    display_window = bool(body.get("display_window"))
+    share_session = (guardrails.BATCH_SHARE_SESSION
+                     if body.get("share_session") is None else bool(body.get("share_session")))
+    retry_transient = (guardrails.BATCH_RETRY_TRANSIENT
+                       if body.get("retry_transient") is None else bool(body.get("retry_transient")))
+    name = body.get("name")
+    name = str(name).strip()[:200] if isinstance(name, str) and name.strip() else None
+
+    plan = batch_runner.plan_order(selected)
+    started_batch = False
+    try:
+        with SessionLocal() as db:
+            batch = Batch(name=name, status="queued", total=len(plan),
+                          options={"screenshots": screenshots, "share_session": share_session,
+                                   "retry_transient": retry_transient, "display_window": display_window,
+                                   "selected": len(selected), "unknown": unknown[:20]})
+            db.add(batch)
+            db.commit()
+            db.refresh(batch)
+            batch_id = batch.id
+            run_ids = []
+            for item in plan:
+                run = Run(recording_id=item["id"], status="queued", batch_id=batch_id)
+                db.add(run)
+                db.commit()
+                db.refresh(run)
+                run_ids.append(run.id)
+                _remember_run_window(run.id, display_window)
+            started_batch = True
+
+        stream_key = f"batch:{batch_id}"
+
+        async def on_event(payload):
+            await broadcast_run(stream_key, payload)
+            run_id = payload.get("run_id")
+            if run_id:
+                await broadcast_run(run_id, payload)
+
+        def viewer_count():
+            return len(RUN_STREAMS.get(stream_key, ()))
+
+        async def batch_wrapper():
+            try:
+                await execute_batch_task(
+                    batch_id, on_event,
+                    display_window=display_window, viewer_count=viewer_count,
+                    screenshots=screenshots, share_session=share_session,
+                    retry_transient=retry_transient,
+                )
+            except Exception as exc:
+                from datetime import datetime
+                with SessionLocal() as db:
+                    row = db.get(Batch, batch_id)
+                    if row is not None and row.status not in ("passed", "partial", "failed", "cancelled"):
+                        row.status = "error"
+                        row.error = redact(exc)[:800]
+                        row.finished_at = datetime.utcnow()
+                        db.commit()
+                await broadcast_run(stream_key, {"type": "batch", "batch_id": batch_id,
+                                                 "status": "error", "error": redact(exc)})
+            finally:
+                for run_id in run_ids:
+                    run_queue.unregister(run_id)
+                guardrails.batch_budget.release()
+
+        task = asyncio.create_task(batch_wrapper())
+        handle = _BatchHandle(task, batch_id)
+        for run_id in run_ids:
+            run_queue.register(run_id, handle)
+        await broadcast_run(stream_key, {
+            "type": "batch", "batch_id": batch_id, "status": "queued", "total": len(plan),
+            "message": f"Batch queued: {len(plan)} recording(s) through one browser",
+        })
+        return {
+            "batch_id": batch_id,
+            "status": "queued",
+            "total": len(plan),
+            "run_ids": run_ids,
+            "unknown_recording_ids": unknown,
+            "plan": [{"recording_id": item["id"], "name": item.get("name"),
+                      "start_url": item.get("start_url"), "step_count": item.get("step_count")}
+                     for item in plan],
+            "options": {"screenshots": screenshots, "share_session": share_session,
+                        "retry_transient": retry_transient, "display_window": display_window},
+            "message": (
+                f"Batch of {len(plan)} recording(s) queued. One browser for the whole batch, "
+                f"screenshots on {screenshots}."
+            ),
+        }
+    except Exception:
+        if not started_batch:
+            guardrails.batch_budget.release()
+        raise
+
+
+@app.get("/api/runs/batches")
+def list_batches(limit: int | None = None):
+    """Recent batches, newest first, without the full report by default."""
+    cap = guardrails.BATCH_LIST_LIMIT if limit is None else limit
+    cap = max(1, min(int(cap), guardrails.MAX_RUN_LIST_LIMIT))
+    with SessionLocal() as db:
+        rows = db.query(Batch).order_by(Batch.created_at.desc()).limit(cap).all()
+        return [_batch_dict(row, with_report=False) for row in rows]
+
+
+@app.get("/api/runs/batch/{batch_id}")
+def get_batch(batch_id: str, full: bool = False):
+    with SessionLocal() as db:
+        batch = db.get(Batch, batch_id)
+        if batch is None:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        runs = db.query(Run).filter(Run.batch_id == batch_id).order_by(Run.created_at.asc()).all()
+        return _batch_dict(batch, runs=runs, full=full)
+
+
+@app.post("/api/runs/batch/{batch_id}/cancel")
+async def cancel_batch(batch_id: str):
+    """Stop a batch: the recording in flight finishes, the rest are not started."""
+    with SessionLocal() as db:
+        batch = db.get(Batch, batch_id)
+        if batch is None:
+            raise HTTPException(status_code=404, detail="Batch not found")
+        if batch.status in ("passed", "partial", "failed", "cancelled", "error"):
+            return {"ok": False, "batch_id": batch_id, "status": batch.status,
+                    "message": f"This batch already finished ({batch.status})."}
+    if batch_runner is not None:
+        batch_runner.request_cancel(batch_id)
+    with SessionLocal() as db:
+        rows = db.query(Run).filter(Run.batch_id == batch_id, Run.status == "queued").all()
+        cancelled = 0
+        for row in rows:
+            row.status = "cancelled"
+            row.cancel_reason = "Batch cancelled before this recording started."
+            row.finished_at = datetime.utcnow()
+            cancelled += 1
+        batch = db.get(Batch, batch_id)
+        if batch is not None and batch.status == "queued":
+            batch.status = "cancelled"
+            batch.finished_at = datetime.utcnow()
+            batch.skipped = cancelled
+        db.commit()
+        status = batch.status if batch else "cancelled"
+    await broadcast_run(f"batch:{batch_id}", {
+        "type": "batch", "batch_id": batch_id, "status": "cancelled",
+        "message": f"Batch cancelled; {cancelled} recording(s) were not started.",
+    })
+    return {"ok": True, "batch_id": batch_id, "status": status, "cancelled_runs": cancelled,
+            "message": "Batch cancellation requested. The recording in flight finishes first."}
 
 
 @app.get("/api/runs")
@@ -855,17 +1257,18 @@ def get_run(run_id: str):
 
 @app.get("/api/runs/queue/status")
 def get_queue_status():
-    """Immediate queue status for requirement 8."""
+    """Immediate queue status, including what in it is never going to run."""
     with SessionLocal() as db:
         queued = db.query(Run).filter(Run.status == "queued").count()
         running = db.query(Run).filter(Run.status == "running").count()
         total = db.query(Run).count()
         recent = db.query(Run).order_by(Run.created_at.desc()).limit(5).all()
-        return {
+        payload = {
             "queued": queued,
             "running": running,
             "passed": db.query(Run).filter(Run.status == "passed").count(),
             "failed": db.query(Run).filter(Run.status.in_(["failed", "error"])).count(),
+            "cancelled": db.query(Run).filter(Run.status == "cancelled").count(),
             "pending": queued + running,
             "passed_pct": round(100 * db.query(Run).filter(Run.status == "passed").count() / total, 1) if total else 0,
             "total": total,
@@ -873,6 +1276,79 @@ def get_queue_status():
             "recent": [_run_dict(r) for r in recent],
             "message": "Queue proceeds immediately, window displays"
         }
+    # Orphans and stale entries: runs the dashboard would otherwise count as
+    # pending forever.
+    payload["hygiene"] = run_queue.snapshot(limit=20)
+    payload["clearable"] = payload["hygiene"]["clearable"]
+    return payload
+
+
+@app.post("/api/runs/queue/clear")
+async def clear_run_queue(body: dict | None = None):
+    """Clear irrelevant and old entries out of the execution queue.
+
+    Body (all optional):
+
+    * ``older_than_minutes`` - only touch runs queued at least this long.
+    * ``include_orphans`` (default true) - runs no worker owns, e.g. left behind by a restart.
+    * ``include_stale`` (default true) - queued longer than ``TF_QUEUE_STALE_MINUTES``.
+    * ``include_duplicates`` (default false) - extra queued runs of a recording already waiting.
+    * ``cancel_running`` (default false) - also stop a run that is executing now.
+    * ``purge_finished_days`` - delete finished history older than this many days.
+    * ``dry_run`` (default false) - report what would be cleared and change nothing.
+    """
+    body = body or {}
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="Body must be an object")
+    older_than = body.get("older_than_minutes")
+    if older_than is not None:
+        try:
+            older_than = float(older_than)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="older_than_minutes must be a number") from None
+        if older_than < 0:
+            raise HTTPException(status_code=422, detail="older_than_minutes cannot be negative")
+    purge_days = body.get("purge_finished_days")
+    if purge_days is not None:
+        try:
+            purge_days = float(purge_days)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="purge_finished_days must be a number") from None
+        if purge_days < 0:
+            raise HTTPException(status_code=422, detail="purge_finished_days cannot be negative")
+    reason = body.get("reason")
+    if reason is not None and not isinstance(reason, str):
+        raise HTTPException(status_code=422, detail="reason must be text")
+    report = await asyncio.to_thread(
+        run_queue.clear,
+        older_than_minutes=older_than,
+        include_orphans=True if body.get("include_orphans") is None else bool(body.get("include_orphans")),
+        include_stale=True if body.get("include_stale") is None else bool(body.get("include_stale")),
+        include_duplicates=bool(body.get("include_duplicates")),
+        cancel_running=bool(body.get("cancel_running")),
+        purge_finished_days=purge_days,
+        reason=(reason.strip()[:200] if reason else None),
+        dry_run=bool(body.get("dry_run")),
+    )
+    report["ok"] = True
+    report["message"] = (
+        f"{report['matched']} run(s) would be cleared."
+        if report["dry_run"] else
+        f"{report['cancelled']} run(s) cleared from the queue."
+    )
+    return report
+
+
+@app.post("/api/runs/queue/sweep")
+async def sweep_run_queue():
+    """Run the orphan reaper now instead of waiting for the periodic sweep."""
+    report = await asyncio.to_thread(run_queue.reap_orphans)
+    report["ok"] = True
+    report["message"] = (
+        f"{report['cancelled']} orphaned run(s) cancelled."
+        if report["cancelled"] else "No orphaned runs to clear."
+    )
+    return report
 
 
 def _safe_artifact(run_id: str, filename: str) -> str:
@@ -930,17 +1406,57 @@ async def library_status():
 
 
 @app.post("/api/library/publish")
-def library_publish():
+def library_publish(message: str | None = None):
+    """Push the library now, by git or by the GitHub API, and verify it landed."""
     try:
-        result = library_store.push_current_branch("Manual push library")
+        result = library_store.push_current_branch(
+            (message or "Manual push library").strip()[:200] or "Manual push library"
+        )
         status = library_store.status()
         status["pushed"] = result
         status["remote_verification"] = library_store.remote_library_status()
-        if not status["remote_verification"].get("synced"):
+        status.update(library_store.publish_outcome(bool(result)))
+        if status["retry_scheduled"]:
             schedule_publish_retry()
         return status
     except LibraryError as exc:
         raise _library_http(exc) from exc
+
+
+@app.get("/api/library/publish/plan")
+async def library_publish_plan():
+    """What the next push would change, without pushing anything.
+
+    In API mode this compares the local library with the remote tree, so the
+    dashboard can show "3 files to publish" before the operator commits to it.
+    """
+    mode = library_store.publish_mode()
+    if mode == "disabled":
+        return {"available": False, "mode": mode,
+                "reason": library_store.publish_disabled_reason()}
+    if mode == "api":
+        from app import github_api
+        collected = await asyncio.to_thread(github_api.collect_local_files, library_store.library_dir())
+        try:
+            client = github_api.GitHubClient()
+            head = await asyncio.to_thread(client.head_sha)
+            remote = await asyncio.to_thread(client.tree, head) if head else {}
+        except github_api.GitHubAPIError as exc:
+            return {"available": False, "mode": mode, "error": str(exc),
+                    "files": len(collected["files"]), "bytes": collected["bytes"],
+                    "skipped": collected["skipped"],
+                    "reason": f"Could not read the remote branch: {exc}"}
+        diff = github_api.plan(collected["files"], remote)
+        return {
+            "available": True, "mode": mode, "slug": client.slug, "branch": client.branch,
+            "remote_sha": head, "files": len(collected["files"]), "bytes": collected["bytes"],
+            "skipped": collected["skipped"], **diff,
+        }
+    verification = await asyncio.to_thread(library_store.remote_library_status)
+    return {"available": True, "mode": mode, "branch": verification.get("branch"),
+            "remote_sha": verification.get("remote_sha"),
+            "synced": verification.get("synced"), "state": verification.get("state"),
+            "reason": verification.get("reason"), "dirty": verification.get("dirty")}
 
 
 @app.get("/api/library/fast")
@@ -951,13 +1467,23 @@ def library_fast():
         catalog = library_store._read_catalog_fast()
         if catalog:
             elapsed = time.time() - start
+            # repo_ref() and publish_mode() are two local git calls and an env
+            # read. status() walks every project, which is exactly what a "fast"
+            # endpoint must not do, and the dashboard polls this one.
+            ref = library_store.repo_ref()
+            mode = library_store.publish_mode()
             return JSONResponse(
                 content={
                     "source": "repository",
                     "fast": True,
                     "projects": catalog.get("projects") or [],
                     "load_time": f"{elapsed:.3f}s",
-                    "branch": library_store.status().get("branch"),
+                    "branch": ref.get("branch"),
+                    "slug": ref.get("slug"),
+                    "repository_url": ref.get("repository_url"),
+                    "publish_mode": mode,
+                    "publish_enabled": mode != "disabled",
+                    "publish_disabled_reason": library_store.publish_disabled_reason(),
                 },
                 headers={"X-Load-Time": f"{elapsed:.3f}s", "X-Source": "catalog-fast"}
             )
@@ -969,17 +1495,33 @@ def library_fast():
 
 @app.post("/api/sync/github")
 def sync_github():
-    """Push and verify the checked-out branch against GitHub."""
+    """Push and verify the library against GitHub, by checkout or by API."""
+    mode = library_store.publish_mode()
+    if mode == "disabled":
+        # Not an error the caller can retry away: say exactly what is missing.
+        raise HTTPException(status_code=503, detail=library_store.publish_disabled_reason())
     try:
         pushed = library_store.push_current_branch("Sync library")
         verification = library_store.remote_library_status()
+        outcome = library_store.publish_outcome(bool(pushed))
+        synced = bool(verification.get("synced"))
         return {
-            "ok": bool(verification.get("synced")),
+            "ok": synced,
             "pushed": pushed,
-            "branch": library_store.status().get("branch"),
+            "mode": mode,
+            "branch": outcome.get("publish_branch") or verification.get("branch"),
+            "repository_url": f"https://github.com/{verification.get('slug')}" if verification.get("slug")
+                              else library_store.status().get("repository_url"),
+            "commit": (library_store.last_api_push() or {}).get("commit"),
             "verification": verification,
-            "message": "Repository push verified" if verification.get("synced") else "Publishing disabled or remote not verified",
-            "immediate": True
+            "publish_message": outcome["publish_message"],
+            "message": (
+                f"Repository push verified on {outcome.get('publish_branch') or 'the branch'} "
+                f"({'git push' if mode == 'checkout' else 'GitHub API'})."
+                if synced else outcome["publish_message"]
+            ),
+            "retry_scheduled": outcome["retry_scheduled"],
+            "immediate": True,
         }
     except LibraryError as exc:
         raise _library_http(exc) from exc
@@ -1089,6 +1631,34 @@ async def ws_rec(ws: WebSocket, rid: str):
                 print(f"WS SAVE FAILED {rid} {redact(e)}")
 
 
+@app.websocket("/ws/batches/{batch_id}")
+async def ws_batch(ws: WebSocket, batch_id: str):
+    """Live batch progress. Same bounded replay buffer as a single run."""
+    await ws.accept()
+    key = f"batch:{batch_id}"
+    queue = asyncio.Queue()
+    RUN_STREAMS.setdefault(key, []).append(queue)
+    for event in guardrails.run_buffers.get(key):
+        queue.put_nowait(event)
+    try:
+        await ws.send_json({"type": "batch", "batch_id": batch_id, "status": "connected",
+                            "message": "Watching batch progress"})
+        while True:
+            event = await queue.get()
+            await ws.send_json(event)
+    except Exception:
+        pass
+    finally:
+        queues = RUN_STREAMS.get(key)
+        if queues is not None:
+            try:
+                queues.remove(queue)
+            except ValueError:
+                pass
+            if not queues:
+                RUN_STREAMS.pop(key, None)
+
+
 @app.websocket("/ws/runs/{run_id}")
 async def ws_run(ws: WebSocket, run_id: str):
     await ws.accept()
@@ -1123,7 +1693,7 @@ async def ws_run(ws: WebSocket, run_id: str):
 
 
 @app.get("/api/logs/source")
-def logs_source(branch: str | None = None):
+async def logs_source(branch: str | None = None):
     """Where to read harness logs, so the dashboard can fetch them from GitHub.
 
     Returns coordinates only. The logs themselves are fetched by the browser
@@ -1141,13 +1711,29 @@ def logs_source(branch: str | None = None):
         raise HTTPException(status_code=422, detail="Branch name is not valid")
     slug = ref.get("slug")
     if not slug:
+        # No coordinates: say why, and offer what this instance does have. The tab
+        # used to stop here, so a deployment without a checkout showed no logs at
+        # all even when the harness had written reports to its own disk.
+        local = await asyncio.to_thread(logs_local.source_report,
+                                        "No git checkout here, so the committed log location is unknown.")
         return {
             "available": False,
-            "reason": "No git checkout here, so the log location is unknown.",
+            "reason": (
+                "No git checkout here, so the committed log location is unknown. "
+                "Set TF_GITHUB_REPO (with TF_GITHUB_BRANCH) to read the committed logs "
+                "from GitHub, or mount a checkout."
+            ),
             "slug": None,
             "branch": None,
             "base": None,
             "index": None,
+            "via": None,
+            "local": local,
+            "fixes": [
+                "TF_GITHUB_REPO=owner/name and TF_GITHUB_BRANCH=main - reads the committed logs from GitHub with no checkout",
+                "mount or copy a git checkout above the library folder",
+                "TF_LOGS_DIR=/path/to/logs - serve the harness reports stored on this instance",
+            ],
         }
     base = f"https://raw.githubusercontent.com/{slug}/{wanted}"
     return {
@@ -1155,10 +1741,51 @@ def logs_source(branch: str | None = None):
         "slug": slug,
         "branch": wanted,
         "base": base,
+        "via": ref.get("via"),
+        "repository_url": ref.get("repository_url"),
         "index": f"{base}/logs/index.md",
         "api": f"https://api.github.com/repos/{slug}/contents/logs?ref={wanted}",
+        # The local reader stays available as a fallback: raw.githubusercontent.com
+        # is blocked on some networks, and a branch that has not been pushed yet has
+        # no committed logs to read.
+        "local": {
+            "available": await asyncio.to_thread(logs_local.available),
+            "logs_dir": str(logs_local.logs_dir()),
+            "endpoints": {"index": "/api/logs/local/index", "file": "/api/logs/local/{folder}/{name}"},
+        },
         "note": "Fetched by your browser directly from GitHub. This service never reads or serves the logs.",
     }
+
+
+@app.get("/api/logs/local/index")
+def logs_local_index(limit: int | None = None):
+    """Harness reports stored on this instance.
+
+    Only used when the GitHub coordinates are unavailable or unreachable. Bounded
+    by TF_MAX_LOG_INDEX_ROWS and cached, so the Logs tab cannot be turned into a
+    directory walk on every poll.
+    """
+    if limit is not None and not str(limit).isdigit():
+        raise HTTPException(status_code=422, detail="limit must be a positive number")
+    return logs_local.index(limit=int(limit) if limit else None)
+
+
+@app.get("/api/logs/local/{folder}/{name}")
+def logs_local_file(folder: str, name: str, tail: int | None = None):
+    """The tail of one local log file, capped at TF_MAX_LOG_FILE_BYTES."""
+    result = logs_local.read(folder, name, max_bytes=tail)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "Log file not found")
+    return result
+
+
+@app.get("/api/logs/local/{folder}")
+def logs_local_folder(folder: str):
+    """Which log files a local harness run has."""
+    files = logs_local.files_in(folder)
+    if not files:
+        raise HTTPException(status_code=404, detail="No log files found for this run")
+    return {"folder": folder, "files": files, "logs_dir": str(logs_local.logs_dir())}
 
 
 @app.post("/api/ai/rephrase")

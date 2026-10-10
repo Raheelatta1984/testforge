@@ -169,6 +169,12 @@ def run_library(log, run_dir, server_log, require_browser):
     env["TF_LIBRARY_PUBLISH"] = "0"
     env.pop("LD_LIBRARY_PATH", None)
     env.pop("TF_GIT_BRANCH", None)
+    # The harness must never publish: a developer shell or a CI runner can have a
+    # GitHub token exported, and TF_LIBRARY_PUBLISH=0 alone would not stop the API
+    # publisher if a repository were also configured.
+    for secret in ("TF_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "TF_GITHUB_REPO",
+                   "TF_GIT_REMOTE", "TF_GITHUB_BRANCH", "TF_LOGS_DIR"):
+        env.pop(secret, None)
     log(f"server: starting on 127.0.0.1:{port}")
     handle = open(server_log, "w", encoding="utf-8")
     proc = subprocess.Popen(

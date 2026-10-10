@@ -108,6 +108,8 @@ function Recorder({ project }) {
   const [frame, setFrame] = useState(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const [saveNote, setSaveNote] = useState("");
+  const [saveState, setSaveState] = useState("");
   const [steps, setSteps] = useState([]);
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
@@ -117,9 +119,25 @@ function Recorder({ project }) {
   const [armed, setArmed] = useState(null);
   const [variableName, setVariableName] = useState("");
   const [varsList, setVarsList] = useState([]);
+  const [publishInfo, setPublishInfo] = useState(null);
   const recRef = useRef(null);
   const frameUrl = useRef(null);
   const initialStepsLoaded = useRef(false);
+
+  // Where a SAVE will land. Read once from the cheap catalog endpoint so the tab
+  // can say "publishes to owner/repo@branch" or "stays local" before the user
+  // records anything, instead of surprising them after SAVE.
+  useEffect(() => {
+    API.get("/api/library/fast").then(data => {
+      setPublishInfo({
+        mode: data.publish_mode,
+        enabled: data.publish_enabled,
+        slug: data.slug,
+        branch: data.branch,
+        reason: data.publish_disabled_reason,
+      });
+    }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!project) return;
@@ -208,11 +226,14 @@ function Recorder({ project }) {
     setStatus("Saving recording…");
     try {
       const result = await API.post("/api/recordings/" + id + "/stop", {});
-      if (result.publish_error) {
-        setError(`Saved locally; GitHub push will retry in 1 minute: ${result.publish_error}`);
-      } else {
-        setError("");
-      }
+      // The server states what happened and whether a retry exists. The old text
+      // always promised "will retry in 1 minute", even when publishing was
+      // disabled and no retry loop had been started.
+      setSaveNote(result.publish_message || (result.published
+        ? `Published to ${result.branch || "the repository"}.`
+        : `Saved locally${result.publish_error ? ": " + result.publish_error : ""}.`));
+      setSaveState(result.published ? "published" : (result.retry_scheduled ? "retry" : "local"));
+      setError("");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -235,6 +256,11 @@ function Recorder({ project }) {
         e("button", { onClick: stop, className: "bg-red-600 px-4 py-1 rounded font-bold text-xs" }, "SAVE"))
     ),
     error && e("p", { role: "alert", className: "text-sm text-red-300 px-1" }, error),
+    saveNote && e("p", { role: "status", className: "text-[11px] px-2 py-1 rounded-lg border " +
+      (saveState === "published" ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-200"
+        : saveState === "retry" ? "bg-amber-950/40 border-amber-800/40 text-amber-200"
+        : "bg-slate-950 border-slate-800 text-slate-300") },
+      (saveState === "published" ? "✅ " : saveState === "retry" ? "⏳ " : "💾 ") + saveNote),
     e("div", { className: "browser-shell flex-1 min-h-0" },
       e("div", { className: "browser-bar" },
         e("span", { className: "dot red" }), e("span", { className: "dot yellow" }), e("span", { className: "dot green" }),
@@ -298,7 +324,14 @@ function Recorder({ project }) {
         e("h2", { className: "font-bold text-lg text-indigo-300" }, "Record in remote browser ⚡ FAST"),
         e("span", { className: "fast-badge" }, "OPTIMIZED")
       ),
-      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on server (free-tier optimized, low CPU). SAVE pushes immediately to GitHub branch with description. Repeated actions merge into one editable step with a repeat count."),
+      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on server (free-tier optimized, low CPU). Repeated actions merge into one editable step with a repeat count."),
+      publishInfo && e("p", { className: "text-[11px] px-3 py-2 rounded-xl border " +
+        (publishInfo.enabled ? "bg-emerald-950/30 border-emerald-900/40 text-emerald-200"
+                             : "bg-amber-950/30 border-amber-900/40 text-amber-200") },
+        publishInfo.enabled
+          ? `SAVE publishes to ${publishInfo.slug || "the repository"}${publishInfo.branch ? "@" + publishInfo.branch : ""} ` +
+            (publishInfo.mode === "api" ? "through the GitHub API (this deployment has no git checkout)." : "with git push.")
+          : "SAVE keeps the recording on this instance only. " + (publishInfo.reason || "GitHub publishing is disabled.")),
       varsList.length > 0 && e("div", { className: "bg-slate-950 p-3 rounded-xl border border-slate-800" },
         e("div", { className: "text-xs font-bold text-indigo-300 mb-2" }, `📦 ${varsList.length} Variables available for reuse:`),
         e("div", { className: "flex flex-wrap gap-1" },
@@ -312,12 +345,18 @@ function Recorder({ project }) {
       e("input", { id: "rec-url", value: url, onChange: (evt) => setUrl(evt.target.value), placeholder: "Leave blank for sample app", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e("button", { type: "button", onClick: () => setUrl("/demo.html"), className: "text-xs text-indigo-300 underline" }, "Use sample app"),
       e("button", { type: "button", onClick: start, disabled: busy, className: "w-full bg-red-600 disabled:opacity-60 py-4 rounded-2xl font-bold text-lg" }, busy ? "OPENING BROWSER FAST…" : "● START AI RECORDING ⚡"),
-      error && e("p", { role: "alert", className: "text-sm text-red-300" }, error)
+      error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),
+      saveNote && e("p", { role: "status", className: "text-xs px-3 py-2 rounded-xl border " +
+        (saveState === "published" ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-200"
+          : saveState === "retry" ? "bg-amber-950/40 border-amber-800/40 text-amber-200"
+          : "bg-slate-950 border-slate-800 text-slate-300") },
+        (saveState === "published" ? "✅ " : saveState === "retry" ? "⏳ " : "💾 ") + saveNote)
     )
   );
 }
 
 function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
+  /* Queue hygiene and batch execution live here: both are about what runs next. */
   const [runs, setRuns] = useState([]);
   const [activeLog, setActiveLog] = useState([]);
   const [frame, setFrame] = useState(null);
@@ -401,6 +440,8 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
       ),
       e("p", { className: "text-[10px] text-slate-400 mt-1" }, `${queueInfo.passed} passed (${queueInfo.passed_pct}%) · ${queueInfo.failed} failed · ${queueInfo.pending} pending` )
     ),
+    queueInfo && e(QueueHygiene, { queueInfo: queueInfo, refresh: () => { load(); loadQueue(); } }),
+    e(BatchPanel, { onOpenRun: setRunId, liveWindow: liveWindow }),
     e("div", { className: "bg-slate-900 p-3 rounded-xl border border-slate-800 flex items-center justify-between gap-3" },
       e("div", {},
         e("div", { className: "text-xs font-bold text-indigo-300" }, "Live browser window"),
@@ -455,11 +496,219 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
     runs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-6" }, "No runs yet. Record a session, then press RUN in the library. Execution displays immediately."),
     runs.map(r => e("div", { key: r.id, onClick: () => setRunId(r.id), className: `p-4 bg-slate-900 rounded-2xl border ${runId===r.id?'border-indigo-500':'border-slate-800'} mb-2 cursor-pointer` },
       e("div", { className: "flex justify-between items-center" },
-        e("span", { className: "font-bold text-indigo-400 text-xs font-mono" }, "RUN #" + r.id.slice(0, 8)),
+        e("span", { className: "font-bold text-indigo-400 text-xs font-mono" }, "RUN #" + r.id.slice(0, 8),
+          r.batch_id && e("span", { className: "ml-2 text-[9px] px-1.5 py-0.5 rounded-full bg-indigo-950 text-indigo-300 font-bold" },
+            "⚡ BATCH " + r.batch_id.slice(0, 8))),
         e("span", { className: "text-[10px] uppercase font-bold text-slate-500" }, r.status + (r.progress_pct ? " " + r.progress_pct + "%" : ""))
       ),
+      // Queue hygiene cancels runs it can never finish; say so on the row.
+      r.cancel_reason && e("div", { className: "text-[9px] bg-amber-950/20 p-2 mt-2 rounded border border-amber-900/30 text-amber-200" },
+        "🧹 " + r.cancel_reason),
       r.rog_monitor_log && e("div", { className: "text-[9px] bg-red-950/20 p-2 mt-2 rounded border border-red-900/30 text-red-200 font-mono" }, r.rog_monitor_log)
     ))
+  );
+}
+
+function QueueHygiene({ queueInfo, refresh }) {
+  const [busy, setBusy] = useState("");
+  const [note, setNote] = useState("");
+  const hygiene = (queueInfo && queueInfo.hygiene) || {};
+  const policy = hygiene.policy || {};
+  const act = async (body, label) => {
+    setBusy(label); setNote("");
+    try {
+      const res = await API.post("/api/runs/queue/clear", body);
+      const kinds = Object.entries(res.by_kind || {}).map(([k, v]) => `${v} ${k}`).join(", ");
+      setNote((res.message || "Done.") + (kinds ? ` (${kinds})` : "") + (res.purge ? ` Purged ${res.purge.purged || res.purge.would_purge || 0} finished run(s).` : ""));
+      refresh();
+    } catch (err) { setNote(err.message); }
+    finally { setBusy(""); }
+  };
+  const clearable = hygiene.clearable || 0;
+  return e("div", { className: "bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs space-y-2" },
+    e("div", { className: "flex justify-between items-center" },
+      e("span", { className: "font-bold text-indigo-300" }, "Queue hygiene 🧹"),
+      clearable > 0
+        ? e("span", { className: "text-[10px] px-2 py-0.5 rounded-full bg-amber-900 text-amber-200 font-bold" }, `${clearable} TO CLEAR`)
+        : e("span", { className: "text-[10px] px-2 py-0.5 rounded-full bg-emerald-900 text-emerald-200 font-bold" }, "CLEAN")
+    ),
+    e("div", { className: "grid grid-cols-2 gap-1 text-[10px] text-slate-400" },
+      e("span", {}, `Orphaned (no worker): ${hygiene.orphans || 0}`),
+      e("span", {}, `Stale (queued > ${policy.stale_minutes || 30}m): ${hygiene.stale || 0}`),
+      e("span", {}, `Duplicates: ${hygiene.duplicates || 0}`),
+      e("span", {}, `Oldest queued: ${Math.round(hygiene.oldest_queued_seconds || 0)}s`),
+      e("span", {}, `Live workers: ${hygiene.live_workers || 0}`),
+      e("span", {}, `Cancelled so far: ${(queueInfo && queueInfo.cancelled) || 0}`)
+    ),
+    e("p", { className: "text-[10px] text-slate-500" },
+      "Orphans are runs left behind by a restart: no worker owns them, so they can never finish. They are reaped at boot and every " +
+      Math.round((policy.sweep_seconds || 300) / 60) + " minutes; clear them here to do it now."),
+    e("div", { className: "flex flex-wrap gap-2" },
+      e("button", { type: "button", disabled: !!busy, onClick: () => act({ dry_run: true }, "dry"),
+        className: "key-btn disabled:opacity-50" }, busy === "dry" ? "…" : "PREVIEW WHAT WOULD CLEAR"),
+      e("button", { type: "button", disabled: !!busy || clearable === 0,
+        onClick: () => act({ include_orphans: true, include_stale: true }, "clear"),
+        className: "key-btn bg-amber-700 border-amber-500 disabled:opacity-40" }, busy === "clear" ? "CLEARING…" : "CLEAR ORPHANS + STALE"),
+      e("button", { type: "button", disabled: !!busy,
+        onClick: () => act({ include_orphans: true, include_stale: true, include_duplicates: true }, "dupes"),
+        className: "key-btn disabled:opacity-50" }, busy === "dupes" ? "CLEARING…" : "+ DUPLICATES"),
+      e("button", { type: "button", disabled: !!busy,
+        onClick: () => act({ include_orphans: true, include_stale: true, include_duplicates: true, purge_finished_days: policy.retention_days || 14 }, "purge"),
+        className: "key-btn bg-red-900 border-red-700 disabled:opacity-50" }, busy === "purge" ? "PURGING…" : "PURGE OLD HISTORY")
+    ),
+    note && e("p", { role: "status", className: "text-[10px] text-emerald-300" }, note)
+  );
+}
+
+function BatchPanel({ onOpenRun, liveWindow }) {
+  const [recs, setRecs] = useState([]);
+  const [sel, setSel] = useState({});
+  const [batch, setBatch] = useState(null);
+  const [batches, setBatches] = useState([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [screenshots, setScreenshots] = useState("failure");
+  const [share, setShare] = useState(true);
+  const [retry, setRetry] = useState(true);
+
+  const loadRecs = () => API.get("/api/library/recordings").then(rows => setRecs(rows || [])).catch(() => {});
+  const loadBatches = () => API.get("/api/runs/batches").then(rows => setBatches(rows || [])).catch(() => {});
+  useEffect(() => { loadRecs(); loadBatches(); }, []);
+
+  // Poll only while a batch is actually moving, and stop when the tab is hidden.
+  useEffect(() => {
+    if (!batch || !["queued", "running"].includes(batch.status)) return undefined;
+    const tick = () => {
+      if (document.hidden) return;
+      API.get("/api/runs/batch/" + batch.id).then(next => {
+        setBatch(next);
+        if (!["queued", "running"].includes(next.status)) { loadBatches(); loadRecs(); }
+      }).catch(() => {});
+    };
+    const timer = setInterval(tick, 1500);
+    return () => clearInterval(timer);
+  }, [batch && batch.id, batch && batch.status]);
+
+  const selected = recs.filter(r => sel[r.id]);
+  const start = async () => {
+    setBusy(true); setError(""); setNote("");
+    try {
+      const created = await API.post("/api/runs/batch", {
+        recording_ids: selected.map(r => r.id),
+        name: "Batch " + new Date().toLocaleTimeString(),
+        display_window: !!liveWindow,
+        screenshots: screenshots,
+        share_session: share,
+        retry_transient: retry,
+      });
+      setBatch({ id: created.batch_id, status: created.status, total: created.total, progress_pct: 0,
+                 passed: 0, failed: 0, runs: [], options: created.options });
+      setNote(created.message);
+      setSel({});
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  const runEverything = async () => {
+    setBusy(true); setError(""); setNote("");
+    try {
+      const created = await API.post("/api/runs/batch", {
+        all: true, display_window: !!liveWindow, screenshots: screenshots,
+        share_session: share, retry_transient: retry,
+      });
+      setBatch({ id: created.batch_id, status: created.status, total: created.total, progress_pct: 0,
+                 passed: 0, failed: 0, runs: [], options: created.options });
+      setNote(created.message);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  const cancel = async () => {
+    if (!batch) return;
+    try { const res = await API.post(`/api/runs/batch/${batch.id}/cancel`, {}); setNote(res.message); }
+    catch (err) { setError(err.message); }
+  };
+  const byProject = recs.reduce((acc, r) => { (acc[r.project_name || r.project_id] = acc[r.project_name || r.project_id] || []).push(r); return acc; }, {});
+  const report = (batch && batch.report) || {};
+  const resources = report.resources || {};
+  const pacing = report.pacing || {};
+  const running = batch && ["queued", "running"].includes(batch.status);
+  return e("div", { className: "bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3" },
+    e("div", { className: "flex justify-between items-center" },
+      e("h3", { className: "font-bold text-sm text-indigo-300" }, "AI batch execution ⚡"),
+      e("span", { className: "fast-badge" }, "ONE BROWSER")
+    ),
+    e("p", { className: "text-[10px] text-slate-400" },
+      "Replays the selected recordings in one batch: a single Chromium for all of them, same-origin recordings share a warm session, " +
+      "step timeouts are learned from previous runs, and screenshots are taken only where they are worth the CPU."),
+    e("div", { className: "max-h-40 overflow-y-auto space-y-1" },
+      Object.keys(byProject).length === 0 && e("p", { className: "text-[10px] text-slate-500" }, "No recordings in the library yet."),
+      Object.entries(byProject).map(([projectName, rows]) => e("div", { key: projectName },
+        e("div", { className: "text-[9px] uppercase font-bold text-slate-500 mt-1" }, projectName),
+        rows.map(r => e("label", { key: r.id, className: "flex items-center gap-2 text-[11px] text-slate-300 cursor-pointer" },
+          e("input", { type: "checkbox", checked: !!sel[r.id], disabled: running,
+            onChange: () => setSel(prev => ({ ...prev, [r.id]: !prev[r.id] })) }),
+          e("span", { className: "flex-1 truncate" }, r.name),
+          e("span", { className: "text-slate-500" }, (r.step_count || 0) + " steps")
+        ))
+      ))
+    ),
+    e("div", { className: "flex flex-wrap gap-2 items-center text-[10px]" },
+      e("label", { className: "text-slate-400" }, "Screenshots ",
+        e("select", { value: screenshots, disabled: running, onChange: ev => setScreenshots(ev.target.value),
+          className: "bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-slate-200" },
+          ["none", "failure", "changes", "all"].map(mode => e("option", { key: mode, value: mode }, mode)))),
+      e("label", { className: "text-slate-400 flex items-center gap-1" },
+        e("input", { type: "checkbox", checked: share, disabled: running, onChange: () => setShare(!share) }), "share session"),
+      e("label", { className: "text-slate-400 flex items-center gap-1" },
+        e("input", { type: "checkbox", checked: retry, disabled: running, onChange: () => setRetry(!retry) }), "retry transient"),
+      e("span", { className: "text-slate-500" }, `${selected.length} selected`)
+    ),
+    e("div", { className: "flex flex-wrap gap-2" },
+      e("button", { type: "button", onClick: start, disabled: busy || running || selected.length === 0,
+        className: "bg-indigo-600 disabled:opacity-40 px-4 py-2 rounded-xl text-xs font-bold" },
+        busy ? "QUEUEING…" : `RUN BATCH OF ${selected.length} ⚡`),
+      e("button", { type: "button", onClick: runEverything, disabled: busy || running || recs.length === 0,
+        className: "bg-slate-700 disabled:opacity-40 px-4 py-2 rounded-xl text-xs font-bold" }, "RUN WHOLE LIBRARY"),
+      running && e("button", { type: "button", onClick: cancel, className: "bg-red-800 px-4 py-2 rounded-xl text-xs font-bold" }, "CANCEL BATCH"),
+      e("button", { type: "button", onClick: () => { loadRecs(); loadBatches(); }, className: "key-btn" }, "REFRESH")
+    ),
+    error && e("p", { role: "alert", className: "text-[11px] text-red-300" }, error),
+    note && e("p", { role: "status", className: "text-[11px] text-emerald-300" }, note),
+    batch && e("div", { className: "bg-slate-950 rounded-xl border border-slate-800 p-3 space-y-2" },
+      e("div", { className: "flex justify-between text-[11px] font-bold" },
+        e("span", {}, `BATCH ${(batch.id || "").slice(0, 8)} · ${batch.total || 0} recordings`),
+        e("span", { className: batch.status === "passed" ? "text-emerald-400" : batch.status === "running" ? "text-indigo-300" : "text-amber-300" },
+          `${batch.status || ""} ${batch.progress_pct || 0}%`)
+      ),
+      e("div", { className: "w-full bg-slate-800 h-1.5 rounded-full overflow-hidden" },
+        e("div", { className: "progress-bar", style: { width: (batch.progress_pct || 0) + "%" } })),
+      e("div", { className: "text-[10px] text-slate-400" },
+        `${batch.passed || 0} passed · ${batch.failed || 0} failed · ${batch.skipped || 0} skipped` +
+        (report.seconds ? ` · ${report.seconds}s` : "") +
+        (report.throughput ? ` · ${report.throughput.recordings_per_minute || 0} rec/min · ${report.throughput.steps_per_second || 0} steps/s` : "")),
+      resources.browsers_launched !== undefined && e("div", { className: "text-[10px] text-emerald-400" },
+        `🧠 ${resources.browsers_launched} browser launch(es) for ${batch.total || 0} recordings` +
+        (resources.browser_relaunches ? ` (${resources.browser_relaunches} memory-guard relaunch)` : "") +
+        ` · ${resources.contexts_opened || 0} contexts · RSS ${resources.rss_mb_before || "?"}→${resources.rss_mb_after || "?"}MB` +
+        ` · screenshots ${report.screenshots ? report.screenshots.taken + " taken, " + report.screenshots.skipped + " skipped" : ""}` +
+        (pacing.learned ? ` · pacing learned for ${pacing.learned} step type(s)` : "")),
+      (batch.runs || []).map(r => e("div", { key: r.id, onClick: () => onOpenRun && onOpenRun(r.id),
+        className: "flex justify-between text-[10px] text-slate-300 bg-slate-900 rounded px-2 py-1 cursor-pointer" },
+        e("span", { className: "truncate" }, `RUN #${(r.id || "").slice(0, 8)} · ${r.step_count || 0} steps`),
+        e("span", { className: r.status === "passed" ? "text-emerald-400" : r.status === "failed" ? "text-red-400" : "text-slate-500" },
+          r.status + (r.progress_pct ? ` ${r.progress_pct}%` : ""))
+      ))
+    ),
+    batches.length > 0 && e("div", { className: "space-y-1" },
+      e("div", { className: "text-[9px] uppercase font-bold text-slate-500" }, "Recent batches"),
+      batches.slice(0, 5).map(b => e("button", { key: b.id, type: "button", onClick: () =>
+          API.get("/api/runs/batch/" + b.id).then(setBatch).catch(err => setError(err.message)),
+          className: "w-full flex justify-between text-[10px] text-slate-400 bg-slate-950 rounded px-2 py-1" },
+        e("span", {}, `${(b.name || "Batch " + b.id.slice(0, 8))} · ${b.total} rec`),
+        e("span", { className: b.status === "passed" ? "text-emerald-400" : "text-amber-300" },
+          `${b.status} ${b.passed}/${b.total}`)
+      ))
+    )
   );
 }
 
@@ -492,7 +741,12 @@ function Library({ project, liveWindow, onRun }) {
     try {
       const result = await API.patch(`/api/recordings/${editing}/steps/${step.id}`, changes);
       await openEditor(editing);
-      if (!result.published) setError("Step saved locally; GitHub sync retry pending.");
+      if (!result.published) {
+        // "retry pending" is only true when a retry was actually scheduled.
+        setError(result.publish_message || (result.retry_scheduled
+          ? "Step saved locally; the GitHub push is pending and will be retried."
+          : "Step saved locally. GitHub publishing is disabled in this deployment."));
+      }
     } catch (err) { setError(err.message); }
   };
   const run = async (recording) => {
@@ -743,8 +997,10 @@ function parseMarkdownTable(text) {
 
 function Logs() {
   const [source, setSource] = useState(null);
+  const [mode, setMode] = useState("");
   const [rows, setRows] = useState([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [open, setOpen] = useState(null);
   const [files, setFiles] = useState({});
@@ -765,19 +1021,55 @@ function Logs() {
     return await api.text();
   };
 
+  // Fallback for a deployment with no git checkout: read the reports this
+  // instance wrote itself. The server caps every file, so this stays cheap.
+  const loadLocal = async () => {
+    const local = await API.get("/api/logs/local/index");
+    if (!local.available) throw new Error(local.reason || "No harness logs are stored on this instance.");
+    setMode("local");
+    setRows((local.rows || []).map(row => ({ ...row, folder: row.folder || row.Folder })));
+    return true;
+  };
+
   useEffect(() => {
     let stop = false;
     (async () => {
       try {
-        // The only request this tab makes to the service: coordinates.
         const src = await API.get("/api/logs/source");
         if (stop) return;
         setSource(src);
-        if (!src.available) { setError(src.reason || "Log location unknown"); setLoading(false); return; }
-        const text = await fromGithub(src, "logs/index.md");
-        if (stop) return;
-        setRows(parseMarkdownTable(text));
-        setError("");
+        if (src.available) {
+          try {
+            const text = await fromGithub(src, "logs/index.md");
+            if (stop) return;
+            const parsed = parseMarkdownTable(text);
+            if (parsed.length) {
+              setMode("github"); setRows(parsed); setError("");
+            } else {
+              throw new Error("The committed log index has no runs yet.");
+            }
+          } catch (githubError) {
+            if (stop) return;
+            // Coordinates exist but the branch has no committed logs (or the
+            // network blocks GitHub): fall back to this instance instead of
+            // showing an empty tab.
+            try {
+              await loadLocal();
+              setNotice(`GitHub logs unavailable (${githubError.message}). Showing the reports stored on this instance.`);
+            } catch (localError) {
+              setMode("github"); setRows([]);
+              setError(githubError.message);
+            }
+          }
+        } else {
+          try {
+            await loadLocal();
+            setNotice(src.reason || "No git checkout here, so committed logs are unavailable.");
+          } catch (localError) {
+            setMode("none");
+            setError((src.reason || "Log location unknown") + " " + localError.message);
+          }
+        }
       } catch (err) {
         if (!stop) setError(err.message);
       } finally {
@@ -790,6 +1082,18 @@ function Logs() {
   const openRun = async (folder) => {
     if (open === folder) { setOpen(null); return; }
     setOpen(folder); setFiles({}); setBusy(folder);
+    if (mode === "local") {
+      try {
+        const listing = await API.get("/api/logs/local/" + encodeURIComponent(folder));
+        for (const name of listing.files || []) {
+          API.get(`/api/logs/local/${encodeURIComponent(folder)}/${encodeURIComponent(name)}`)
+            .then(res => setFiles(prev => ({ ...prev, [name]: (res.truncated ? "… (tail) …\n" : "") + res.text })))
+            .catch(() => {});
+        }
+      } catch (_) { /* a run may have no files */ }
+      setBusy("");
+      return;
+    }
     for (const name of LOG_FILES) {
       fromGithub(source, `logs/${folder}/${name}`)
         .then(text => setFiles(prev => ({ ...prev, [name]: text })))
@@ -799,25 +1103,35 @@ function Logs() {
   };
 
   const folderOf = (row) => {
+    if (row.folder) return row.folder;
     const match = /\(([^)]+)\/results\.md\)/.exec(row["Folder"] || "");
     return match ? match[1] : (row["Folder"] || "").replace(/[[\]]/g, "");
   };
 
+  const badge = mode === "github" ? "FROM GITHUB" : mode === "local" ? "FROM THIS INSTANCE" : "NO LOGS";
   return e("div", { className: "space-y-4" },
     e("div", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-2" },
       e("div", { className: "flex justify-between items-center" },
         e("h2", { className: "font-bold text-lg text-indigo-300" }, "Harness logs 📜"),
-        e("span", { className: "fast-badge" }, "FROM GITHUB")
+        e("span", { className: "fast-badge" }, badge)
       ),
       e("p", { className: "text-sm text-slate-400" },
-        "Read straight from the repository by your browser. This deployment never reads, stores or serves these files, so opening this tab puts no load on the service."),
+        mode === "local"
+          ? "Read from the reports stored on this instance, capped per file. This is the fallback used when the deployment has no git checkout to read the committed logs from."
+          : "Read straight from the repository by your browser. This deployment never reads, stores or serves these files, so opening this tab puts no load on the service."),
       source && source.available && e("p", { className: "text-[10px] font-mono text-slate-500 break-all" },
-        `${source.slug} @ ${source.branch}`)
+        `${source.slug} @ ${source.branch}` + (source.via === "config" ? " (from TF_GITHUB_REPO, no checkout needed)" : "")),
+      mode === "local" && source && source.local && e("p", { className: "text-[10px] font-mono text-slate-500 break-all" },
+        `${source.local.logs_dir}`),
+      source && !source.available && source.fixes && e("div", { className: "text-[10px] text-amber-300/80 space-y-0.5" },
+        e("div", { className: "font-bold" }, "Make committed logs readable here:"),
+        source.fixes.map(fix => e("div", { key: fix, className: "font-mono" }, "• " + fix)))
     ),
-    loading && e("p", { className: "text-sm text-slate-400" }, "Fetching log index from GitHub…"),
+    loading && e("p", { className: "text-sm text-slate-400" }, "Fetching log index…"),
+    notice && e("p", { role: "status", className: "text-xs text-amber-300" }, notice),
     error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),
     !loading && !error && rows.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-6" },
-      "No committed harness runs on this branch yet."),
+      mode === "local" ? "No harness runs are stored on this instance yet." : "No committed harness runs on this branch yet."),
     rows.map((row, i) => {
       const folder = folderOf(row);
       const isOpen = open === folder;
@@ -833,13 +1147,13 @@ function Logs() {
             row["Result"] || "?")
         ),
         isOpen && e("div", { className: "p-3 space-y-2 border-t border-slate-800" },
-          busy === folder && e("p", { className: "text-xs text-slate-400" }, "Fetching from GitHub…"),
+          busy === folder && e("p", { className: "text-xs text-slate-400" }, mode === "local" ? "Reading from this instance…" : "Fetching from GitHub…"),
           Object.keys(files).length === 0 && busy !== folder && e("p", { className: "text-xs text-slate-500" }, "No log files found for this run."),
           Object.entries(files).map(([name, text]) => e("details", { key: name, open: name === "results.md", className: "bg-slate-950 rounded border border-slate-800" },
             e("summary", { className: "text-[10px] font-mono p-2 cursor-pointer text-indigo-300" }, name),
             e("pre", { className: "text-[9px] p-2 overflow-x-auto max-h-64 overflow-y-auto whitespace-pre-wrap text-slate-300" }, text)
           )),
-          e("a", { href: `https://github.com/${source.slug}/tree/${source.branch}/logs/${folder}`, target: "_blank", rel: "noopener noreferrer",
+          mode === "github" && source && source.slug && e("a", { href: `https://github.com/${source.slug}/tree/${source.branch}/logs/${folder}`, target: "_blank", rel: "noopener noreferrer",
                    className: "block text-center text-[10px] text-indigo-300 underline pt-1" }, "Open this run on GitHub")
         )
       );
@@ -850,19 +1164,33 @@ function Logs() {
 function Github() {
   const [info, setInfo] = useState(null);
   const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [plan, setPlan] = useState(null);
   const [publishing, setPublishing] = useState(false);
   const [fastInfo, setFastInfo] = useState(null);
   const load = () => {
-    API.get("/api/library").then(setInfo).catch(err => setError(err.message));
+    API.get("/api/library").then(data => { setInfo(data); setError(""); }).catch(err => setError(err.message));
     API.get("/api/library/fast").then(setFastInfo).catch(() => {});
   };
   useEffect(() => { load(); }, []);
+  const preview = async () => {
+    setNote("Comparing this instance with the remote branch…");
+    try {
+      const result = await API.get("/api/library/publish/plan");
+      setPlan(result);
+      setNote(result.available
+        ? `${result.added || 0} new, ${result.changed || 0} changed, ${result.removed || 0} deleted file(s) to publish.`
+        : (result.reason || result.error || "Nothing to compare."));
+    } catch (err) { setNote(""); setError(err.message); }
+  };
   const publish = async () => {
     setPublishing(true);
     try {
       const result = await API.post("/api/library/publish", {});
       setInfo(result);
       setError("");
+      setNote(result.publish_message || result.message || "");
+      load();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -874,7 +1202,7 @@ function Github() {
     try {
       const result = await API.post("/api/sync/github", {});
       setError("");
-      alert(result.message || "Pushed to the active branch immediately ⚡");
+      setNote(result.message || "");
       load();
     } catch (err) {
       setError(err.message);
@@ -887,28 +1215,47 @@ function Github() {
   const projects = (info && info.projects) || [];
   return e('div', { className: "py-8 px-5 bg-slate-900 rounded-3xl border border-slate-800 shadow-2xl space-y-4" },
     e('div', {className:"text-5xl text-center"}, "🐙"),
-    e('div', { className: "flex justify-center gap-2" },
+    e('div', { className: "flex justify-center gap-2 items-center" },
       e('h2', {className:"font-bold text-xl text-indigo-300 text-center"}, "GITHUB LIBRARY"),
-      e('span', { className: "fast-badge" }, "CURRENT BRANCH ⚡")
+      e('span', { className: "fast-badge" },
+        (info && info.publish_mode === "api") ? "GITHUB API ⚡"
+        : (info && info.publish_enabled) ? "GIT CHECKOUT ⚡" : "LOCAL ONLY")
     ),
-    e('p', {className:"text-sm text-slate-400"}, "Projects, variables, recordings stored in library/ folder of current branch only. Dashboard loads super fast from catalog. Creating project or saving recording commits and pushes to the active branch immediately with description. Repeated actions are stored as one step with a repeat count."),
+    e('p', {className:"text-sm text-slate-400"},
+      "Projects, variables and recordings live in the library/ folder of the repository. Saving commits and publishes them, " +
+      "either with git push from a checkout or, in a container that has no checkout, through the GitHub API. " +
+      "Repeated actions are stored as one step with a repeat count."),
     info && e('div', { className: "text-xs text-slate-400 font-mono space-y-1" },
-      e('div', {}, "Branch " + (info.branch || "— " + (info.git_state === "no-checkout" ? "(no git checkout here)" : "(unknown)"))),
+      e('div', {}, "Branch " + (info.branch
+        ? info.branch + (info.publish_mode === "api" ? " (GitHub API — no checkout here)" : " (checked out)")
+        : "— " + (info.git_state === "no-checkout" ? "(no git checkout here)" : "(unknown)"))),
       e('div', { className: info.remote_verification?.synced ? "text-emerald-400" : "text-amber-300" },
         info.remote_verification?.synced
           ? "Remote verified: fully synced"
           : "Remote not verified / sync pending" + (info.remote_verification?.state ? " · " + info.remote_verification.state : "")),
-      e('div', {}, "Revision " + (info.revision || "—")),
-      e('div', {}, info.publish_enabled ? "Push to the active branch enabled ⚡" : "Push disabled"),
+      e('div', {}, "Revision " + (info.revision || info.remote_verification?.revision || "—")),
+      e('div', {}, info.publish_enabled
+        ? (info.publish_mode === "api"
+            ? `Publishing enabled through the GitHub API to ${info.api_publish?.slug || "the repository"} ⚡`
+            : "Push to the checked-out branch enabled ⚡")
+        : "Publishing disabled"),
       info.dirty && e('div', { className: "text-amber-300" }, "Unpublished changes - will push to the active branch immediately"),
       fastInfo && e('div', { className: "text-emerald-400" }, `Fast load: ${fastInfo.load_time || "cached"} from catalog ⚡`)
+    ),
+    info && info.git_note && e('div', { role: "status", className: "text-[11px] bg-slate-950 border border-slate-800 text-slate-300 p-3 rounded-xl" },
+      e('div', { className: "font-bold mb-1 text-indigo-300" }, "How this deployment publishes"),
+      e('p', {}, info.git_note),
+      info.last_api_push && e('p', { className: "mt-1 text-[10px] text-emerald-300/80 font-mono break-all" },
+        `Last API commit ${String(info.last_api_push.commit || "").slice(0, 7)} · ${info.last_api_push.total || 0} file(s) · ${info.last_api_push.elapsed || 0}s`)
     ),
     info && info.status_reason && e('div', { role: "status", className: "text-[11px] bg-amber-950/40 border border-amber-800/40 text-amber-200 p-3 rounded-xl" },
       e('div', { className: "font-bold mb-1" }, "Why the panel reads this way"),
       e('p', {}, info.status_reason),
       info.remote_verification?.reason && e('p', { className: "mt-1 text-amber-300/80" }, info.remote_verification.reason),
       info.git_state === "no-checkout" && e('p', { className: "mt-2 text-[10px] text-amber-300/70" },
-        "Library folder: " + (info.library_dir || "library") + " · " + (info.projects_on_disk || 0) + " project(s) on disk · catalog " + (info.catalog_present ? "present" : "missing"))
+        "Library folder: " + (info.library_dir || "library") + " · " + (info.projects_on_disk || 0) + " project(s) on disk · catalog " + (info.catalog_present ? "present" : "missing")),
+      info.git_state === "no-checkout" && e('p', { className: "mt-2 text-[10px] text-amber-300/70 font-mono" },
+        "To enable publishing: set TF_GITHUB_REPO=owner/name and TF_GITHUB_TOKEN (repo scope), or mount a git checkout.")
     ),
     e('div', { className: "space-y-2" },
       projects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center" },
@@ -933,10 +1280,33 @@ function Github() {
     error && e('p', { role: "alert", className: "text-sm text-red-300" }, error),
     e('div', { className: "flex flex-col gap-2" },
       e('a', { href: tree, target: "_blank", rel: "noopener noreferrer", className: "text-center bg-slate-700 px-8 py-3 rounded-2xl font-bold" }, "OPEN LIBRARY ON GITHUB BRANCH"),
-      e('button', { type: "button", onClick: publish, disabled: publishing || !(info && info.publish_enabled), title: info && info.publish_enabled ? "" : "Publishing is disabled: no git checkout in this deployment", className: "bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed px-8 py-3 rounded-2xl font-bold" }, publishing ? "PUSHING…⚡" : (info && info.publish_enabled ? "PUSH LIBRARY TO GITHUB ⚡" : "PUSH DISABLED — NO GIT CHECKOUT")),
-      e('button', { type: "button", onClick: sync, disabled: publishing, className: "bg-emerald-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "SYNCING…⚡" : "VERIFY / SYNC NOW ⚡")
+      e('button', { type: "button", onClick: publish, disabled: publishing || !(info && info.publish_enabled),
+        title: (info && info.publish_enabled) ? "" : (info && info.publish_disabled_reason) || "Publishing is disabled in this deployment",
+        className: "bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed px-8 py-3 rounded-2xl font-bold" },
+        publishing ? "PUBLISHING…⚡"
+          : (info && info.publish_enabled)
+            ? (info.publish_mode === "api" ? "PUBLISH LIBRARY VIA GITHUB API ⚡" : "PUSH LIBRARY TO GITHUB ⚡")
+            : "PUBLISHING DISABLED"),
+      e('button', { type: "button", onClick: sync, disabled: publishing || !(info && info.publish_enabled),
+        title: (info && info.publish_enabled) ? "" : (info && info.publish_disabled_reason) || "Nothing to verify: publishing is disabled",
+        className: "bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed px-8 py-3 rounded-2xl font-bold" },
+        publishing ? "SYNCING…⚡" : "VERIFY / SYNC NOW ⚡"),
+      e('button', { type: "button", onClick: preview, disabled: publishing || !(info && info.publish_enabled),
+        className: "bg-slate-700 disabled:opacity-40 px-8 py-3 rounded-2xl font-bold" }, "WHAT WOULD THIS PUBLISH?")
     ),
-    e('p', { className: "text-xs text-slate-500" }, "Pushes are verified against the remote branch. Unavailable GitHub or a rejected push remains pending and is retried after one minute.")
+    plan && plan.available && e('div', { className: "text-[10px] font-mono text-slate-400 bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1" },
+      e('div', {}, `${plan.slug || ""}@${plan.branch || ""} · remote ${String(plan.remote_sha || "—").slice(0, 7)} · ${plan.files || 0} local file(s), ${Math.round((plan.bytes || 0) / 1024)}KB`),
+      e('div', { className: "text-emerald-300" }, `new: ${(plan.added || []).join(", ") || "none"}`),
+      e('div', { className: "text-amber-300" }, `changed: ${(plan.changed || []).join(", ") || "none"}`),
+      e('div', { className: "text-red-300" }, `deleted on remote: ${(plan.removed || []).join(", ") || "none"}`),
+      (plan.skipped || []).length > 0 && e('div', { className: "text-slate-500" },
+        `skipped: ${plan.skipped.map(s => s.path + " (" + s.reason + ")").join(", ")}`)
+    ),
+    note && e('p', { role: "status", className: "text-xs text-emerald-300" }, note),
+    e('p', { className: "text-xs text-slate-500" },
+      (info && info.publish_enabled)
+        ? "Every publish is verified by reading the remote branch back. A push that GitHub rejects stays pending and is retried once a minute; the local library is never rolled back."
+        : "Publishing is disabled here, so saves stay on this instance and no retry is scheduled. Configure TF_GITHUB_REPO with TF_GITHUB_TOKEN (or mount a checkout) to enable it.")
   );
 }
 

@@ -111,6 +111,8 @@ class ScenarioRunner:
             raise ScenarioError(f"write probe failed: {payload.get('write_probe')}")
         if payload.get("recorder") != "ok" or payload.get("executor") != "ok":
             raise ScenarioError(f"diagnostics degraded: recorder={payload.get('recorder')} executor={payload.get('executor')}")
+        if payload.get("batch_executor") != "ok":
+            raise ScenarioError(f"diagnostics degraded: batch_executor={payload.get('batch_executor')}")
 
     def do_expect_http(self, step, ctx):
         status, payload = self.client.request(step["method"], step["path"], step.get("body"))
@@ -121,6 +123,167 @@ class ScenarioRunner:
         if step.get("json_field"):
             if not isinstance(payload, dict) or payload.get(step["json_field"]) != step.get("json_equals"):
                 raise ScenarioError(f"JSON field mismatch: {payload}")
+
+    def do_queue_hygiene(self, step, ctx):
+        """The queue reports what will never run, and a dry run changes nothing."""
+        _, payload = self.client.ok("GET", "/api/runs/queue/status")
+        for key in ("queued", "running", "pending", "hygiene"):
+            if key not in payload:
+                raise ScenarioError(f"queue status is missing {key!r}: {payload}")
+        hygiene = payload["hygiene"]
+        for key in ("orphans", "stale", "clearable", "duplicates", "policy"):
+            if key not in hygiene:
+                raise ScenarioError(f"queue hygiene is missing {key!r}: {hygiene}")
+        if not hygiene["policy"].get("stale_minutes"):
+            raise ScenarioError(f"queue policy has no stale window: {hygiene['policy']}")
+        before = hygiene["clearable"]
+        _, preview = self.client.ok("POST", "/api/runs/queue/clear", {"dry_run": True})
+        if not preview.get("dry_run"):
+            raise ScenarioError(f"a dry run must say so: {preview}")
+        if preview.get("cancelled") != 0:
+            raise ScenarioError(f"a dry run must not cancel anything: {preview}")
+        if preview.get("matched") != before:
+            raise ScenarioError(f"dry run matched {preview.get('matched')} but the queue reported {before}")
+        _, after = self.client.ok("GET", "/api/runs/queue/status")
+        if after["hygiene"]["clearable"] != before:
+            raise ScenarioError("a dry run changed the queue")
+
+    def do_logs_fallback(self, step, ctx):
+        """Without git coordinates the Logs tab still gets somewhere to read."""
+        _, source = self.client.ok("GET", "/api/logs/source")
+        if source.get("available"):
+            for key in ("slug", "branch", "base", "index"):
+                if not source.get(key):
+                    raise ScenarioError(f"log source is missing {key!r}: {source}")
+        else:
+            if "No git checkout" not in (source.get("reason") or ""):
+                raise ScenarioError(f"the reason must say why: {source}")
+            if not isinstance(source.get("local"), dict):
+                raise ScenarioError(f"no local fallback was offered: {source}")
+            fixes = " ".join(source.get("fixes") or [])
+            if "TF_GITHUB_REPO" not in fixes:
+                raise ScenarioError(f"no actionable fix was listed: {source}")
+        _, index = self.client.ok("GET", "/api/logs/local/index")
+        if index.get("source") != "local" or "logs_dir" not in index:
+            raise ScenarioError(f"local log index is malformed: {index}")
+        if not index.get("available") and not index.get("reason"):
+            raise ScenarioError(f"an unavailable local index must explain itself: {index}")
+        if index.get("available"):
+            folder = index["rows"][0].get("folder")
+            status, body = self.client.request("GET", f"/api/logs/local/{folder}/results.md")
+            if status == 200 and not isinstance(body.get("text"), str):
+                raise ScenarioError(f"local log file has no text: {body}")
+            status, _ = self.client.request("GET", "/api/logs/local/..%2F..%2Fetc/passwd")
+            if status != 404:
+                raise ScenarioError(f"path traversal must be refused, got {status}")
+
+    def do_publish_contract(self, step, ctx):
+        """Publishing state is reported consistently, and never promises a phantom retry."""
+        _, library = self.client.ok("GET", "/api/library")
+        mode = library.get("publish_mode")
+        if mode not in ("checkout", "api", "disabled"):
+            raise ScenarioError(f"unknown publish mode: {library}")
+        if mode == "disabled":
+            if library.get("publish_enabled"):
+                raise ScenarioError("disabled publishing reported publish_enabled")
+            if not library.get("publish_disabled_reason"):
+                raise ScenarioError(f"disabled publishing gave no reason: {library}")
+            if not library.get("status_reason"):
+                raise ScenarioError(f"the panel would render bare dashes: {library}")
+        elif mode == "api":
+            if not library.get("api_publish", {}).get("slug"):
+                raise ScenarioError(f"api publishing has no repository: {library}")
+        _, health = self.client.ok("GET", "/api/health")
+        if health.get("library_publish_mode") != mode:
+            raise ScenarioError(f"health says {health.get('library_publish_mode')}, library says {mode}")
+        status, payload = self.client.request("POST", "/api/sync/github", {})
+        if mode == "disabled":
+            if status != 503:
+                raise ScenarioError(f"sync with publishing disabled must be 503, got {status}")
+            if "No .git" not in str(payload) and "switched off" not in str(payload):
+                raise ScenarioError(f"503 must explain itself: {payload}")
+        elif status < 400 and not payload.get("publish_message"):
+            raise ScenarioError(f"sync gave no message to show: {payload}")
+
+    def do_start_batch(self, step, ctx):
+        """Queue a batch of committed recordings through the real API."""
+        body = {
+            "recording_ids": step["recording_ids"],
+            "screenshots": step.get("screenshots", "failure"),
+            "display_window": bool(step.get("display_window", False)),
+            "name": step.get("name", "Harness batch"),
+        }
+        if "share_session" in step:
+            body["share_session"] = step["share_session"]
+        status, payload = self.client.request("POST", "/api/runs/batch", body, timeout=30)
+        if status != 201:
+            raise ScenarioError(f"batch was not accepted ({status}): {payload}")
+        if payload.get("total") != len(step["recording_ids"]):
+            raise ScenarioError(f"batch planned {payload.get('total')} of {len(step['recording_ids'])}: {payload}")
+        if payload.get("options", {}).get("screenshots") != body["screenshots"]:
+            raise ScenarioError(f"screenshot mode was not honoured: {payload}")
+        if step.get("save"):
+            ctx[step["save"]] = payload["batch_id"]
+
+    def do_wait_batch(self, step, ctx):
+        """Wait for a batch to finish and check what it cost."""
+        batch_id = step["batch"]
+        deadline = time.time() + step.get("timeout", 150)
+        payload = None
+        while time.time() < deadline:
+            _, payload = self.client.ok("GET", f"/api/runs/batch/{batch_id}")
+            if payload.get("status") not in ("queued", "running"):
+                break
+            time.sleep(0.5)
+        if payload is None:
+            raise ScenarioError("the batch never reported a status")
+        expected = step.get("expect_status", "passed")
+        if payload.get("status") != expected:
+            raise ScenarioError(
+                f"batch status {payload.get('status')} != {expected}: {payload.get('error')}"
+            )
+        runs = payload.get("runs") or []
+        if len(runs) != payload.get("total"):
+            raise ScenarioError(f"batch has {len(runs)} runs for {payload.get('total')} recordings")
+        for run in runs:
+            if run.get("status") != "passed":
+                raise ScenarioError(
+                    f"run {run.get('id')} finished {run.get('status')}: {run.get('rog_monitor_log')}"
+                )
+        report = payload.get("report") or {}
+        resources = report.get("resources") or {}
+        if step.get("expect_browsers") and resources.get("browsers_launched") != step["expect_browsers"]:
+            raise ScenarioError(
+                f"batch launched {resources.get('browsers_launched')} browser(s), "
+                f"expected {step['expect_browsers']}: {resources}"
+            )
+        if not (report.get("throughput") or {}).get("steps_per_second"):
+            raise ScenarioError(f"batch reported no throughput: {report.get('throughput')}")
+        if report.get("seconds") is None:
+            raise ScenarioError("batch reported no elapsed time")
+        self.log(f"  batch {batch_id[:8]}: {payload.get('total')} recordings in "
+                 f"{report.get('seconds')}s, {resources.get('browsers_launched')} browser(s), "
+                 f"rss {resources.get('rss_mb_before')}->{resources.get('rss_mb_after')}MB")
+
+    def do_batch_validation(self, step, ctx):
+        """Batch selection is validated before a browser is anywhere near it."""
+        status, payload = self.client.request("POST", "/api/runs/batch", {})
+        if status != 422:
+            raise ScenarioError(f"an empty batch must be 422, got {status}: {payload}")
+        status, payload = self.client.request("POST", "/api/runs/batch", {"recording_ids": ["not-a-recording"]})
+        if status != 404:
+            raise ScenarioError(f"an unknown recording must be 404, got {status}: {payload}")
+        status, payload = self.client.request("GET", "/api/runs/batches")
+        if status != 200 or not isinstance(payload, list):
+            raise ScenarioError(f"batch listing must be a list, got {status}: {payload}")
+        status, payload = self.client.request("GET", "/api/runs/batch/not-a-batch")
+        if status != 404:
+            raise ScenarioError(f"an unknown batch must be 404, got {status}: {payload}")
+        _, diagnostics = self.client.ok("GET", "/api/diagnostics")
+        if diagnostics.get("batch_executor") != "ok":
+            raise ScenarioError(f"batch executor is not ready: {diagnostics.get('batch_executor')}")
+        if "queue" not in diagnostics or "logs" not in diagnostics:
+            raise ScenarioError(f"diagnostics lost the queue/logs report: {sorted(diagnostics)}")
 
     def do_create_project(self, step, ctx):
         _, payload = self.client.ok("POST", "/api/projects", {"name": step["name"], "base_url": step.get("base_url", "")})
