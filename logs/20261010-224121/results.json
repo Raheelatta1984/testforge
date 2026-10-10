@@ -1,0 +1,982 @@
+{
+  "started": "2026-10-10T22:41:21+00:00",
+  "finished": "2026-10-10T22:41:33+00:00",
+  "revision": "79c4522",
+  "python": "3.11.2",
+  "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
+  "passed": 114,
+  "failed": 0,
+  "skipped": 7,
+  "total": 121,
+  "ok": true,
+  "scenarios": [
+    {
+      "id": "UT-MEM-07",
+      "title": "test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-MEM-08",
+      "title": "test_UT_MEM_08_artifact_export_streams_within_the_cap",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-01",
+      "title": "test_UT_BATCH_01_one_browser_replays_the_whole_batch",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-02",
+      "title": "test_UT_BATCH_02_pacing_learns_clamps_and_classifies",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-03",
+      "title": "test_UT_BATCH_03_screenshots_only_where_they_are_worth_it",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-04",
+      "title": "test_UT_BATCH_04_transient_failure_is_retried_once",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-05",
+      "title": "test_UT_BATCH_05_no_retry_for_a_real_recording_defect",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-06",
+      "title": "test_UT_BATCH_06_plan_groups_origins_shortest_first",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-07",
+      "title": "test_UT_BATCH_07_batch_endpoints_validate_and_report",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-08",
+      "title": "test_UT_BATCH_08_cancel_stops_the_rest_of_the_batch",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-09",
+      "title": "test_UT_BATCH_09_a_second_batch_is_refused_while_one_runs",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BATCH-10",
+      "title": "test_UT_BATCH_10_a_batch_cannot_open_a_second_browser",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BOOT-01",
+      "title": "test_UT_BOOT_01_modules_import",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BOOT-02",
+      "title": "test_UT_BOOT_02_config_contract",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BOOT-03",
+      "title": "test_UT_BOOT_03_run_columns_match_the_model",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-01",
+      "title": "test_UT_BRW_01_libs_do_not_leak",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-02",
+      "title": "test_UT_BRW_02_missing_binary_raises",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-03",
+      "title": "test_UT_BRW_03_install_hint",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-BRW-04",
+      "title": "test_UT_BRW_04_video_disabled_for_override",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-DOC-01",
+      "title": "test_UT_DOC_01_catalog_ids_match",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-05",
+      "title": "test_UT_RUN_05_window_off_replays_without_rendering_a_frame",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-06",
+      "title": "test_UT_RUN_06_window_on_with_a_viewer_streams_frames",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-07",
+      "title": "test_UT_RUN_07_window_on_but_nobody_watching_renders_nothing",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-08",
+      "title": "test_UT_RUN_08_merged_repeat_executes_every_occurrence",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-MEM-01",
+      "title": "test_UT_MEM_01_browser_budget_serialises_and_counts",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-MEM-02",
+      "title": "test_UT_MEM_02_cancelled_waiter_does_not_leak_a_permit",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-MEM-03",
+      "title": "test_UT_MEM_03_live_frames_are_bounded_and_expire",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-MEM-04",
+      "title": "test_UT_MEM_04_run_buffers_are_bounded",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-MEM-05",
+      "title": "test_UT_MEM_05_recorder_and_executor_share_one_budget",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-MEM-06",
+      "title": "test_UT_MEM_06_two_runs_never_hold_a_browser_at_once",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-GIT-01",
+      "title": "test_UT_GIT_01_status_explains_a_missing_git_checkout",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-GIT-02",
+      "title": "test_UT_GIT_02_status_reports_what_is_on_disk",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-01",
+      "title": "test_UT_LIB_01_project_is_written_to_the_repository_tree",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-02",
+      "title": "test_UT_LIB_02_database_only_projects_are_hidden",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-03",
+      "title": "test_UT_LIB_03_recording_writes_its_jenkins_resource",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-04",
+      "title": "test_UT_LIB_04_variables_roundtrip_in_the_repository",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-05",
+      "title": "test_UT_LIB_05_rejects_a_path_escape",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-06",
+      "title": "test_UT_LIB_06_publish_pushes_only_library_files",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-07",
+      "title": "test_UT_LIB_07_failed_push_keeps_local_project_for_retry",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LIB-08",
+      "title": "test_UT_LIB_08_materialize_loads_a_file_only_recording",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LOG-04",
+      "title": "test_UT_LOG_04_local_index_and_file_are_served",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LOG-05",
+      "title": "test_UT_LOG_05_local_reader_refuses_to_escape_and_caps_the_tail",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LOG-06",
+      "title": "test_UT_LOG_06_source_falls_back_to_local_and_explains_itself",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LOG-07",
+      "title": "test_UT_LOG_07_repo_coordinates_come_from_configuration",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LOG-01",
+      "title": "test_UT_LOG_01_logs_are_pointed_at_github_not_this_server",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LOG-02",
+      "title": "test_UT_LOG_02_logs_source_rejects_a_bad_branch",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-LOG-03",
+      "title": "test_UT_LOG_03_logs_source_explains_a_missing_checkout",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-03",
+      "title": "test_UT_RUN_03_no_frame_is_rendered_without_a_viewer",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-04",
+      "title": "test_UT_RUN_04_run_records_the_live_window_choice",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-PUB-01",
+      "title": "test_UT_PUB_01_disabled_publishing_promises_no_retry",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-PUB-02",
+      "title": "test_UT_PUB_02_failed_push_states_the_retry_interval",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-PUB-03",
+      "title": "test_UT_PUB_03_api_publisher_commits_and_verifies",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-PUB-04",
+      "title": "test_UT_PUB_04_api_publisher_is_a_no_op_when_synced",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-PUB-05",
+      "title": "test_UT_PUB_05_api_publisher_bounds_the_push_and_hides_the_token",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-PUB-06",
+      "title": "test_UT_PUB_06_status_reports_api_publishing_instead_of_dashes",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-PUB-07",
+      "title": "test_UT_PUB_07_a_stray_token_does_not_enable_publishing",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-QUEUE-01",
+      "title": "test_UT_QUEUE_01_orphans_are_cancelled_and_live_runs_are_not",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-QUEUE-02",
+      "title": "test_UT_QUEUE_02_clear_honours_age_and_dry_run",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-QUEUE-03",
+      "title": "test_UT_QUEUE_03_duplicate_queued_runs_are_reused_not_stacked",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-QUEUE-04",
+      "title": "test_UT_QUEUE_04_finished_history_can_be_purged",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-QUEUE-05",
+      "title": "test_UT_QUEUE_05_clear_endpoint_validates_and_reports",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-01",
+      "title": "test_UT_REP_01_navigate_interpolates",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-02",
+      "title": "test_UT_REP_02_click_selector",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-03",
+      "title": "test_UT_REP_03_click_coordinate_fallback",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-04",
+      "title": "test_UT_REP_04_click_without_target",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-05",
+      "title": "test_UT_REP_05_type_interpolates",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-06",
+      "title": "test_UT_REP_06_fill_replaces",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-07",
+      "title": "test_UT_REP_07_press_key",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-08",
+      "title": "test_UT_REP_08_unsupported_action",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-09",
+      "title": "test_UT_REP_09_navigate_without_url",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-REP-10",
+      "title": "test_UT_REP_10_relative_navigate_uses_this_server",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-API-01",
+      "title": "test_UT_API_01_run_list_is_bounded_and_light_by_default",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-01",
+      "title": "test_UT_RUN_01_no_steps_fails_closed",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-RUN-02",
+      "title": "test_UT_RUN_02_missing_recording",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-SAVE-01",
+      "title": "test_UT_SAVE_01_stop_survives_a_slow_export",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-SAVE-02",
+      "title": "test_UT_SAVE_02_stop_closes_the_browser_even_if_the_export_raises",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-SEC-01",
+      "title": "test_UT_SEC_01_redact_password",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-01",
+      "title": "test_UT_URL_01_blank_sample_app",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-02",
+      "title": "test_UT_URL_02_relative_loopback",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-03",
+      "title": "test_UT_URL_03_scheme_less_https",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-04",
+      "title": "test_UT_URL_04_external_unchanged",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-05",
+      "title": "test_UT_URL_05_file_scheme_rejected",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-06",
+      "title": "test_UT_URL_06_preview_host_rewritten",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-07",
+      "title": "test_UT_URL_07_other_local_port_preserved",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-URL-08",
+      "title": "test_UT_URL_08_query_preserved",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-01",
+      "title": "test_UT_VAR_01_known_keys",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-02",
+      "title": "test_UT_VAR_02_unknown_key_kept",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-03",
+      "title": "test_UT_VAR_03_empty_text",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-VAR-04",
+      "title": "test_UT_VAR_04_inner_whitespace",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-01",
+      "title": "test_UT_FLOW_01_repeated_action_merges_distinct_actions_keep_order",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-02",
+      "title": "test_UT_FLOW_02_stop_without_session_and_edit_with_screenshot",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-03",
+      "title": "test_UT_FLOW_03_export_templates_and_formula_safety",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-04",
+      "title": "test_UT_FLOW_04_variable_capture_and_replay_value",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-05",
+      "title": "test_UT_FLOW_05_capture_new_and_existing_variable",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-06",
+      "title": "test_UT_FLOW_06_compact_png_preserves_format_and_never_grows",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-07",
+      "title": "test_UT_FLOW_07_merged_repeat_replays_every_occurrence",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-08",
+      "title": "test_UT_FLOW_08_save_variable_is_never_merged",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "UT-FLOW-09",
+      "title": "test_UT_FLOW_09_compress_existing_recording",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
+      "id": "LB-API-01",
+      "title": "Health reports the recorder and the executor",
+      "status": "passed",
+      "seconds": 0.003,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-02",
+      "title": "Creating a project without a name is rejected",
+      "status": "passed",
+      "seconds": 0.003,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-03",
+      "title": "A project can be created and listed",
+      "status": "passed",
+      "seconds": 0.021,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-04",
+      "title": "Variables can be created, updated, and deleted",
+      "status": "passed",
+      "seconds": 0.043,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-05",
+      "title": "AI rephrase trims and punctuates text without an API key",
+      "status": "passed",
+      "seconds": 0.002,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-06",
+      "title": "Screenshot paths cannot escape the artifacts directory",
+      "status": "passed",
+      "seconds": 0.005,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-07",
+      "title": "A run cannot be queued for an unknown recording",
+      "status": "passed",
+      "seconds": 0.002,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-08",
+      "title": "Running a recording with no steps fails before a browser opens",
+      "status": "passed",
+      "seconds": 0.22,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-09",
+      "title": "A recording aimed at another local port is stored unchanged",
+      "status": "passed",
+      "seconds": 0.06,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-10",
+      "title": "Diagnostics stays readable and the write probe succeeds",
+      "status": "passed",
+      "seconds": 0.01,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-REC-04",
+      "title": "Stopping a session that is not running is idempotent",
+      "status": "passed",
+      "seconds": 0.175,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-REC-01",
+      "title": "Starting a recording shows a live browser frame",
+      "layer": "library",
+      "status": "skipped",
+      "seconds": 0,
+      "error": "Chromium is not installed; scenario skipped"
+    },
+    {
+      "id": "LB-REC-02",
+      "title": "Clicks, typing, and a key press are saved with selectors",
+      "layer": "library",
+      "status": "skipped",
+      "seconds": 0,
+      "error": "Chromium is not installed; scenario skipped"
+    },
+    {
+      "id": "LB-RUN-01",
+      "title": "Replay of a literal recording passes and the page shows the typed name",
+      "layer": "library",
+      "status": "skipped",
+      "seconds": 0,
+      "error": "Chromium is not installed; scenario skipped"
+    },
+    {
+      "id": "LB-RUN-02",
+      "title": "Replay interpolates {{user}} at execution time, not record time",
+      "layer": "library",
+      "status": "skipped",
+      "seconds": 0,
+      "error": "Chromium is not installed; scenario skipped"
+    },
+    {
+      "id": "LB-LIB-01",
+      "title": "The dashboard library is the repository catalog",
+      "status": "passed",
+      "seconds": 0.01,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-LIB-02",
+      "title": "Replay the repository recording qa-hello-literal",
+      "layer": "library",
+      "status": "skipped",
+      "seconds": 0,
+      "error": "Chromium is not installed; scenario skipped"
+    },
+    {
+      "id": "LB-LIB-03",
+      "title": "Replay the repository recording that interpolates {{user}}",
+      "layer": "library",
+      "status": "skipped",
+      "seconds": 0,
+      "error": "Chromium is not installed; scenario skipped"
+    },
+    {
+      "id": "LB-API-11",
+      "title": "The execution queue reports and clears entries that will never run",
+      "status": "passed",
+      "seconds": 0.031,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-12",
+      "title": "Batch selection is validated before a browser is launched",
+      "status": "passed",
+      "seconds": 0.023,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-13",
+      "title": "The Logs tab has a source even without a git checkout",
+      "status": "passed",
+      "seconds": 0.009,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-API-14",
+      "title": "Publishing state is reported consistently and never promises a phantom retry",
+      "status": "passed",
+      "seconds": 0.007,
+      "error": null,
+      "layer": "library"
+    },
+    {
+      "id": "LB-BAT-01",
+      "title": "One browser replays both committed recordings in a batch",
+      "layer": "library",
+      "status": "skipped",
+      "seconds": 0,
+      "error": "Chromium is not installed; scenario skipped"
+    }
+  ]
+}

@@ -30,6 +30,12 @@ from app.library_store import playback_url
 RUN_EXCERPT = os.environ.get("TF_RUN_EXCERPT", "1").strip().lower() in {"1", "true", "yes", "on"}
 
 
+# Timeouts for one replayed step. The single-run path uses these defaults; the
+# batch path passes budgets learned from previous runs (see app.batch_runner), so
+# a step that always lands in 120ms is not given three seconds to fail in.
+DEFAULT_BUDGETS = {"navigate_ms": 20000, "action_ms": 3000, "type_delay_ms": 5}
+
+
 async def _persist_shot(directory, name, data):
     """Palette-compress and write a step screenshot off the replay path."""
     try:
@@ -67,37 +73,65 @@ def _save(run_id, **fields):
         db.commit()
 
 
-async def _click(page, selector):
+async def _click(page, selector, action_ms: int | None = None):
+    """Click by selector, falling back to the recorded coordinates.
+
+    ``action_ms`` is the learned budget for this step; the default is what a single
+    run has always used.
+
+    When the selector attempt fails and there are no coordinates to fall back to,
+    the original error is reported. It used to be swallowed and replaced with "Click
+    has no selector and no coordinates", which is wrong twice over: the step does
+    have a selector, and the real cause (a timeout, a detached element) is what the
+    operator needs in order to fix the recording.
+    """
     selector = selector or {}
+    timeout = int(action_ms or DEFAULT_BUDGETS["action_ms"])
     primary = selector.get("primary")
+    failure = None
     if primary:
         loc = page.locator(primary)
         try:
             count = await loc.count()
             if count >= 1:
-                await loc.first.click(timeout=3000)  # faster timeout
+                await loc.first.click(timeout=timeout)
                 return
-        except Exception:
-            pass
+            failure = RuntimeError(f"no element matched {primary}")
+        except Exception as exc:
+            failure = exc
     if selector.get("x") is not None and selector.get("y") is not None:
         await page.mouse.click(float(selector["x"]), float(selector["y"]))
         return
+    if failure is not None:
+        raise RuntimeError(f"Click on {primary} failed: {failure}") from failure
     raise RuntimeError("Click has no selector and no coordinates")
 
 
-async def _focus(page, selector):
+async def _focus(page, selector, action_ms: int | None = None):
     try:
-        await _click(page, selector)
+        await _click(page, selector, action_ms)
     except Exception:
         if selector and selector.get("x") is not None:
             await page.mouse.click(float(selector["x"]), float(selector["y"]))
 
 
-async def replay_step(page, step, variables):
+async def replay_step(page, step, variables, budgets=None):
+    """Replay one recorded step.
+
+    ``budgets`` optionally overrides the per-action timeouts. Anything missing
+    falls back to :data:`DEFAULT_BUDGETS`, so callers can pass a partial dict.
+    """
     action = (step.get("action") or "").lower()
     raw = step.get("value")
     value = interpolate(raw, variables) if raw else None
     selector = step.get("selector") or {}
+    budget = dict(DEFAULT_BUDGETS)
+    if isinstance(budgets, dict):
+        budget.update({key: int(item) for key, item in budgets.items()
+                       if key in DEFAULT_BUDGETS and item})
+    navigate_ms = budget["navigate_ms"]
+    action_ms = budget["action_ms"]
+    type_delay_ms = budget["type_delay_ms"]
 
     # Handle repeat metadata
     repeat = step.get("repeat") or 1
@@ -113,20 +147,22 @@ async def replay_step(page, step, variables):
         url = playback_url(value or "")
         if not url:
             raise RuntimeError("Navigate step has no URL")
-        await page.goto(url, wait_until="domcontentloaded", timeout=20000)  # faster timeout
+        # domcontentloaded, not networkidle: a replay does not need every analytics
+        # request to settle, and waiting for them is the slowest part of a run.
+        await page.goto(url, wait_until="domcontentloaded", timeout=navigate_ms)
         return
     if action == "click":
-        await _click(page, selector)
+        await _click(page, selector, action_ms)
         return
     if action in ("fill", "type", "text"):
         if selector:
-            await _focus(page, selector)
+            await _focus(page, selector, action_ms)
         if action == "fill" and selector.get("primary"):
-            await page.locator(selector["primary"]).first.fill(value or "", timeout=3000)
+            await page.locator(selector["primary"]).first.fill(value or "", timeout=action_ms)
         else:
             # Fast typing, compatible with FakeKeyboard in tests
             try:
-                await page.keyboard.type(value or "", delay=5)
+                await page.keyboard.type(value or "", delay=type_delay_ms)
             except TypeError:
                 await page.keyboard.type(value or "")
         return
@@ -137,7 +173,7 @@ async def replay_step(page, step, variables):
         name = raw
         if not name or not selector.get("primary"):
             raise RuntimeError("Save variable needs a name and input selector")
-        variables[name] = await page.locator(selector["primary"]).first.input_value(timeout=3000)
+        variables[name] = await page.locator(selector["primary"]).first.input_value(timeout=action_ms)
         return
     raise RuntimeError(f"Unsupported action: {action}")
 
@@ -243,6 +279,8 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             variables = resolve_variables(db, recording.project_id)
             run.status = "running"
             run.progress_pct = 1
+            if getattr(run, "started_at", None) is None:
+                run.started_at = datetime.datetime.utcnow()
             db.commit()
 
         run_dir = os.path.join(ARTIFACTS, "runs", run_id)

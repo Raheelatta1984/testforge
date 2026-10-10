@@ -29,7 +29,12 @@ COPY app ./app
 # The library tree is the dashboard's data store. Without it the container boots
 # with an empty library/ and the GitHub tab reports "No projects in the branch".
 COPY library ./library
-RUN mkdir -p /app/artifacts/runs /app/artifacts/rec
+# Harness reports ship with the image. This container has no .git directory, so
+# without them the Logs tab has nothing to read: no committed coordinates and
+# nothing on disk. They are a few hundred KB of text, and the reader that serves
+# them is capped (see TF_MAX_LOG_FILE_BYTES).
+COPY logs ./logs
+RUN mkdir -p /app/artifacts/runs /app/artifacts/rec /app/artifacts/batches
 
 ENV TF_ARTIFACTS=/app/artifacts \
     PORT=8000 \
@@ -49,7 +54,25 @@ ENV TF_ARTIFACTS=/app/artifacts \
     TF_MAX_RUN_BUFFER_RUNS=6 \
     TF_MAX_RUN_BUFFER_EVENTS=60 \
     TF_RUN_LIST_LIMIT=25 \
-    TF_MAX_ZIP_BYTES=67108864
+    TF_MAX_ZIP_BYTES=67108864 \
+    # --- queue hygiene: a restart must not leave runs pending forever ---
+    TF_QUEUE_ORPHAN_GRACE=120 \
+    TF_QUEUE_STALE_MINUTES=30 \
+    TF_QUEUE_SWEEP_SECONDS=300 \
+    TF_RUN_RETENTION_DAYS=14 \
+    # --- batch execution: many recordings, one browser ---
+    TF_BATCH_SCREENSHOTS=failure \
+    TF_BATCH_MAX_RECORDINGS=40 \
+    TF_MAX_BATCHES=1 \
+    TF_BATCH_MAX_RSS_MB=420 \
+    TF_BATCH_LOG_ENTRIES=200 \
+    TF_BATCH_REPORTS=40 \
+    # --- local log reader (the fallback when GitHub coordinates are unknown) ---
+    TF_MAX_LOG_FILE_BYTES=262144 \
+    TF_MAX_LOG_INDEX_ROWS=40
+# TF_GITHUB_REPO and TF_GITHUB_TOKEN are NOT baked into the image. Set them at
+# deploy time to let this checkout-less container publish library/ through the
+# GitHub API; without them publishing is reported as disabled, and says why.
 
 EXPOSE 8000
 

@@ -90,6 +90,13 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-RUN-08 | Repeat count on replay | A step stored with `repeat_count=3` produces three clicks. |
 | UT-SAVE-01 | Slow export on save | `stop()` returns cleanly when the debounced export outlives its flush budget, the browser is closed, and the export is left to finish rather than cancelled mid-write. This is the regression that raised `AttributeError: 'NoneType' object has no attribute 'cancel'`. |
 | UT-SAVE-02 | Export raises on save | `stop()` still closes the browser and records the failure in the session save log. |
+| UT-PUB-01 | Disabled publishing promises no retry | `publish_outcome(False)` returns `publish_state=local-only`, `retry_scheduled=false`, `retry_in_seconds=null`, and a message that says publishing is disabled. This is the regression where the record tab showed "GitHub push will retry in 1 minute: GitHub publishing is disabled". |
+| UT-PUB-02 | Failed push states the retry | With a checkout, a failed push returns `retry-pending`, the configured `TF_PUBLISH_RETRY_SECONDS` wait, and the git error verbatim; a successful push returns `published` with no retry. |
+| UT-PUB-03 | API publisher commits and verifies | With no checkout, `github_api.publish()` creates one blob per file, a tree, a commit and a ref update against a fake transport, then reads the branch back before reporting `published`. Blob SHAs match what git would compute. |
+| UT-PUB-04 | API publisher no-op when synced | A second publish with an unchanged library creates no blob and no commit and reports `state=synced`; a dry run publishes nothing. |
+| UT-PUB-05 | Push bounds and token redaction | A file larger than `TF_GITHUB_MAX_FILE_BYTES` is skipped with a reason, and neither an `Authorization:` header nor a `ghp_…` token survives `_safe()`. |
+| UT-PUB-06 | API mode is reported, not dashes | With `TF_GITHUB_REPO`, `TF_GITHUB_BRANCH` and a token, `status()` reports `publish_mode=api`, `git_state=api`, the configured branch and repository URL, a `git_note`, and no git-shaped `status_reason`. |
+| UT-PUB-07 | A stray token publishes nothing | A `GITHUB_TOKEN` with no configured repository leaves `publish_mode=disabled`: API publishing is opt-in, so a CI runner cannot push anywhere by accident. |
 | UT-GIT-01 | No git checkout | `status()` reports `git_state=no-checkout` with a reason instead of a silent `branch: null`, and `remote_library_status()` explains the missing checkout. |
 | UT-GIT-02 | Library disk report | `status()` reports `projects_on_disk`, `project_dirs`, `catalog_present` and `library_dir`. |
 | UT-MEM-01 | Browser budget serialises | With one permit, a second browser waits for the first to finish; counters return to zero and the peak never exceeds the limit. |
@@ -104,7 +111,30 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-LOG-01 | Logs come from GitHub | `/api/logs/source` returns raw.githubusercontent.com coordinates only - no log bodies, so the service never reads or serves them. |
 | UT-LOG-02 | Branch validation | A branch of `../etc` is rejected with 422; `main` is accepted. |
 | UT-LOG-03 | No git checkout | `/api/logs/source` reports `available: false` with a reason instead of a broken URL. |
+| UT-LOG-04 | Local log index and file | With `TF_LOGS_DIR` set, the index is parsed from `index.md` (folder, result, counts) and a run's file is read back. |
+| UT-LOG-05 | Local reader is bounded | `../` paths, unknown extensions and a 5KB read of a large file are refused or tail-truncated to the cap. |
+| UT-LOG-06 | Logs tab fallback | With no checkout, `/api/logs/source` still returns a `local` block and actionable `fixes`, `/api/logs/local/index` lists runs, a file is served, and a traversal path returns 404. |
+| UT-LOG-07 | Coordinates from configuration | With no checkout, `TF_GITHUB_REPO` and `TF_GITHUB_BRANCH` give `repo_ref()` a slug and branch, `/api/logs/source` returns raw.githubusercontent.com URLs, and `../etc` is still rejected with 422. |
+| UT-QUEUE-01 | Orphans are cancelled | A queued run with no worker and a running run with no worker are cancelled with a restart reason; a run queued seconds ago and a run with a live worker are left alone. |
+| UT-QUEUE-02 | Age filter and dry run | `clear(older_than_minutes=60)` reports one stale run without touching it in a dry run, then cancels only that run. |
+| UT-QUEUE-03 | Duplicates are reused | `duplicate_of()` finds a queued, not-yet-started run of the same recording; `POST /api/runs` returns it with `deduplicated: true`, and `force: true` queues a new run. |
+| UT-QUEUE-04 | History purge | `purge_finished(older_than_days=14)` deletes a 40-day-old finished run, keeps a recent one, and never deletes an unfinished run. |
+| UT-QUEUE-05 | Clear endpoint | The boot reaper cancels a run left behind before startup; `POST /api/runs/queue/clear` rejects a negative or non-numeric `older_than_minutes` with 422, previews with `dry_run`, and reports `by_kind` plus the operator's reason. |
+| UT-BATCH-01 | One browser per batch | Three recordings replay through a single Chromium launch, every run carries the `batch_id` and both timestamps, the batch row reports `passed` at 100%, and the report counts the launches avoided. |
+| UT-BATCH-02 | Learned pacing | Observed 100ms clicks produce a budget below the 3s default and above the floor; a 9s step is clamped at the ceiling; an unseen step keeps the default; `escalate()` relaxes within the ceiling; failures classify as timeout, navigation, selector or recording. |
+| UT-BATCH-03 | Screenshots only on failure | The default `failure` mode captures exactly one PNG for the failed step and none for the passing recording, and the batch reports `partial`. |
+| UT-BATCH-04 | Transient retry | A scripted timeout is retried once with an escalated budget, the run passes, and the log entry is marked `retried`. |
+| UT-BATCH-05 | No retry for a defect | A click with no matching element and no coordinates is not retried: the batch fails with `retries: 0`. |
+| UT-BATCH-06 | Origin grouping | `plan_order()` puts the origin with the most recordings first and orders shortest-first inside it, so one warm session covers them. |
+| UT-BATCH-07 | Batch endpoints | `POST /api/runs/batch` rejects an empty selection with 422, an unknown recording with 404 and a bad screenshot mode with 422; a duplicate id is planned once; `GET /api/runs/batches` lists and an unknown batch is 404. |
+| UT-BATCH-08 | Batch cancel | Cancelling marks the batch `cancelled`, cancels the recordings that had not started, and refuses to cancel a finished batch again. |
+| UT-BATCH-09 | One batch at a time | The batch budget hands out one permit and refuses the second, then recovers both counters on release. |
+| UT-BATCH-10 | Batch holds the browser slot | While a batch replays, the shared browser budget reports exactly one active slot, so a recording session cannot open a second Chromium; the slot is released when the batch ends. |
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
+
+Publishing (`UT-PUB-*`) covers the three ways a save can end: published, saved locally with a retry that really is scheduled, and saved locally with publishing disabled and no retry promised. The API publisher is exercised against an in-memory fake transport, so no test touches GitHub.
+
+Queue hygiene (`UT-QUEUE-*`) covers the runs that will never execute: orphans left by a restart, entries stale behind a busy browser, and duplicates of a recording that is already waiting. Batch execution (`UT-BATCH-*`) covers one browser for many recordings, learned step budgets, screenshots only where they are worth the CPU, and the retry rule that distinguishes a transient timeout from a broken recording.
 
 Resource guardrails (`UT-MEM-*`) cover the limits that keep a 512MB instance inside its memory ceiling: one Chromium shared by recording and execution, bounded live frames, bounded run event buffers, a bounded run list, and an artifact export that streams instead of buffering.
 
@@ -133,6 +163,11 @@ These run against a live `uvicorn` process started by the harness.
 | LB-LIB-01 | api | Read `GET /api/library` | Source is `repository`. `qa-sample-app` is listed with variable `user` and both committed recordings, each with a Jenkinsfile. |
 | LB-LIB-02 | browser | Run the committed recording `qa-hello-literal` | Status `passed`. The page contains `Hello, Quinn`. No new recording is created. |
 | LB-LIB-03 | browser | Run the committed recording `qa-hello-variable` | Status `passed`. The page contains `Hello, Ada` because `user` comes from the repository. |
+| LB-API-11 | api | `GET /api/runs/queue/status` then a dry-run clear | The status carries `hygiene` with `orphans`, `stale`, `clearable`, `duplicates` and a `policy`; `POST /api/runs/queue/clear` with `dry_run` matches the same count, cancels nothing, and leaves the queue unchanged. |
+| LB-API-12 | api | Batch validation | An empty batch is 422, an unknown recording is 404, an unknown batch is 404, `GET /api/runs/batches` is a list, and `/api/diagnostics` reports `batch_executor: ok` plus the queue and logs reports. |
+| LB-API-13 | api | Log source fallback | `/api/logs/source` either returns GitHub coordinates or a `local` block with actionable `fixes`; `/api/logs/local/index` answers with `source: local`, and `..%2F..%2Fetc%2Fpasswd` is 404. |
+| LB-API-14 | api | Publishing contract | `/api/library` reports a `publish_mode` of `checkout`, `api` or `disabled`; when disabled it also reports `publish_disabled_reason` and `status_reason`; `/api/health` agrees on the mode; `POST /api/sync/github` is 503 with an explanation when publishing is disabled. |
+| LB-BAT-01 | browser | Batch the two committed recordings | `POST /api/runs/batch` plans both, the batch finishes `passed`, both runs pass, `report.resources.browsers_launched` is 1, and the report carries throughput and elapsed seconds. |
 
 ## Adding or changing a scenario
 

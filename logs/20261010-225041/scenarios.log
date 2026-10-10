@@ -1,0 +1,74 @@
+2026-10-10T22:50:52+00:00 chromium: bundled path missing (/home/user/.cache/ms-playwright/chromium-1148/chrome-linux/chrome)
+2026-10-10T22:50:52+00:00 server: starting on 127.0.0.1:38361
+2026-10-10T22:50:54+00:00 server: healthy {'status': 'ok', 'database': 'ok', 'recorder': True, 'executor': True, 'batch_executor': True, 'revision': 'local', 'library': 'repository', 'optimized': True, 'library_publish_enabled': False, 'library_publish_mode': 'disabled', 'guardrails': {'max_concurrent_browsers': 1, 'browser': {'limit': 1, 'active': 0, 'waiting': 0, 'peak': 0, 'acquired': 0}, 'live_frames': {'runs': 0, 'limit': 4, 'bytes': 0}, 'run_buffers': {'runs': 0, 'limit': 8, 'events': 0, 'event_limit': 60}, 'max_zip_bytes': 67108864, 'run_list_limit': 25, 'batch': {'limit': 1, 'active': 0, 'peak': 0, 'rejected': 0}, 'batch_max_recordings': 40, 'batch_log_entries': 200, 'max_log_file_bytes': 262144}}
+2026-10-10T22:50:54+00:00 BEGIN LB-API-01 Health reports the recorder and the executor
+2026-10-10T22:50:54+00:00   step 1 health
+2026-10-10T22:50:54+00:00 PASS LB-API-01 in 0.09s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-02 Creating a project without a name is rejected
+2026-10-10T22:50:54+00:00   step 1 expect_http
+2026-10-10T22:50:54+00:00 PASS LB-API-02 in 0.00s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-03 A project can be created and listed
+2026-10-10T22:50:54+00:00   step 1 create_project
+2026-10-10T22:50:54+00:00   step 2 list_projects
+2026-10-10T22:50:54+00:00 PASS LB-API-03 in 0.02s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-04 Variables can be created, updated, and deleted
+2026-10-10T22:50:54+00:00   step 1 create_project
+2026-10-10T22:50:54+00:00   step 2 create_variable
+2026-10-10T22:50:54+00:00   step 3 patch_variable
+2026-10-10T22:50:54+00:00   step 4 delete_variable
+2026-10-10T22:50:54+00:00 PASS LB-API-04 in 0.05s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-05 AI rephrase trims and punctuates text without an API key
+2026-10-10T22:50:54+00:00   step 1 expect_http
+2026-10-10T22:50:54+00:00 PASS LB-API-05 in 0.00s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-06 Screenshot paths cannot escape the artifacts directory
+2026-10-10T22:50:54+00:00   step 1 expect_http
+2026-10-10T22:50:54+00:00   step 2 expect_http
+2026-10-10T22:50:54+00:00 PASS LB-API-06 in 0.01s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-07 A run cannot be queued for an unknown recording
+2026-10-10T22:50:54+00:00   step 1 expect_http
+2026-10-10T22:50:54+00:00 PASS LB-API-07 in 0.00s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-08 Running a recording with no steps fails before a browser opens
+2026-10-10T22:50:54+00:00   step 1 create_project
+2026-10-10T22:50:54+00:00   step 2 create_recording
+2026-10-10T22:50:54+00:00   step 3 queue_run
+2026-10-10T22:50:54+00:00   step 4 wait_run
+2026-10-10T22:50:54+00:00 PASS LB-API-08 in 0.44s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-09 A recording aimed at another local port is stored unchanged
+2026-10-10T22:50:54+00:00   step 1 create_project
+2026-10-10T22:50:54+00:00   step 2 create_recording
+2026-10-10T22:50:54+00:00   step 3 assert_repository
+2026-10-10T22:50:54+00:00 PASS LB-API-09 in 0.11s
+2026-10-10T22:50:54+00:00 BEGIN LB-API-10 Diagnostics stays readable and the write probe succeeds
+2026-10-10T22:50:54+00:00   step 1 diagnostics
+2026-10-10T22:50:54+00:00 PASS LB-API-10 in 0.02s
+2026-10-10T22:50:54+00:00 BEGIN LB-REC-04 Stopping a session that is not running is idempotent
+2026-10-10T22:50:54+00:00   step 1 create_project
+2026-10-10T22:50:54+00:00   step 2 create_recording
+2026-10-10T22:50:54+00:00   step 3 stop_session
+2026-10-10T22:50:54+00:00   step 4 stop_session
+2026-10-10T22:50:55+00:00   step 5 session_status
+2026-10-10T22:50:55+00:00 PASS LB-REC-04 in 0.18s
+2026-10-10T22:50:55+00:00 SKIP LB-REC-01 Chromium is not installed; scenario skipped
+2026-10-10T22:50:55+00:00 SKIP LB-REC-02 Chromium is not installed; scenario skipped
+2026-10-10T22:50:55+00:00 SKIP LB-RUN-01 Chromium is not installed; scenario skipped
+2026-10-10T22:50:55+00:00 SKIP LB-RUN-02 Chromium is not installed; scenario skipped
+2026-10-10T22:50:55+00:00 BEGIN LB-LIB-01 The dashboard library is the repository catalog
+2026-10-10T22:50:55+00:00   step 1 library_contains
+2026-10-10T22:50:55+00:00   step 2 library_contains
+2026-10-10T22:50:55+00:00 PASS LB-LIB-01 in 0.01s
+2026-10-10T22:50:55+00:00 SKIP LB-LIB-02 Chromium is not installed; scenario skipped
+2026-10-10T22:50:55+00:00 SKIP LB-LIB-03 Chromium is not installed; scenario skipped
+2026-10-10T22:50:55+00:00 BEGIN LB-API-11 The execution queue reports and clears entries that will never run
+2026-10-10T22:50:55+00:00   step 1 queue_hygiene
+2026-10-10T22:50:55+00:00 PASS LB-API-11 in 0.03s
+2026-10-10T22:50:55+00:00 BEGIN LB-API-12 Batch selection is validated before a browser is launched
+2026-10-10T22:50:55+00:00   step 1 batch_validation
+2026-10-10T22:50:55+00:00 PASS LB-API-12 in 0.03s
+2026-10-10T22:50:55+00:00 BEGIN LB-API-13 The Logs tab has a source even without a git checkout
+2026-10-10T22:50:55+00:00   step 1 logs_fallback
+2026-10-10T22:50:55+00:00 PASS LB-API-13 in 0.01s
+2026-10-10T22:50:55+00:00 BEGIN LB-API-14 Publishing state is reported consistently and never promises a phantom retry
+2026-10-10T22:50:55+00:00   step 1 publish_contract
+2026-10-10T22:50:55+00:00 PASS LB-API-14 in 0.01s
+2026-10-10T22:50:55+00:00 SKIP LB-BAT-01 Chromium is not installed; scenario skipped
+2026-10-10T22:50:55+00:00 server: stopped

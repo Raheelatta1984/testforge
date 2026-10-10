@@ -475,9 +475,17 @@ class CatalogTests(unittest.TestCase):
             for covered in scenario.get("also_covers", []):
                 if covered not in documented:
                     missing.append(covered)
-        for name in dir(unittest.TestCase):
-            pass
-        for cls in (BootTests, VariableTests, UrlTests, BrowserLaunchTests, SecurityTests, ReplayTests, RunTests, LibraryStoreTests):
+        # Every TestCase in this module, discovered rather than listed: a new
+        # class used to be invisible to this check, so its IDs could go
+        # undocumented without failing anything.
+        import inspect as _inspect
+        import sys as _sys
+        module = _sys.modules[__name__]
+        classes = [
+            obj for _name, obj in vars(module).items()
+            if _inspect.isclass(obj) and issubclass(obj, unittest.TestCase)
+        ]
+        for cls in classes:
             for name in dir(cls):
                 if name.startswith("test_UT_") and name.split("_", 1)[0] == "test":
                     scenario_id = name.split("_", 1)[1]
@@ -1262,6 +1270,843 @@ class ArtifactExportTests(unittest.TestCase):
         finally:
             guardrails.MAX_ZIP_BYTES = original
 
+
+
+class PublishModeTests(unittest.TestCase):
+    """A save must report what really happened to it, and promise only real retries."""
+
+    def _no_checkout(self):
+        from app import library_store
+        original = library_store.git_root
+        library_store.git_root = lambda: None
+        library_store.invalidate_repo_ref()
+        return original
+
+    def _restore(self, original):
+        from app import library_store
+        library_store.git_root = original
+        library_store.invalidate_repo_ref()
+
+    def test_UT_PUB_01_disabled_publishing_promises_no_retry(self):
+        """With publishing off, the message must not say a retry is coming.
+
+        This is the reported bug: the record tab showed "Saved locally; GitHub
+        push will retry in 1 minute: GitHub publishing is disabled" — two
+        contradictions in one sentence, because no retry loop is started when
+        publishing is disabled.
+        """
+        from app import library_store
+        original = self._no_checkout()
+        try:
+            self.assertEqual(library_store.publish_mode(), "disabled")
+            self.assertFalse(library_store.publish_enabled())
+            outcome = library_store.publish_outcome(False)
+        finally:
+            self._restore(original)
+        self.assertEqual(outcome["publish_state"], "local-only")
+        self.assertFalse(outcome["retry_scheduled"])
+        self.assertIsNone(outcome["retry_in_seconds"])
+        message = outcome["publish_message"].lower()
+        self.assertIn("disabled", message)
+        self.assertNotIn("will be retried", message)
+        self.assertIn("no .git", outcome["publish_error"].lower())
+
+    def test_UT_PUB_02_failed_push_states_the_retry_interval(self):
+        """A real push failure keeps the retry promise, with the configured wait."""
+        from app import library_store
+        saved = _env_set(TF_LIBRARY_PUBLISH="1")
+        original = library_store.git_root
+        library_store.git_root = lambda: Path("/nonexistent-checkout")
+        try:
+            self.assertEqual(library_store.publish_mode(), "checkout")
+            outcome = library_store.publish_outcome(False, "remote rejected the push")
+            published = library_store.publish_outcome(True)
+        finally:
+            library_store.git_root = original
+            _env_restore(saved)
+        self.assertEqual(outcome["publish_state"], "retry-pending")
+        self.assertTrue(outcome["retry_scheduled"])
+        self.assertEqual(outcome["retry_in_seconds"], library_store.PUBLISH_RETRY_SECONDS)
+        self.assertIn("remote rejected the push", outcome["publish_message"])
+        self.assertEqual(published["publish_state"], "published")
+        self.assertFalse(published["retry_scheduled"])
+
+    def test_UT_PUB_03_api_publisher_commits_and_verifies(self):
+        """With no checkout, the REST publisher commits blobs, a tree, a commit and a ref.
+
+        The push is only reported as published after the branch is read back.
+        """
+        import tempfile
+        from app import github_api
+
+        root = Path(tempfile.mkdtemp(prefix="tf-api-lib-"))
+        (root / "projects").mkdir()
+        (root / "catalog.json").write_text('{"source": "repository", "projects": []}', encoding="utf-8")
+        project = root / "projects" / "demo"
+        project.mkdir()
+        (project / "project.json").write_text('{"id": "demo", "name": "Demo"}', encoding="utf-8")
+        (project / "variables.json").write_text("[]", encoding="utf-8")
+
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_BRANCH="main",
+                         TF_GITHUB_TOKEN="ghp_secret_token_value")
+        client = FakeGitHubClient(head="a" * 40, remote={})
+        try:
+            self.assertTrue(github_api.enabled())
+            report = github_api.publish("Save library", root, client=client)
+        finally:
+            _env_restore(saved)
+
+        self.assertTrue(report["published"], report)
+        self.assertEqual(report["added"], ["library/catalog.json", "library/projects/demo/project.json",
+                                            "library/projects/demo/variables.json"])
+        self.assertEqual(report["files"], 3)
+        methods = [method for method, _path in client.calls]
+        # 3 blobs, one tree, one commit, one ref update, and two reads of the branch
+        self.assertEqual(methods.count("POST"), 5)
+        self.assertEqual(methods.count("PATCH"), 1)
+        self.assertEqual(client.blobs_created, 3)
+        self.assertEqual(client.tree_entries, 3)
+        self.assertEqual(client.updated_ref, client.commit_sha)
+        self.assertTrue(client.verified_after_push)
+        # The blob SHA git would compute, without a git binary.
+        expected = github_api.blob_sha(b'{"id": "demo", "name": "Demo"}')
+        self.assertIn(expected, client.blob_shas)
+
+    def test_UT_PUB_04_api_publisher_is_a_no_op_when_synced(self):
+        """A second publish with nothing changed must not create a commit."""
+        import tempfile
+        from app import github_api
+
+        root = Path(tempfile.mkdtemp(prefix="tf-api-lib2-"))
+        (root / "catalog.json").write_text("{}", encoding="utf-8")
+        head = "b" * 40
+        remote = {"library/catalog.json": {"sha": github_api.blob_sha(b"{}"), "size": 2}}
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_TOKEN="tok")
+        client = FakeGitHubClient(head=head, remote=remote)
+        try:
+            report = github_api.publish("Save library", root, client=client)
+            dry = github_api.publish("Save library", root, client=client, dry_run=True)
+        finally:
+            _env_restore(saved)
+        self.assertFalse(report["published"])
+        self.assertEqual(report["state"], "synced")
+        self.assertEqual(client.blobs_created, 0)
+        self.assertIsNone(client.commit_sha)
+        self.assertTrue(dry["dry_run"])
+
+    def test_UT_PUB_05_api_publisher_bounds_the_push_and_hides_the_token(self):
+        """Oversized files are skipped with a reason, and the token never appears."""
+        import tempfile
+        from app import github_api
+
+        root = Path(tempfile.mkdtemp(prefix="tf-api-lib3-"))
+        (root / "small.json").write_text("{}", encoding="utf-8")
+        (root / "huge.bin").write_bytes(b"x" * 4096)
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_TOKEN="ghp_super_secret")
+        original_cap = github_api.MAX_FILE_BYTES
+        github_api.MAX_FILE_BYTES = 1024
+        try:
+            collected = github_api.collect_local_files(root)
+            failing = FakeGitHubClient(head=None, remote={}, error="Bad credentials for ghp_super_secret")
+            with self.assertRaises(github_api.GitHubAPIError) as caught:
+                failing.head_sha()
+        finally:
+            github_api.MAX_FILE_BYTES = original_cap
+            _env_restore(saved)
+        self.assertIn("library/small.json", collected["files"])
+        self.assertNotIn("library/huge.bin", collected["files"])
+        self.assertEqual(collected["skipped"][0]["path"], "library/huge.bin")
+        self.assertIn("larger than", collected["skipped"][0]["reason"])
+        self.assertNotIn("ghp_super_secret", str(caught.exception))
+        self.assertIn("***", str(caught.exception))
+        # The redactor is what keeps a token out of the dashboard, and it must
+        # work without the environment still holding the token.
+        self.assertEqual(github_api._safe("Authorization: Bearer ghp_super_secret"),
+                         "Authorization: ***")
+        self.assertEqual(github_api._safe("push failed for ghp_super_secret"),
+                         "push failed for ***")
+        # A remote URL can carry the token itself, so the redactor handles that
+        # shape too. Built from chr(64) so no credential-shaped literal sits in
+        # this file.
+        at = chr(64)
+        self.assertEqual(
+            github_api._safe("fatal: unable to access 'https://qa:" + "ghp_super_secret" + at + "github.com/acme/qa/'"),
+            "fatal: unable to access 'https://qa:***" + at + "github.com/acme/qa/'",
+        )
+
+    def test_UT_PUB_06_status_reports_api_publishing_instead_of_dashes(self):
+        """The GitHub tab shows a branch and a mode when the API can publish."""
+        from app import library_store
+        original = self._no_checkout()
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="release", TF_GITHUB_TOKEN="tok")
+        try:
+            info = library_store.status()
+        finally:
+            _env_restore(saved)
+            self._restore(original)
+        self.assertEqual(info["publish_mode"], "api")
+        self.assertTrue(info["publish_enabled"])
+        self.assertEqual(info["git_state"], "api")
+        self.assertEqual(info["branch"], "release")
+        self.assertTrue(info["api_publish"]["available"])
+        self.assertIn("GitHub API", info["git_note"])
+        self.assertEqual(info["repository_url"], "https://github.com/acme/qa-library")
+        # An empty library is reported as an empty library, never as a git problem.
+        self.assertTrue(info["status_reason"] is None or "library tree is empty" in info["status_reason"],
+                        info["status_reason"])
+        self.assertNotIn("no .git", (info["status_reason"] or "").lower())
+
+    def test_UT_PUB_07_a_stray_token_does_not_enable_publishing(self):
+        """CI runners have a GITHUB_TOKEN; that alone must not push anywhere."""
+        from app import github_api, library_store
+        original = self._no_checkout()
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, GITHUB_TOKEN="ghs_actions_token",
+                         TF_GITHUB_REPO=None, TF_GIT_REMOTE=None)
+        try:
+            self.assertFalse(github_api.enabled())
+            self.assertEqual(library_store.publish_mode(), "disabled")
+            self.assertIsNone(github_api.repo_slug())
+        finally:
+            _env_restore(saved)
+            self._restore(original)
+
+
+class FakeGitHubClient:
+    """In-memory stand-in for the GitHub REST API. No network."""
+
+    def __init__(self, head=None, remote=None, error=None):
+        from app import github_api
+        self.slug = "acme/qa-library"
+        self.branch = "main"
+        self.token = "token"
+        self.head = head
+        self.remote = dict(remote or {})
+        self.error = error
+        self.calls = []
+        self.blobs_created = 0
+        self.blob_shas = []
+        self.tree_entries = 0
+        self.tree_base = None
+        self.commit_sha = None
+        self.updated_ref = None
+        self.verified_after_push = False
+        self._github_api = github_api
+
+    def head_sha(self):
+        self.calls.append(("GET", "/branches"))
+        if self.error:
+            # The real transport strips credentials before raising; so does this one.
+            raise self._github_api.GitHubAPIError(self._github_api._safe(self.error))
+        if self.updated_ref:
+            self.verified_after_push = self.head == self.commit_sha
+        return self.head
+
+    def tree(self, sha):
+        self.calls.append(("GET", "/trees"))
+        return dict(self.remote)
+
+    def create_blob(self, data):
+        self.calls.append(("POST", "/blobs"))
+        self.blobs_created += 1
+        sha = self._github_api.blob_sha(data)
+        self.blob_shas.append(sha)
+        return sha
+
+    def create_tree(self, base_sha, entries):
+        self.calls.append(("POST", "/trees"))
+        self.tree_entries = len(entries)
+        self.tree_base = base_sha
+        for entry in entries:
+            if entry.get("sha") is None:
+                self.remote.pop(entry["path"], None)
+            else:
+                self.remote[entry["path"]] = {"sha": entry["sha"], "size": 1}
+        return "t" * 40
+
+    def create_commit(self, message, tree_sha, parent):
+        self.calls.append(("POST", "/commits"))
+        self.commit_sha = "c" * 40
+        self.commit_message = message
+        self.commit_parent = parent
+        return self.commit_sha
+
+    def update_ref(self, sha, force=False):
+        self.calls.append(("PATCH", "/refs"))
+        self.updated_ref = sha
+        self.head = sha
+
+    def request(self, method, path, payload=None, accept=None):
+        self.calls.append((method, path))
+        return 200, {}
+
+
+class LocalLogTests(unittest.TestCase):
+    """The Logs tab fallback for a deployment with no git checkout."""
+
+    def setUp(self):
+        import tempfile
+        from app import logs_local
+        self.logs_local = logs_local
+        self.root = Path(tempfile.mkdtemp(prefix="tf-logs-"))
+        run = self.root / "20261011-090000"
+        run.mkdir()
+        (run / "results.md").write_text("| ID | Result |\n| --- | --- |\n| UT-X | passed |\n", encoding="utf-8")
+        (run / "harness.log").write_text("line one\nline two\n", encoding="utf-8")
+        (self.root / "index.md").write_text(
+            "# Harness run index\n\n"
+            "| Started | Result | Passed | Failed | Skipped | Revision | Folder |\n"
+            "| --- | --- | --- | --- | --- | --- | --- |\n"
+            "| 2026-10-11T09:00:00+00:00 | PASS | 90 | 0 | 3 | abc1234 | "
+            "[20261011-090000](20261011-090000/results.md) |\n", encoding="utf-8")
+        self.saved = _env_set(TF_LOGS_DIR=str(self.root))
+        logs_local._CACHE.update({"ts": 0.0, "value": None, "key": None})
+
+    def tearDown(self):
+        _env_restore(self.saved)
+        self.logs_local._CACHE.update({"ts": 0.0, "value": None, "key": None})
+
+    def test_UT_LOG_04_local_index_and_file_are_served(self):
+        index = self.logs_local.index()
+        self.assertTrue(index["available"])
+        self.assertEqual(index["origin"], "index.md")
+        self.assertEqual(index["rows"][0]["folder"], "20261011-090000")
+        self.assertEqual(index["rows"][0]["Result"], "PASS")
+        body = self.logs_local.read("20261011-090000", "harness.log")
+        self.assertTrue(body["ok"])
+        self.assertIn("line two", body["text"])
+        self.assertFalse(body["truncated"])
+        self.assertEqual(self.logs_local.files_in("20261011-090000"), ["harness.log", "results.md"])
+
+    def test_UT_LOG_05_local_reader_refuses_to_escape_and_caps_the_tail(self):
+        for folder, name in [("../../etc", "passwd"), ("20261011-090000", "../../secret"),
+                             ("..", "index.md"), ("20261011-090000", "results.md.sh")]:
+            result = self.logs_local.read(folder, name)
+            self.assertFalse(result.get("ok"), f"{folder}/{name} must not be served")
+        big = self.root / "20261011-090000" / "unit.log"
+        big.write_text("x" * 5000 + "\nTAIL MARKER\n", encoding="utf-8")
+        body = self.logs_local.read("20261011-090000", "unit.log", max_bytes=1024)
+        self.assertTrue(body["ok"])
+        self.assertLessEqual(body["bytes"], 1024)
+        self.assertTrue(body["truncated"])
+        self.assertIn("TAIL MARKER", body["text"])
+
+    def test_UT_LOG_06_source_falls_back_to_local_and_explains_itself(self):
+        """`/api/logs/source` must offer the local reader instead of a dead end."""
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+        original = library_store.git_root
+        library_store.git_root = lambda: None
+        library_store.invalidate_repo_ref()
+        try:
+            with TestClient(app) as client:
+                payload = client.get("/api/logs/source").json()
+                local_index = client.get("/api/logs/local/index").json()
+                body = client.get("/api/logs/local/20261011-090000/results.md")
+                escape = client.get("/api/logs/local/..%2F..%2Fetc/passwd")
+        finally:
+            library_store.git_root = original
+            library_store.invalidate_repo_ref()
+        self.assertFalse(payload["available"])
+        self.assertIn("No git checkout", payload["reason"])
+        self.assertTrue(payload["local"]["available"])
+        self.assertTrue(any("TF_GITHUB_REPO" in fix for fix in payload["fixes"]))
+        self.assertTrue(local_index["available"])
+        self.assertEqual(body.status_code, 200)
+        self.assertIn("UT-X", body.json()["text"])
+        self.assertEqual(escape.status_code, 404)
+
+    def test_UT_LOG_07_repo_coordinates_come_from_configuration(self):
+        """No checkout is needed to read committed logs: TF_GITHUB_REPO is enough."""
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+        original = library_store.git_root
+        library_store.git_root = lambda: None
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_BRANCH="release")
+        library_store.invalidate_repo_ref()
+        try:
+            ref = library_store.repo_ref()
+            with TestClient(app) as client:
+                payload = client.get("/api/logs/source").json()
+                rejected = client.get("/api/logs/source", params={"branch": "../etc"})
+        finally:
+            _env_restore(saved)
+            library_store.git_root = original
+            library_store.invalidate_repo_ref()
+        self.assertEqual(ref, {"slug": "acme/qa-library", "branch": "release", "available": True,
+                               "via": "config", "repository_url": "https://github.com/acme/qa-library"})
+        self.assertTrue(payload["available"])
+        self.assertEqual(payload["base"], "https://raw.githubusercontent.com/acme/qa-library/release")
+        self.assertEqual(payload["index"], "https://raw.githubusercontent.com/acme/qa-library/release/logs/index.md")
+        self.assertEqual(rejected.status_code, 422)
+
+
+class QueueHygieneTests(unittest.TestCase):
+    """Old and irrelevant queue entries must leave the queue."""
+
+    def setUp(self):
+        from app import library_store, run_queue
+        self.run_queue = run_queue
+        self.library_store = library_store
+        # Through the library, not straight into the database: the run endpoint
+        # looks a recording up in library/ before it will queue it.
+        project = library_store.create_project("queue-hygiene", "")
+        self.project_id = project["id"]
+        recording = library_store.create_recording(self.project_id, "queued", "/demo.html")
+        self.recording_id = recording["id"]
+
+    def tearDown(self):
+        """Leave the queue as it was found.
+
+        The suite shares one database and another scenario asserts that the
+        pending queue is empty, so runs this class queued must not outlive it.
+        """
+        for run_id in self.run_queue.live_run_ids():
+            self.run_queue.unregister(run_id)
+        with SessionLocal() as db:
+            for row in db.query(Run).filter(Run.status.in_(("queued", "running"))).all():
+                db.delete(row)
+            db.commit()
+
+    def _run(self, status="queued", age_minutes=0.0, recording_id=None, started_at=None):
+        from datetime import datetime, timedelta
+        with SessionLocal() as db:
+            run = Run(recording_id=recording_id or self.recording_id, status=status,
+                      started_at=started_at)
+            db.add(run); db.commit(); db.refresh(run)
+            if age_minutes:
+                run.created_at = datetime.utcnow() - timedelta(minutes=age_minutes)
+                db.commit()
+            return run.id
+
+    def test_UT_QUEUE_01_orphans_are_cancelled_and_live_runs_are_not(self):
+        orphan = self._run("queued", age_minutes=10)
+        stranded = self._run("running", age_minutes=1)
+        fresh = self._run("queued", age_minutes=0)
+        live = self._run("queued", age_minutes=10)
+
+        class Worker:
+            def done(self):
+                return False
+        self.run_queue.register(live, Worker())
+        try:
+            report = self.run_queue.reap_orphans()
+        finally:
+            self.run_queue.unregister(live)
+
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Run, orphan).status, "cancelled")
+            self.assertIn("restarted", db.get(Run, orphan).cancel_reason)
+            self.assertEqual(db.get(Run, stranded).status, "cancelled")
+            # A run queued a moment ago is still being handed to its worker.
+            self.assertEqual(db.get(Run, fresh).status, "queued")
+            self.assertEqual(db.get(Run, live).status, "queued")
+        self.assertEqual(report["cancelled"], 2)
+
+    def test_UT_QUEUE_02_clear_honours_age_and_dry_run(self):
+        old = self._run("queued", age_minutes=90)
+        new = self._run("queued", age_minutes=1)
+        self.run_queue.register(old, type("W", (), {"done": lambda self: False})())
+        self.run_queue.register(new, type("W", (), {"done": lambda self: False})())
+        try:
+            preview = self.run_queue.clear(older_than_minutes=60, include_orphans=False,
+                                           include_stale=True, dry_run=True)
+            self.assertEqual(preview["matched"], 1)
+            self.assertEqual(preview["cancelled"], 0)
+            self.assertTrue(preview["dry_run"])
+            report = self.run_queue.clear(older_than_minutes=60, include_orphans=False,
+                                          include_stale=True)
+        finally:
+            self.run_queue.unregister(old)
+            self.run_queue.unregister(new)
+        self.assertEqual(report["cancelled"], 1)
+        self.assertEqual(report["by_kind"], {"stale": 1})
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Run, old).status, "cancelled")
+            self.assertEqual(db.get(Run, new).status, "queued")
+
+    def test_UT_QUEUE_03_duplicate_queued_runs_are_reused_not_stacked(self):
+        from datetime import datetime as dt
+        from fastapi.testclient import TestClient
+        import app.main as main
+        first = self._run("queued", age_minutes=0, started_at=None)
+        duplicate = self.run_queue.duplicate_of(self.recording_id)
+        self.assertEqual(duplicate["run_id"], first)
+        started = self._run("queued", age_minutes=0, recording_id=self.recording_id, started_at=dt.utcnow())
+        self.assertEqual(self.run_queue.duplicate_of(self.recording_id)["run_id"], first)
+        self.assertEqual(started != first, True)
+
+        # Through the API: the second RUN press reuses the waiting run.
+        original = main.execute_run_task
+
+        async def slow_run(*args, **kwargs):
+            await asyncio.sleep(0.05)
+        main.execute_run_task = slow_run
+        try:
+            with TestClient(main.app) as client:
+                first_response = client.post("/api/runs", json={"target_id": self.recording_id})
+                second = client.post("/api/runs", json={"target_id": self.recording_id})
+                forced = client.post("/api/runs", json={"target_id": self.recording_id, "force": True})
+        finally:
+            main.execute_run_task = original
+        self.assertEqual(first_response.status_code, 201)
+        self.assertEqual(second.json()["deduplicated"], True)
+        self.assertEqual(second.json()["run_id"], first_response.json()["run_id"])
+        self.assertNotEqual(forced.json()["run_id"], first_response.json()["run_id"])
+
+    def test_UT_QUEUE_04_finished_history_can_be_purged(self):
+        from datetime import timedelta
+        ancient = self._run("passed", age_minutes=60 * 24 * 40)
+        recent = self._run("passed", age_minutes=1)
+        queued = self._run("queued", age_minutes=60 * 24 * 40)
+        report = self.run_queue.purge_finished(older_than_days=14)
+        with SessionLocal() as db:
+            self.assertIsNone(db.get(Run, ancient))
+            self.assertIsNotNone(db.get(Run, recent))
+            # An unfinished run is never purged, only cleared by the reaper.
+            self.assertIsNotNone(db.get(Run, queued))
+        self.assertEqual(report["purged"], 1)
+
+    def test_UT_QUEUE_05_clear_endpoint_validates_and_reports(self):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        # Queued before boot: the startup reaper owns this one.
+        before_boot = self._run("queued", age_minutes=120)
+        with TestClient(app) as client:
+            with SessionLocal() as db:
+                self.assertEqual(db.get(Run, before_boot).status, "cancelled",
+                                 "boot must cancel runs a restart left behind")
+                self.assertIn("restarted", db.get(Run, before_boot).cancel_reason)
+            stale = self._run("queued", age_minutes=120)
+            bad = client.post("/api/runs/queue/clear", json={"older_than_minutes": -5})
+            bad_text = client.post("/api/runs/queue/clear", json={"older_than_minutes": "soon"})
+            # A dry run reports exactly what the real clear would act on.
+            preview = client.post("/api/runs/queue/clear", json={"dry_run": True})
+            self.assertEqual(preview.json()["matched"], 1)
+            self.assertEqual(preview.json()["candidates"][0]["kind"], "orphan")
+            status = client.get("/api/runs/queue/status").json()
+            self.assertIn("hygiene", status)
+            self.assertIn("policy", status["hygiene"])
+            self.assertEqual(status["hygiene"]["orphans"], 1)
+            cleared = client.post("/api/runs/queue/clear", json={"reason": "Clearing before a demo"})
+            after = client.get("/api/runs/queue/status").json()
+        self.assertEqual(bad.status_code, 422)
+        self.assertEqual(bad_text.status_code, 422)
+        self.assertTrue(preview.json()["dry_run"])
+        self.assertEqual(preview.json()["cancelled"], 0)
+        self.assertGreaterEqual(cleared.json()["cancelled"], 1)
+        self.assertIn("demo", cleared.json()["reason"])
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Run, stale).status, "cancelled")
+        self.assertEqual(after["hygiene"]["clearable"], 0)
+
+
+class BatchExecutionTests(unittest.TestCase):
+    """Adaptive batch execution: one browser, learned budgets, cheap screenshots."""
+
+    def tearDown(self):
+        """Batches driven by a stub executor never finish their runs; clean them up."""
+        from app import run_queue
+        for run_id in run_queue.live_run_ids():
+            run_queue.unregister(run_id)
+        with SessionLocal() as db:
+            for row in db.query(Run).filter(Run.status.in_(("queued", "running"))).all():
+                db.delete(row)
+            db.commit()
+
+    def _make_recording(self, name, steps, start_url="http://127.0.0.1:8765/demo.html"):
+        """A recording in both stores: library/ (what the API selects) and the DB."""
+        from app import library_store
+        from app.db import RecordingStep
+        project = library_store.create_project(name, "")
+        recording = library_store.create_recording(project["id"], name, start_url)
+        with SessionLocal() as db:
+            for order, step in enumerate(steps, 1):
+                db.add(RecordingStep(recording_id=recording["id"], order=order,
+                                     action=step.get("action"), value=step.get("value"),
+                                     label=step.get("label") or step.get("action"),
+                                     selector=step.get("selector"),
+                                     repeat_count=step.get("repeat", 1)))
+            db.commit()
+        library_store.export_recording(recording["id"], publish=False)
+        return recording["id"], project["id"]
+
+    def _make_batch(self, recording_ids, name="batch"):
+        from app.db import Batch
+        with SessionLocal() as db:
+            batch = Batch(name=name, status="queued", total=len(recording_ids))
+            db.add(batch); db.commit(); db.refresh(batch)
+            run_ids = []
+            for recording_id in recording_ids:
+                run = Run(recording_id=recording_id, status="queued", batch_id=batch.id)
+                db.add(run); db.commit(); db.refresh(run)
+                run_ids.append(run.id)
+            return batch.id, run_ids
+
+    STEPS = [
+        {"action": "navigate", "value": "/demo.html", "label": "Open"},
+        {"action": "click", "label": "Go", "selector": {"primary": "#go", "x": 80, "y": 200}},
+    ]
+
+    def test_UT_BATCH_01_one_browser_replays_the_whole_batch(self):
+        """Three recordings, one Chromium launch: that is the point of a batch."""
+        from app.batch_runner import execute_batch
+        from app.db import Batch
+        from tests.fakes import BatchFakePlaywright
+        ids = [self._make_recording(f"batch-a-{index}", self.STEPS)[0] for index in range(3)]
+        batch_id, run_ids = self._make_batch(ids)
+        fake = BatchFakePlaywright(known=["#go"])
+        events = []
+
+        async def on_event(payload):
+            events.append(payload)
+
+        report = asyncio.run(execute_batch(batch_id, on_event, playwright_factory=lambda: fake,
+                                           screenshots="none", pacer=AdaptivePacerForTest()))
+        self.assertEqual(fake.launches, 1, "a batch must not launch a browser per recording")
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(report["passed"], 3)
+        self.assertEqual(report["resources"]["browsers_launched"], 1)
+        self.assertEqual(report["savings"]["browser_launches_avoided"], 2)
+        self.assertEqual(len(report["results"]), 3)
+        self.assertTrue(all(item["seconds"] >= 0 for item in report["results"]))
+        with SessionLocal() as db:
+            for run_id in run_ids:
+                run = db.get(Run, run_id)
+                self.assertEqual(run.status, "passed")
+                self.assertEqual(run.batch_id, batch_id)
+                self.assertIsNotNone(run.started_at)
+                self.assertIsNotNone(run.finished_at)
+            batch = db.get(Batch, batch_id)
+            self.assertEqual(batch.status, "passed")
+            self.assertEqual(batch.progress_pct, 100)
+            self.assertTrue(batch.report["resources"])
+        self.assertTrue(any(event.get("type") == "batch" and event.get("status") == "passed"
+                            for event in events))
+
+    def test_UT_BATCH_02_pacing_learns_clamps_and_classifies(self):
+        """Learned budgets stay between a floor and the single-run ceiling."""
+        from app.batch_runner import DEFAULT_BUDGETS, classify_failure
+        pacer = AdaptivePacerForTest()
+        for _ in range(4):
+            pacer.observe("click", {"primary": "#go"}, 100, True)
+        fast = pacer.budgets_for("click", {"primary": "#go"})
+        self.assertTrue(fast["learned"])
+        self.assertLess(fast["action_ms"], DEFAULT_BUDGETS["action_ms"],
+                        "a step that always lands in 100ms must not be given 3s")
+        self.assertGreaterEqual(fast["action_ms"], 350)
+        for _ in range(4):
+            pacer.observe("click", {"primary": "#slow"}, 9000, True)
+        slow = pacer.budgets_for("click", {"primary": "#slow"})
+        self.assertLessEqual(slow["action_ms"], 10000, "never looser than the ceiling")
+        unknown = pacer.budgets_for("click", {"primary": "#never-seen"})
+        self.assertEqual(unknown["action_ms"], DEFAULT_BUDGETS["action_ms"])
+        self.assertFalse(unknown["learned"])
+        escalated = pacer.escalate(fast)
+        self.assertTrue(escalated["escalated"])
+        self.assertGreater(escalated["action_ms"], fast["action_ms"])
+        self.assertEqual(classify_failure("Timeout 400ms exceeded"), "timeout")
+        self.assertEqual(classify_failure("net::ERR_NAME_NOT_RESOLVED"), "navigation")
+        self.assertEqual(classify_failure("Click has no selector and no coordinates"), "recording")
+        self.assertEqual(classify_failure("Unsupported action: dance"), "recording")
+        self.assertEqual(classify_failure("element is not visible"), "selector")
+
+    def test_UT_BATCH_03_screenshots_only_where_they_are_worth_it(self):
+        """The default batch mode captures a PNG on failure only."""
+        from app.batch_runner import execute_batch
+        from tests.fakes import BatchFakePlaywright
+        good = self._make_recording("batch-shot-good", self.STEPS)[0]
+        broken = self._make_recording("batch-shot-broken", [
+            {"action": "navigate", "value": "/demo.html"},
+            {"action": "click", "label": "Ghost", "selector": {"primary": "#ghost"}},
+        ])[0]
+        batch_id, _ = self._make_batch([good, broken])
+        fake = BatchFakePlaywright(known=["#go"])
+        report = asyncio.run(execute_batch(batch_id, None, playwright_factory=lambda: fake,
+                                           pacer=AdaptivePacerForTest()))
+        shots = [shot for page in fake.pages for shot in page.shots if shot == "png"]
+        self.assertEqual(report["screenshots"]["mode"], "failure")
+        self.assertEqual(report["screenshots"]["taken"], 1, "only the failed step is captured")
+        self.assertEqual(len(shots), 1)
+        self.assertEqual(report["passed"], 1)
+        self.assertEqual(report["failed"], 1)
+        self.assertEqual(report["status"], "partial")
+        failed = [result for result in report["results"] if result["status"] == "failed"]
+        self.assertEqual(len(failed), 1)
+        # The real cause is reported, not a generic "no selector" message.
+        self.assertIn("#ghost", failed[0]["error"])
+
+    def test_UT_BATCH_04_transient_failure_is_retried_once(self):
+        """A timeout is retried with a relaxed budget; the recording still passes."""
+        from app.batch_runner import execute_batch
+        from tests.fakes import BatchFakePlaywright
+        # No recorded coordinates on purpose: with x/y present the replay falls
+        # back to a coordinate click and the timeout never surfaces (UT-REP-03).
+        recording_id, _ = self._make_recording("batch-flaky", [
+            {"action": "navigate", "value": "/demo.html", "label": "Open"},
+            {"action": "click", "label": "Go", "selector": {"primary": "#go"}},
+        ])
+        batch_id, run_ids = self._make_batch([recording_id])
+        fake = BatchFakePlaywright(known=["#go"], flaky={"#go": 1})
+        report = asyncio.run(execute_batch(batch_id, None, playwright_factory=lambda: fake,
+                                           screenshots="none", retry_transient=True,
+                                           pacer=AdaptivePacerForTest()))
+        self.assertEqual(report["status"], "passed", report["results"])
+        self.assertEqual(report["retries"], 1)
+        self.assertEqual(report["pacing"]["escalations"], 1)
+        with SessionLocal() as db:
+            log = db.get(Run, run_ids[0]).execution_log
+        retried = [entry for entry in log if entry.get("retried")]
+        self.assertEqual(len(retried), 1)
+        self.assertEqual(retried[0]["status"], "passed")
+
+    def test_UT_BATCH_05_no_retry_for_a_real_recording_defect(self):
+        """A missing selector is not transient: retrying it only costs time."""
+        from app.batch_runner import execute_batch
+        from tests.fakes import BatchFakePlaywright
+        recording_id, _ = self._make_recording("batch-broken", [
+            {"action": "navigate", "value": "/demo.html"},
+            {"action": "click", "label": "Ghost", "selector": {"primary": "#ghost"}},
+        ])
+        batch_id, _ = self._make_batch([recording_id])
+        fake = BatchFakePlaywright(known=["#go"])
+        report = asyncio.run(execute_batch(batch_id, None, playwright_factory=lambda: fake,
+                                           screenshots="none", retry_transient=True,
+                                           pacer=AdaptivePacerForTest()))
+        self.assertEqual(report["retries"], 0)
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["failed"], 1)
+
+    def test_UT_BATCH_06_plan_groups_origins_shortest_first(self):
+        from app.batch_runner import origin_of, plan_order
+        items = [
+            {"id": "a", "name": "long", "start_url": "https://shop.example/login", "step_count": 9},
+            {"id": "b", "name": "short", "start_url": "https://shop.example/cart", "step_count": 2},
+            {"id": "c", "name": "other", "start_url": "https://hr.example/", "step_count": 4},
+            {"id": "d", "name": "local", "start_url": "/demo.html", "step_count": 1},
+        ]
+        self.assertEqual(origin_of("/demo.html"), origin_of("http://127.0.0.1:8765/demo.html"))
+        plan = plan_order(items)
+        # The origin with the most recordings runs together, shortest first inside
+        # it, so one warm session covers both shop.example recordings.
+        self.assertEqual([item["id"] for item in plan][:2], ["b", "a"])
+        self.assertEqual([origin_of(item["start_url"]) for item in plan[:2]],
+                         [origin_of("https://shop.example/login")] * 2)
+        self.assertEqual(sorted(item["id"] for item in plan), ["a", "b", "c", "d"])
+
+    def test_UT_BATCH_07_batch_endpoints_validate_and_report(self):
+        from fastapi.testclient import TestClient
+        import app.main as main
+        recording_id, project_id = self._make_recording("batch-api", self.STEPS)
+        original = main.execute_batch_task
+        started = {}
+
+        async def stub_batch(batch_id, on_event=None, **kwargs):
+            started["batch_id"] = batch_id
+            started["kwargs"] = kwargs
+            return {"batch_id": batch_id, "status": "passed"}
+        main.execute_batch_task = stub_batch
+        try:
+            with TestClient(main.app) as client:
+                empty = client.post("/api/runs/batch", json={})
+                unknown = client.post("/api/runs/batch", json={"recording_ids": ["nope"]})
+                bad_mode = client.post("/api/runs/batch",
+                                       json={"recording_ids": [recording_id], "screenshots": "every-frame"})
+                created = client.post("/api/runs/batch", json={
+                    "recording_ids": [recording_id, recording_id], "project_id": project_id,
+                    "screenshots": "none", "name": "Nightly"})
+                listing = client.get("/api/runs/batches")
+                missing = client.get("/api/runs/batch/does-not-exist")
+        finally:
+            main.execute_batch_task = original
+        self.assertEqual(empty.status_code, 422)
+        self.assertEqual(unknown.status_code, 404)
+        self.assertEqual(bad_mode.status_code, 422)
+        self.assertEqual(created.status_code, 201, created.text)
+        payload = created.json()
+        # The same recording twice is one entry, and recording_ids wins over project_id.
+        self.assertEqual(payload["total"], 1)
+        self.assertEqual(len(payload["run_ids"]), 1)
+        self.assertEqual(payload["options"]["screenshots"], "none")
+        self.assertEqual(started["kwargs"]["screenshots"], "none")
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual(missing.status_code, 404)
+
+    def test_UT_BATCH_08_cancel_stops_the_rest_of_the_batch(self):
+        from fastapi.testclient import TestClient
+        import app.main as main
+        from app import batch_runner
+        ids = [self._make_recording(f"batch-cancel-{index}", self.STEPS)[0] for index in range(3)]
+        original = main.execute_batch_task
+        hold = asyncio.Event()
+
+        async def stuck_batch(batch_id, on_event=None, **kwargs):
+            started["batch_id"] = batch_id
+            await asyncio.sleep(0.2)
+            return {"batch_id": batch_id, "status": "cancelled"}
+        started = {}
+        main.execute_batch_task = stuck_batch
+        try:
+            with TestClient(main.app) as client:
+                created = client.post("/api/runs/batch", json={"recording_ids": ids})
+                batch_id = created.json()["batch_id"]
+                cancelled = client.post(f"/api/runs/batch/{batch_id}/cancel")
+                detail = client.get(f"/api/runs/batch/{batch_id}").json()
+                again = client.post(f"/api/runs/batch/{batch_id}/cancel")
+        finally:
+            main.execute_batch_task = original
+            batch_runner._CANCELLED.discard(batch_id)
+        self.assertEqual(cancelled.json()["ok"], True)
+        self.assertGreaterEqual(cancelled.json()["cancelled_runs"], 1)
+        self.assertTrue(any(run["status"] == "cancelled" for run in detail["runs"]))
+        self.assertEqual(detail["status"], "cancelled")
+        _ = hold
+        self.assertFalse(again.json()["ok"], "a finished batch cannot be cancelled again")
+
+    def test_UT_BATCH_09_a_second_batch_is_refused_while_one_runs(self):
+        """One browser means one batch: the second is refused, not queued behind it."""
+        from app import guardrails
+        budget = guardrails.batch_budget
+        self.assertTrue(budget.acquire())
+        try:
+            self.assertFalse(budget.acquire())
+            self.assertEqual(budget.report()["rejected"], 1)
+        finally:
+            budget.release()
+        self.assertTrue(budget.acquire())
+        budget.release()
+        self.assertEqual(budget.report()["active"], 0)
+
+    def test_UT_BATCH_10_a_batch_cannot_open_a_second_browser(self):
+        """The batch holds the shared budget, so a recording cannot start Chromium too."""
+        from app import guardrails
+        from app.batch_runner import execute_batch
+        from tests.fakes import BatchFakePlaywright
+        recording_id, _ = self._make_recording("batch-budget", self.STEPS)
+        batch_id, _ = self._make_batch([recording_id])
+        fake = BatchFakePlaywright(known=["#go"])
+        seen = {}
+
+        async def on_event(payload):
+            # Sampled from inside the batch, while the browser slot is held.
+            if payload.get("type") == "run" and "active" not in seen:
+                seen["active"] = guardrails.browser_budget.report()["active"]
+                seen["waiting"] = guardrails.browser_budget.report()["waiting"]
+
+        report = asyncio.run(execute_batch(batch_id, on_event, playwright_factory=lambda: fake,
+                                           screenshots="none", pacer=AdaptivePacerForTest()))
+        self.assertEqual(report["status"], "passed")
+        self.assertEqual(seen["active"], 1, "the batch holds exactly one browser slot")
+        self.assertEqual(guardrails.browser_budget.report()["active"], 0,
+                         "the slot is released when the batch ends")
+
+
+def AdaptivePacerForTest():
+    """A pacer with no profile file, so tests never touch artifacts/batches."""
+    from app.batch_runner import AdaptivePacer
+    return AdaptivePacer(path=None, profile={})
 
 
 if __name__ == "__main__":
