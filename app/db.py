@@ -75,6 +75,7 @@ class RecordingStep(Base):
     value: Mapped[str] = mapped_column(Text, nullable=True)
     label: Mapped[str] = mapped_column(String(500), nullable=True)
     screenshot_path: Mapped[str] = mapped_column(String(1000), nullable=True)
+    repeat_count: Mapped[int] = mapped_column(Integer, default=1)  # how many times to repeat this step
     recording: Mapped["Recording"] = relationship(back_populates="steps")
 
 class Run(Base):
