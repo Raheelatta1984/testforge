@@ -8,12 +8,13 @@ Optimizations:
 - Fast viewport (1024x640) for lower CPU on free tier, configurable
 - Adaptive preview with touch() for instant feedback
 - Debounced export to avoid heavy I/O on every step
-- Each action remains individually editable, even identical repeated actions
-- Smooth save with retry and detailed logs
+- Consecutive identical actions collapse into one step carrying a repeat count
+- Save never raises: the browser always closes and the recording always persists
 """
 
 import asyncio
 import os
+import re
 import time
 
 from playwright.async_api import async_playwright
@@ -98,6 +99,26 @@ VIEWPORT_HEIGHT = int(os.environ.get("TF_VIEWPORT_HEIGHT", "640"))
 VIEWPORT = {"width": VIEWPORT_WIDTH, "height": VIEWPORT_HEIGHT}
 SESSIONS = {}
 _LOCK = asyncio.Lock()
+
+# Grace period for the debounced export on save. It must be generous: cutting an
+# export short is what loses a recording. The caller performs an authoritative
+# export afterwards, so nothing depends on this window being tight.
+EXPORT_FLUSH_TIMEOUT = float(os.environ.get("TF_EXPORT_FLUSH_TIMEOUT", "10"))
+
+# Consecutive identical actions collapse into one step with a repeat count.
+# Set TF_MERGE_REPEAT_STEPS=0 to keep one row per action instead.
+MERGE_REPEAT_STEPS = os.environ.get("TF_MERGE_REPEAT_STEPS", "1").strip().lower() in {
+    "1", "true", "yes", "on",
+}
+
+# Upper bound on a merged repeat count, matching the executor's replay cap.
+MAX_REPEAT = 100
+
+# Actions whose repeats are NOT interchangeable, so each one keeps its own row.
+# `save_variable` snapshots whatever the input holds at that moment: two
+# consecutive captures of the same field usually hold different values, and
+# folding them together would claim otherwise.
+MERGE_EXCLUDED_ACTIONS = frozenset({"save_variable", "navigate"})
 
 
 def get_session(recording_id):
@@ -237,7 +258,7 @@ class RecorderSession:
                 step = await self._record("press", value=key, label=f"Press {key}")
             elif kind == "save_variable":
                 name = str(msg.get("name") or "").strip()
-                if not name or not __import__("re").fullmatch(r"[\w.-]{1,100}", name):
+                if not name or not re.fullmatch(r"[\w.-]{1,100}", name):
                     raise ValueError("Variable name must be 1–100 letters, numbers, dots, dashes or underscores")
                 focused = await self.page.evaluate(_FOCUSED_JS)
                 selector = (focused or {}).get("selector")
@@ -275,8 +296,76 @@ class RecorderSession:
         await self._broadcast({"type": "step", "step": step})
         return step
 
+    async def _merge_into_previous(self, candidate):
+        """Fold `candidate` into the previous row when it repeats it exactly.
+
+        Returns the updated step payload, or None when the action is distinct and
+        needs its own row. Equality is `library_store.step_signature`, the same
+        rule the exporter's `compress_steps` uses, so what the recorder merges and
+        what the library compresses can never disagree.
+        """
+        if self.seq < 1:
+            return None
+        try:
+            with SessionLocal() as db:
+                row = (
+                    db.query(RecordingStep)
+                    .filter(
+                        RecordingStep.recording_id == self.recording_id,
+                        RecordingStep.order == self.seq,
+                    )
+                    .first()
+                )
+                if row is None:
+                    return None
+                previous = {
+                    "action": row.action,
+                    "value": row.value,
+                    "label": library_store.strip_repeat_suffix(row.label),
+                    "selector": row.selector,
+                }
+                if library_store.step_signature(previous) != library_store.step_signature(candidate):
+                    return None
+                count = (row.repeat_count or 1) + 1
+                if count > MAX_REPEAT:
+                    return None
+                row.repeat_count = count
+                db.commit()
+                db.refresh(row)
+                return {
+                    "id": row.id,
+                    "order": row.order,
+                    "action": row.action,
+                    "value": row.value,
+                    "label": row.label,
+                    "selector": row.selector,
+                    "repeat": row.repeat_count,
+                    "screenshot": os.path.basename(row.screenshot_path) if row.screenshot_path else None,
+                    "merged": True,
+                }
+        except Exception as exc:
+            # A merge is an optimisation; never let it cost the user their action.
+            logger.warning("MERGE SKIPPED %s %s", self.recording_id, exc)
+            return None
+
     async def _record(self, action, value=None, label=None, selector=None, force_new=False):
-        """Persist one separately editable row for each action."""
+        """Persist the action, folding it into the previous row when it repeats it.
+
+        Consecutive identical actions become one step carrying `repeat = N`, which
+        the replay expands back into N actions. `force_new` keeps an action on its
+        own row even when the previous one matches.
+        """
+        candidate = {"action": action, "value": value, "label": label, "selector": selector}
+        if not force_new and MERGE_REPEAT_STEPS and (action or "").lower() not in MERGE_EXCLUDED_ACTIONS:
+            merged = await self._merge_into_previous(candidate)
+            if merged is not None:
+                logger.info(
+                    "RECORDER MERGE %s order=%s action=%s repeat=%s",
+                    self.recording_id, merged["order"], action, merged["repeat"],
+                )
+                self._schedule_export()
+                return merged
+
         self.seq += 1
 
         try:
@@ -373,27 +462,63 @@ class RecorderSession:
                 pass
             self._pw = None
 
+    async def _flush_export(self):
+        """Wait for the debounced export without ever raising at the caller.
+
+        `asyncio.wait_for` cancels the awaited task and waits for that
+        cancellation to finish before raising TimeoutError, and the export task
+        clears `self._export_task` in its own `finally`. Re-reading the attribute
+        after the wait therefore sees `None` — which is exactly how SAVE died with
+        `AttributeError: 'NoneType' object has no attribute 'cancel'`. Hold the
+        task in a local, and shield it so a slow export is never cut off
+        mid-write: a cancelled export is a lost recording.
+        """
+        task = self._export_task
+        if task is None or task.done():
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(task), EXPORT_FLUSH_TIMEOUT)
+            return
+        except asyncio.TimeoutError:
+            # Leave the export running; the caller performs an authoritative
+            # export next, and both writes are serialized by the library lock.
+            self._save_logs.append(
+                f"{time.time()}: export still running after {EXPORT_FLUSH_TIMEOUT}s; left to finish"
+            )
+            logger.warning(
+                "RECORDER EXPORT SLOW %s (left running after %.0fs)",
+                self.recording_id, EXPORT_FLUSH_TIMEOUT,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._save_logs.append(f"{time.time()}: export failed {exc}")
+            logger.warning("RECORDER EXPORT FAILED %s %s", self.recording_id, exc)
+
     async def stop(self):
+        """Close the session. Never raises: the browser must always be released."""
         if self._closed:
             return
         self._closed = True
         self.status = "stopped" if self.status != "error" else self.status
         SESSIONS.pop(self.recording_id, None)
 
-        # Do not close before queued screenshot writes finish.
-        if self._image_tasks:
-            await asyncio.gather(*list(self._image_tasks), return_exceptions=True)
-        # Ensure final export with retry for smooth save
-        if self._export_task and not self._export_task.done():
-            try:
-                await asyncio.wait_for(self._export_task, timeout=2)
-            except asyncio.TimeoutError:
-                self._export_task.cancel()
+        try:
+            # Do not close before queued screenshot writes finish.
+            if self._image_tasks:
+                await asyncio.gather(*list(self._image_tasks), return_exceptions=True)
+            # Ensure the debounced export has landed before the session goes away.
+            await self._flush_export()
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # pragma: no cover - defensive
+            self._save_logs.append(f"{time.time()}: stop failed {exc}")
+            logger.exception("RECORDER STOP FAILED %s", self.recording_id)
+        finally:
+            await self._close_browser()
 
         # Final save logs
         logger.info("RECORDER STOPPING %s seq=%s logs=%s", self.recording_id, self.seq, self._save_logs[-5:])
-
-        await self._close_browser()
 
 
 async def open_session(recording_id, start_url, start_seq) -> RecorderSession:

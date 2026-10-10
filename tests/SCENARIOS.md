@@ -28,17 +28,20 @@ Add a check by editing `tests/test_unit.py` (ID in the method name, `test_UT_ARE
 
 ## Unit scenarios
 
-Workflow regressions: `UT-FLOW-01` asserts duplicate actions retain individual order and PNGs; `UT-FLOW-02` checks idempotent save, editing and screenshot access; `UT-FLOW-03` checks generated formats and spreadsheet injection protection; `UT-FLOW-04` checks placeholders are typed as resolved values but stored as placeholders; `UT-FLOW-05` checks new/existing variable capture preserves prior steps; `UT-FLOW-06` checks compact PNG output.
+Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collapse into one step carrying a repeat count while distinct actions keep their own row and order; `UT-FLOW-02` checks idempotent save, editing and screenshot access; `UT-FLOW-03` checks generated formats and spreadsheet injection protection; `UT-FLOW-04` checks placeholders are typed as resolved values but stored as placeholders; `UT-FLOW-05` checks new/existing variable capture preserves prior steps; `UT-FLOW-06` checks compact PNG output.
 
 
 | ID | Scenario | Expected result |
 | --- | --- | --- |
-| UT-FLOW-01 | Individual recording steps | Every action is saved in order, with a PNG screenshot reference. |
+| UT-FLOW-01 | Merged repeats, ordered steps | Three identical clicks become one row with `repeat=3` and one PNG; a different action still gets the next order. |
 | UT-FLOW-02 | Save and edit | Stop without a live session succeeds; edited input persists and screenshot access is scoped. |
 | UT-FLOW-03 | Export formats | CSV/XLSX, Jenkins, BDD and Playwright templates are created; formula-like inputs are escaped. |
 | UT-FLOW-04 | Runtime variables | Recorder types resolved values and preserves the placeholder for replay. |
 | UT-FLOW-05 | Capture variable | New and existing variables take the focused input value without losing recording steps. |
 | UT-FLOW-06 | Compact PNG | Optimized screenshots remain valid PNG and never grow. |
+| UT-FLOW-07 | Merged repeat expansion | A step stored with `repeat=3` expands to three executions during replay. |
+| UT-FLOW-08 | Capture is never merged | Two `save_variable` steps on the same field keep separate rows, because each captures a different value. |
+| UT-FLOW-09 | Compress an existing recording | `POST /api/recordings/{id}/steps/compress` collapses four identical clicks into one step with `repeat=4`. |
 | UT-BOOT-01 | Import the recorder and the executor | Both modules load. This is the regression where `IS_TERMUX`, `interpolate`, and `CICD_INTERVAL` were missing and both features were offline. |
 | UT-BOOT-02 | Config contract | `IS_TERMUX` is a bool, `CICD_INTERVAL` is a positive int, and `interpolate` is `apply_variables`. |
 | UT-BOOT-03 | Run model columns | `recording_id`, `execution_log`, `progress_pct`, and `rog_monitor_log` exist. `target_id` and `rog_investigation` do not. |
@@ -79,6 +82,16 @@ Workflow regressions: `UT-FLOW-01` asserts duplicate actions retain individual o
 | UT-LIB-08 | File-only recording | A recording that exists only as JSON is loaded into the database for replay. |
 | UT-RUN-01 | Recording with no steps | Status becomes `error`, the monitor log says no steps, and no browser is launched. |
 | UT-RUN-02 | Run whose recording was deleted | Status becomes `error` and the event says `Recording not found`. |
+| UT-RUN-03 | Preview with no viewer | While `should_capture` reports zero viewers the loop renders nothing; capture resumes once somebody watches. |
+| UT-RUN-04 | Live window toggle reaches the queue | `POST /api/runs` with `display_window=false` records the choice on the run; omitting it defaults to on. |
+| UT-RUN-05 | Window off, replay on | `execute_run(display_window=False)` passes, requests no JPEG frame, pushes no frame to the dashboard, and every step PNG is on disk before the run finishes. |
+| UT-RUN-06 | Window on with a viewer | `execute_run(display_window=True)` captures JPEG frames while a viewer is attached. |
+| UT-RUN-07 | Window on, nobody watching | With a viewer count of zero the run passes and renders no frames. |
+| UT-RUN-08 | Repeat count on replay | A step stored with `repeat_count=3` produces three clicks. |
+| UT-SAVE-01 | Slow export on save | `stop()` returns cleanly when the debounced export outlives its flush budget, the browser is closed, and the export is left to finish rather than cancelled mid-write. This is the regression that raised `AttributeError: 'NoneType' object has no attribute 'cancel'`. |
+| UT-SAVE-02 | Export raises on save | `stop()` still closes the browser and records the failure in the session save log. |
+| UT-GIT-01 | No git checkout | `status()` reports `git_state=no-checkout` with a reason instead of a silent `branch: null`, and `remote_library_status()` explains the missing checkout. |
+| UT-GIT-02 | Library disk report | `status()` reports `projects_on_disk`, `project_dirs`, `catalog_present` and `library_dir`. |
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
 
 ## Library scenarios

@@ -494,7 +494,11 @@ class CatalogTests(unittest.TestCase):
 class WorkflowRegressionTests(unittest.TestCase):
     """Record/save/edit/export regressions that do not require Chromium."""
 
-    def test_UT_FLOW_01_each_action_keeps_its_order_and_png(self):
+    def test_UT_FLOW_01_repeated_action_merges_distinct_actions_keep_order(self):
+        """Consecutive identical actions become one step carrying a repeat count.
+
+        Distinct actions still get their own row, in execution order.
+        """
         from app import library_store
         from app.db import RecordingStep, SessionLocal
         from app.recorder import RecorderSession
@@ -505,16 +509,82 @@ class WorkflowRegressionTests(unittest.TestCase):
         async def exercise():
             first = await session._record("click", selector={"x": 1, "y": 2}, label="click")
             second = await session._record("click", selector={"x": 1, "y": 2}, label="click")
-            self.assertEqual([first["order"], second["order"]], [1, 2])
-            self.assertNotEqual(first["id"], second["id"])
-            await session._attach_image(second, b"\x89PNG\r\n\x1a\n")
+            third = await session._record("click", selector={"x": 1, "y": 2}, label="click")
+            # Identical repeat: the same row, with the count bumped.
+            self.assertEqual(second["id"], first["id"])
+            self.assertEqual(third["id"], first["id"])
+            self.assertEqual([first["order"], second["order"], third["order"]], [1, 1, 1])
+            self.assertEqual(third["repeat"], 3)
+            # A different action keeps its own row after the merged one.
+            fourth = await session._record("press", value="Enter", label="Press Enter")
+            self.assertNotEqual(fourth["id"], first["id"])
+            self.assertEqual(fourth["order"], 2)
+            await session._attach_image(third, b"\x89PNG\r\n\x1a\n")
             await session.stop()
         asyncio.run(exercise())
         exported = library_store.export_recording(rec["id"])
         self.assertEqual([step["order"] for step in exported["steps"]], [1, 2])
-        self.assertEqual(exported["steps"][1]["screenshot"], "step-002.png")
+        self.assertEqual(exported["steps"][0]["repeat"], 3)
+        self.assertEqual(exported["steps"][0]["screenshot"], "step-001.png")
+        self.assertNotIn("×", exported["steps"][0]["label"])
         with SessionLocal() as db:
             self.assertEqual(db.query(RecordingStep).filter_by(recording_id=rec["id"]).count(), 2)
+
+    def test_UT_FLOW_07_merged_repeat_replays_every_occurrence(self):
+        """A merged step must still perform the action as many times as recorded."""
+        from app.executor import _expand_steps_with_repeat
+        steps = [
+            {"order": 1, "action": "click", "label": "Next", "selector": {"primary": "#next"}, "repeat": 3},
+            {"order": 2, "action": "press", "value": "Enter", "label": "Press Enter", "repeat": 1},
+        ]
+        expanded = asyncio.run(_expand_steps_with_repeat(steps))
+        self.assertEqual(len(expanded), 4)
+        self.assertEqual([item["action"] for item in expanded], ["click", "click", "click", "press"])
+
+    def test_UT_FLOW_08_save_variable_is_never_merged(self):
+        """Two captures of the same field hold different values, so both stay."""
+        from app import library_store
+        from app.db import RecordingStep, SessionLocal
+        from app.recorder import RecorderSession
+        project = library_store.create_project("Capture order", "")
+        rec = library_store.create_recording(project["id"], "capture-order", "/demo.html")
+        session = RecorderSession(rec["id"], "", 0)
+        async def exercise():
+            first = await session._record("save_variable", value="captured",
+                                          selector={"primary": "#input"}, label="Save input into captured")
+            second = await session._record("save_variable", value="captured",
+                                           selector={"primary": "#input"}, label="Save input into captured")
+            self.assertNotEqual(first["id"], second["id"])
+            self.assertEqual([first["order"], second["order"]], [1, 2])
+            await session.stop()
+        asyncio.run(exercise())
+        with SessionLocal() as db:
+            self.assertEqual(db.query(RecordingStep).filter_by(recording_id=rec["id"]).count(), 2)
+
+    def test_UT_FLOW_09_compress_existing_recording(self):
+        """A recording saved before merging can be collapsed on demand."""
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.db import RecordingStep, SessionLocal
+        from app.main import app
+        project = library_store.create_project("Legacy repeats", "")
+        rec = library_store.create_recording(project["id"], "legacy", "/demo.html")
+        with SessionLocal() as db:
+            for order in range(1, 5):
+                db.add(RecordingStep(recording_id=rec["id"], order=order, action="click",
+                                     label="Next", selector={"primary": "#next"}))
+            db.commit()
+        with TestClient(app) as client:
+            response = client.post(f"/api/recordings/{rec['id']}/steps/compress")
+            self.assertEqual(response.status_code, 200)
+            payload = response.json()
+            self.assertEqual(payload["before"], 4)
+            self.assertEqual(payload["after"], 1)
+            self.assertTrue(payload["changed"])
+            self.assertEqual(payload["steps"][0]["repeat"], 4)
+            detail = client.get(f"/api/recordings/{rec['id']}").json()
+            self.assertEqual(len(detail["steps"]), 1)
+            self.assertEqual(detail["steps"][0]["repeat"], 4)
 
     def test_UT_FLOW_02_stop_without_session_and_edit_with_screenshot(self):
         from fastapi.testclient import TestClient
@@ -628,6 +698,293 @@ class WorkflowRegressionTests(unittest.TestCase):
         self.assertTrue(smaller.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertLessEqual(len(smaller), len(original))
         self.assertEqual(Image.open(io.BytesIO(smaller)).size, (128, 128))
+
+
+class SaveCrashTests(unittest.TestCase):
+    def test_UT_SAVE_01_stop_survives_a_slow_export(self):
+        """SAVE must not die with 'NoneType' object has no attribute 'cancel'.
+
+        stop() waited 2s for the debounced export and then cancelled
+        `self._export_task`. But asyncio.wait_for cancels and re-awaits the task
+        before raising TimeoutError, and the task's own finally clears that
+        attribute first -- so the cancel hit None, the exception escaped stop(),
+        the save endpoint returned 500 and the browser was never closed.
+        """
+        import time
+        from app import library_store, recorder
+        project = library_store.create_project("Slow export", "")
+        rec = library_store.create_recording(project["id"], "slow", "/demo.html")
+        session = recorder.RecorderSession(rec["id"], "", 0)
+
+        original_export = library_store.export_recording
+        original_timeout = recorder.EXPORT_FLUSH_TIMEOUT
+        calls = []
+        closed = []
+
+        def blocking_export(recording_id, publish=False):
+            calls.append(recording_id)
+            time.sleep(0.8)          # longer than the flush budget below
+            return original_export(recording_id, publish=publish)
+
+        async def exercise():
+            library_store.export_recording = blocking_export
+            recorder.EXPORT_FLUSH_TIMEOUT = 0.2
+            async def fake_close():
+                closed.append(True)
+            session._close_browser = fake_close
+            try:
+                session._schedule_export()
+                await asyncio.sleep(0.05)
+                await session.stop()          # used to raise AttributeError
+                # The export is left to finish rather than cut off mid-write.
+                await asyncio.sleep(1.0)
+            finally:
+                recorder.EXPORT_FLUSH_TIMEOUT = original_timeout
+                library_store.export_recording = original_export
+
+        asyncio.run(exercise())
+        self.assertTrue(calls, "the export must have started")
+        self.assertTrue(closed, "the browser must always be closed")
+        self.assertEqual(session.status, "stopped")
+
+    def test_UT_SAVE_02_stop_closes_the_browser_even_if_the_export_raises(self):
+        from app import library_store, recorder
+        project = library_store.create_project("Broken export", "")
+        rec = library_store.create_recording(project["id"], "broken", "/demo.html")
+        session = recorder.RecorderSession(rec["id"], "", 0)
+
+        original_export = library_store.export_recording
+        closed = []
+
+        def exploding_export(recording_id, publish=False):
+            raise RuntimeError("disk on fire")
+
+        async def exercise():
+            library_store.export_recording = exploding_export
+            async def fake_close():
+                closed.append(True)
+            session._close_browser = fake_close
+            try:
+                session._schedule_export()
+                await asyncio.sleep(0.7)      # let the debounced task fail
+                await session.stop()
+            finally:
+                library_store.export_recording = original_export
+
+        asyncio.run(exercise())
+        self.assertTrue(closed, "the browser must always be closed")
+        self.assertTrue(any("export failed" in line for line in session._save_logs))
+
+
+class PreviewCostTests(unittest.TestCase):
+    def test_UT_RUN_03_no_frame_is_rendered_without_a_viewer(self):
+        """The live window must not burn CPU for a run nobody is watching."""
+        from app.browser import Preview
+
+        class Page:
+            def __init__(self):
+                self.shots = 0
+            async def screenshot(self, **kwargs):
+                self.shots += 1
+                return b"\xff\xd8" + b"0" * 200
+
+        viewers = {"count": 0}
+        page = Page()
+        preview = Preview(page, on_jpeg=None, interval=0.01,
+                          should_capture=lambda: viewers["count"] > 0)
+
+        async def exercise():
+            preview.start()
+            await asyncio.sleep(0.3)
+            unwatched = page.shots
+            viewers["count"] = 1
+            for _ in range(40):            # give the loop time to notice
+                await asyncio.sleep(0.05)
+                if page.shots:
+                    break
+            watched = page.shots
+            await preview.stop()
+            return unwatched, watched
+
+        unwatched, watched = asyncio.run(exercise())
+        self.assertEqual(unwatched, 0, "no viewer means no capture")
+        self.assertGreater(watched, 0, "capture resumes as soon as somebody watches")
+        self.assertGreater(preview.captures, 0)
+
+    def test_UT_RUN_04_run_records_the_live_window_choice(self):
+        """The Runs tab toggle reaches the queue and the run record."""
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import RUN_WINDOWS, app
+        project = library_store.create_project("Window toggle", "")
+        rec = library_store.create_recording(project["id"], "toggle", "/demo.html")
+        with TestClient(app) as client:
+            response = client.post("/api/runs", json={"target_id": rec["id"], "display_window": False})
+            self.assertEqual(response.status_code, 201)
+            payload = response.json()
+            run_id = payload["run_id"]
+            self.assertFalse(payload["display_window"])
+            self.assertFalse(RUN_WINDOWS[run_id])
+            self.assertFalse(client.get(f"/api/runs/{run_id}").json()["display_window"])
+
+            response = client.post("/api/runs", json={"target_id": rec["id"]})
+            self.assertEqual(response.status_code, 201)
+            self.assertTrue(response.json()["display_window"], "the window defaults to on")
+
+
+class LibraryDiagnosticsTests(unittest.TestCase):
+    def test_UT_GIT_01_status_explains_a_missing_git_checkout(self):
+        """A deployment with no checkout must say so, not show bare dashes."""
+        from app import library_store
+        original = library_store.git_root
+        library_store.git_root = lambda: None
+        try:
+            info = library_store.status()
+            verification = library_store.remote_library_status()
+        finally:
+            library_store.git_root = original
+        self.assertEqual(info["git_state"], "no-checkout")
+        self.assertFalse(info["git_available"])
+        self.assertIsNone(info["branch"])
+        self.assertIsNone(info["revision"])
+        self.assertFalse(info["publish_enabled"])
+        self.assertIn("No .git", info["status_reason"])
+        self.assertEqual(verification["state"], "no-checkout")
+        self.assertIn("No .git", verification["reason"])
+
+    def test_UT_GIT_02_status_reports_what_is_on_disk(self):
+        from app import library_store
+        info = library_store.status()
+        self.assertIn("projects_on_disk", info)
+        self.assertIn("project_dirs", info)
+        self.assertIn("catalog_present", info)
+        self.assertIn("library_dir", info)
+        # Whatever the checkout state, the listing is explained rather than silent.
+        if info["git_available"] and not info["projects_error"] and info["projects"]:
+            self.assertIsNone(info["status_reason"])
+
+
+
+class ExecutorWindowTests(unittest.TestCase):
+    """Drive the real execute_run against a fake browser.
+
+    This exercises the live-window switch and the viewer gate end to end without
+    needing Chromium.
+    """
+
+    def _recording_with_steps(self, name):
+        from app.db import Project, Recording, RecordingStep
+        with SessionLocal() as db:
+            project = Project(name=name, base_url="")
+            db.add(project); db.commit(); db.refresh(project)
+            recording = Recording(project_id=project.id, name=name, start_url="http://127.0.0.1/demo.html")
+            db.add(recording); db.commit(); db.refresh(recording)
+            db.add(RecordingStep(recording_id=recording.id, order=1, action="navigate",
+                                 value="/demo.html", label="Open"))
+            db.add(RecordingStep(recording_id=recording.id, order=2, action="click",
+                                 label="Go", selector={"primary": "#go", "x": 1, "y": 2}))
+            db.commit()
+            run = Run(recording_id=recording.id, status="queued")
+            db.add(run); db.commit(); db.refresh(run)
+            return run.id
+
+    def _drive(self, display_window, viewers):
+        import app.executor as executor
+        from tests.fakes import FakePage, FakePlaywright
+        page = FakePage(known=["#go"])
+        fake = FakePlaywright(page)
+        frames = []
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        async def on_frame(payload):
+            frames.append(payload)
+
+        run_id = self._recording_with_steps(f"window-{display_window}-{viewers}")
+        original = executor.async_playwright
+        executor.async_playwright = lambda: fake
+        try:
+            asyncio.run(execute_run(
+                run_id, on_event, on_frame=on_frame,
+                display_window=display_window, viewer_count=lambda: viewers,
+            ))
+        finally:
+            executor.async_playwright = original
+        with SessionLocal() as db:
+            status = db.get(Run, run_id).status
+        return status, page, frames, events
+
+    def test_UT_RUN_05_window_off_replays_without_rendering_a_frame(self):
+        import os
+        from app.config import ARTIFACTS
+        status, page, frames, events = self._drive(display_window=False, viewers=1)
+        self.assertEqual(status, "passed", "the replay must still succeed headless")
+        self.assertEqual([s for s in page.shots if s == "jpeg"], [], "no screencast frames")
+        self.assertIn("png", page.shots, "step screenshots are still taken")
+        self.assertEqual(frames, [], "no frame is pushed to the dashboard")
+        self.assertFalse(events[-1]["display_window"])
+        # Screenshots are written detached from the replay path, so the run must
+        # not finish before they are on disk -- otherwise the audit links 404.
+        with SessionLocal() as db:
+            log = db.query(Run).order_by(Run.created_at.desc()).first().execution_log
+        for entry in log:
+            if entry.get("screenshot"):
+                name = entry["screenshot"].rsplit("/", 2)
+                path = os.path.join(ARTIFACTS, "runs", name[-2], name[-1])
+                self.assertTrue(os.path.isfile(path), f"{path} was never written")
+
+    def test_UT_RUN_06_window_on_with_a_viewer_streams_frames(self):
+        status, page, frames, events = self._drive(display_window=True, viewers=1)
+        self.assertEqual(status, "passed")
+        self.assertGreater(len([s for s in page.shots if s == "jpeg"]), 0)
+        self.assertTrue(events[-1]["display_window"])
+
+    def test_UT_RUN_07_window_on_but_nobody_watching_renders_nothing(self):
+        status, page, frames, events = self._drive(display_window=True, viewers=0)
+        self.assertEqual(status, "passed")
+        self.assertEqual([s for s in page.shots if s == "jpeg"], [],
+                         "an unwatched run must not pay for frames")
+
+    def test_UT_RUN_08_merged_repeat_executes_every_occurrence(self):
+        """A step recorded as x3 performs three actions on replay."""
+        from app.db import Project, Recording, RecordingStep
+        import app.executor as executor
+        from tests.fakes import FakePage, FakePlaywright
+        with SessionLocal() as db:
+            project = Project(name="repeat-exec", base_url="")
+            db.add(project); db.commit(); db.refresh(project)
+            recording = Recording(project_id=project.id, name="repeat", start_url="http://127.0.0.1/demo.html")
+            db.add(recording); db.commit(); db.refresh(recording)
+            db.add(RecordingStep(recording_id=recording.id, order=1, action="navigate",
+                                 value="/demo.html", label="Open"))
+            db.add(RecordingStep(recording_id=recording.id, order=2, action="click",
+                                 label="Next", selector={"primary": "#next", "x": 5, "y": 6},
+                                 repeat_count=3))
+            db.commit()
+            run = Run(recording_id=recording.id, status="queued")
+            db.add(run); db.commit(); db.refresh(run)
+            run_id = run.id
+
+        page = FakePage(known=["#next"])
+        fake = FakePlaywright(page)
+
+        async def on_event(event):
+            pass
+
+        original = executor.async_playwright
+        executor.async_playwright = lambda: fake
+        try:
+            asyncio.run(execute_run(run_id, on_event, display_window=False,
+                                    viewer_count=lambda: 0))
+        finally:
+            executor.async_playwright = original
+        with SessionLocal() as db:
+            self.assertEqual(db.get(Run, run_id).status, "passed")
+        self.assertEqual(len([c for c in page.clicks if c[1] == "#next"]), 3,
+                         "repeat_count must be honoured on replay")
+
 
 
 if __name__ == "__main__":

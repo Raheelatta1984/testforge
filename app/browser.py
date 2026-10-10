@@ -17,6 +17,10 @@ import time
 
 from .config import IS_TERMUX
 
+# How often the capture loop re-checks whether anybody is watching while it is
+# idle. Checking is free; rendering a frame nobody will see is not.
+VIEWER_RECHECK = float(os.environ.get("TF_VIEWER_RECHECK", "0.15"))
+
 
 def _mode() -> str:
     mode = os.environ.get("TF_BROWSER_MODE", "auto").lower()
@@ -133,11 +137,17 @@ class Preview:
     - Lower JPEG quality (configurable) to reduce CPU/bandwidth
     - Skip duplicate frames via hash check
     - On-demand capture after actions
+    - Captures nothing at all while `should_capture` reports no viewer, so a run
+      nobody is watching (or one with the live window switched off) spends no
+      render time on frames that would be thrown away
     """
 
-    def __init__(self, page, on_jpeg=None, interval=None):
+    def __init__(self, page, on_jpeg=None, interval=None, should_capture=None):
         self.page = page
         self.on_jpeg = on_jpeg
+        # `should_capture` returns False while the live window is switched off or
+        # no client is attached. Capturing then is pure waste.
+        self.should_capture = should_capture
         # Fast default: 0.18s for snappy feel, configurable via env
         default_interval = float(os.environ.get("TF_PREVIEW_INTERVAL", "0.18"))
         self.base_interval = interval if interval is not None else default_interval
@@ -149,6 +159,16 @@ class Preview:
         self._last_activity = time.time()
         self._last_hash = None
         self._jpeg_quality = int(os.environ.get("TF_JPEG_QUALITY", "35"))  # lower = faster, less CPU
+        self.captures = 0
+
+    def _wanted(self) -> bool:
+        """Whether a frame would reach anybody. Defaults to yes."""
+        if self.should_capture is None:
+            return True
+        try:
+            return bool(self.should_capture())
+        except Exception:
+            return True
 
     def start(self):
         self._task = asyncio.create_task(self._loop())
@@ -163,6 +183,7 @@ class Preview:
         try:
             # Use lower quality for speed
             data = await self.page.screenshot(type="jpeg", quality=self._jpeg_quality)
+            self.captures += 1
         except Exception:
             # Page might be closed
             return None
@@ -186,6 +207,18 @@ class Preview:
     async def _loop(self):
         while not self._stopped.is_set():
             try:
+                # Nothing to do while the live window is off or nobody is
+                # watching: polling again is cheaper than rendering a frame
+                # that gets discarded.
+                if not self._wanted():
+                    # Re-check often: this branch costs a timer, not a render, and
+                    # a short interval is what keeps the first frame quick when a
+                    # viewer attaches part-way through a run.
+                    try:
+                        await asyncio.wait_for(self._stopped.wait(), VIEWER_RECHECK)
+                    except asyncio.TimeoutError:
+                        pass
+                    continue
                 # Adaptive interval: fast after activity, slow when idle
                 idle = time.time() - self._last_activity
                 if idle > 3.0:
@@ -215,9 +248,15 @@ class Preview:
             return await self._shoot(force=force)
 
     async def stop(self):
+        """Stop the capture loop. Never raises: callers rely on it to unwind."""
         self._stopped.set()
-        if self._task is not None:
-            try:
-                await asyncio.wait_for(self._task, 2)
-            except Exception:
-                self._task.cancel()
+        task = self._task
+        self._task = None
+        if task is None:
+            return
+        try:
+            await asyncio.wait_for(task, 2)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            task.cancel()

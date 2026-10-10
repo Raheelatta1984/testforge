@@ -1,0 +1,40 @@
+INFO:     Started server process [3571]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:48543 (Press CTRL+C to quit)
+--- TITAN ERP SYSTEM BOOTED ---
+LOGS: /tmp/tf-library-cqqp5_24/artifacts/system_logs
+ROG DATABASE INITIALIZED
+INFO:     127.0.0.1:39022 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39032 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39044 - "POST /api/projects HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:39052 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39058 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39064 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39076 - "POST /api/variables HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39082 - "PATCH /api/variables/96520499-a237-42ee-8dc0-23bef127a7b2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39094 - "DELETE /api/variables/96520499-a237-42ee-8dc0-23bef127a7b2 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39104 - "POST /api/ai/rephrase HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39108 - "GET /api/runs/screenshot/not-a-run/../../etc/passwd HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39114 - "GET /api/runs/screenshot/missing-run/step-1.jpg HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39116 - "POST /api/runs HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:39122 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39126 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39130 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39144 - "GET /api/runs/4ff3db9e-c4b0-43eb-966c-0ca3496a0142 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39150 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39152 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39158 - "GET /api/recordings/f8b88226-4890-4562-b45a-2818927ea1e0 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39164 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39166 - "GET /api/diagnostics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39172 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39186 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:39192 - "POST /api/recordings/c4cd6d7f-d234-490a-98f0-2b94720cca75/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39198 - "POST /api/recordings/c4cd6d7f-d234-490a-98f0-2b94720cca75/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39202 - "GET /api/recordings/c4cd6d7f-d234-490a-98f0-2b94720cca75/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39216 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39218 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [3571]

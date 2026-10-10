@@ -1,0 +1,74 @@
+test_UT_BOOT_01_modules_import (tests.test_unit.BootTests.test_UT_BOOT_01_modules_import) ... ok
+test_UT_BOOT_02_config_contract (tests.test_unit.BootTests.test_UT_BOOT_02_config_contract) ... ok
+test_UT_BOOT_03_run_columns_match_the_model (tests.test_unit.BootTests.test_UT_BOOT_03_run_columns_match_the_model) ... ok
+test_UT_BRW_01_libs_do_not_leak (tests.test_unit.BrowserLaunchTests.test_UT_BRW_01_libs_do_not_leak) ... ok
+test_UT_BRW_02_missing_binary_raises (tests.test_unit.BrowserLaunchTests.test_UT_BRW_02_missing_binary_raises) ... ok
+test_UT_BRW_03_install_hint (tests.test_unit.BrowserLaunchTests.test_UT_BRW_03_install_hint) ... ok
+test_UT_BRW_04_video_disabled_for_override (tests.test_unit.BrowserLaunchTests.test_UT_BRW_04_video_disabled_for_override) ... ok
+test_UT_DOC_01_catalog_ids_match (tests.test_unit.CatalogTests.test_UT_DOC_01_catalog_ids_match) ... ok
+test_UT_RUN_05_window_off_replays_without_rendering_a_frame (tests.test_unit.ExecutorWindowTests.test_UT_RUN_05_window_off_replays_without_rendering_a_frame) ... ok
+test_UT_RUN_06_window_on_with_a_viewer_streams_frames (tests.test_unit.ExecutorWindowTests.test_UT_RUN_06_window_on_with_a_viewer_streams_frames) ... ok
+test_UT_RUN_07_window_on_but_nobody_watching_renders_nothing (tests.test_unit.ExecutorWindowTests.test_UT_RUN_07_window_on_but_nobody_watching_renders_nothing) ... ok
+test_UT_RUN_08_merged_repeat_executes_every_occurrence (tests.test_unit.ExecutorWindowTests.test_UT_RUN_08_merged_repeat_executes_every_occurrence)
+A step recorded as x3 performs three actions on replay. ... ok
+test_UT_GIT_01_status_explains_a_missing_git_checkout (tests.test_unit.LibraryDiagnosticsTests.test_UT_GIT_01_status_explains_a_missing_git_checkout)
+A deployment with no checkout must say so, not show bare dashes. ... ok
+test_UT_GIT_02_status_reports_what_is_on_disk (tests.test_unit.LibraryDiagnosticsTests.test_UT_GIT_02_status_reports_what_is_on_disk) ... ok
+test_UT_LIB_01_project_is_written_to_the_repository_tree (tests.test_unit.LibraryStoreTests.test_UT_LIB_01_project_is_written_to_the_repository_tree) ... ok
+test_UT_LIB_02_database_only_projects_are_hidden (tests.test_unit.LibraryStoreTests.test_UT_LIB_02_database_only_projects_are_hidden) ... ok
+test_UT_LIB_03_recording_writes_its_jenkins_resource (tests.test_unit.LibraryStoreTests.test_UT_LIB_03_recording_writes_its_jenkins_resource) ... ok
+test_UT_LIB_04_variables_roundtrip_in_the_repository (tests.test_unit.LibraryStoreTests.test_UT_LIB_04_variables_roundtrip_in_the_repository) ... ok
+test_UT_LIB_05_rejects_a_path_escape (tests.test_unit.LibraryStoreTests.test_UT_LIB_05_rejects_a_path_escape) ... ok
+test_UT_LIB_06_publish_pushes_only_library_files (tests.test_unit.LibraryStoreTests.test_UT_LIB_06_publish_pushes_only_library_files) ... ok
+test_UT_LIB_07_failed_push_keeps_local_project_for_retry (tests.test_unit.LibraryStoreTests.test_UT_LIB_07_failed_push_keeps_local_project_for_retry) ... ok
+test_UT_LIB_08_materialize_loads_a_file_only_recording (tests.test_unit.LibraryStoreTests.test_UT_LIB_08_materialize_loads_a_file_only_recording) ... ok
+test_UT_RUN_03_no_frame_is_rendered_without_a_viewer (tests.test_unit.PreviewCostTests.test_UT_RUN_03_no_frame_is_rendered_without_a_viewer)
+The live window must not burn CPU for a run nobody is watching. ... ok
+test_UT_RUN_04_run_records_the_live_window_choice (tests.test_unit.PreviewCostTests.test_UT_RUN_04_run_records_the_live_window_choice)
+The Runs tab toggle reaches the queue and the run record. ... ok
+test_UT_REP_01_navigate_interpolates (tests.test_unit.ReplayTests.test_UT_REP_01_navigate_interpolates) ... ok
+test_UT_REP_02_click_selector (tests.test_unit.ReplayTests.test_UT_REP_02_click_selector) ... ok
+test_UT_REP_03_click_coordinate_fallback (tests.test_unit.ReplayTests.test_UT_REP_03_click_coordinate_fallback) ... ok
+test_UT_REP_04_click_without_target (tests.test_unit.ReplayTests.test_UT_REP_04_click_without_target) ... ok
+test_UT_REP_05_type_interpolates (tests.test_unit.ReplayTests.test_UT_REP_05_type_interpolates) ... ok
+test_UT_REP_06_fill_replaces (tests.test_unit.ReplayTests.test_UT_REP_06_fill_replaces) ... ok
+test_UT_REP_07_press_key (tests.test_unit.ReplayTests.test_UT_REP_07_press_key) ... ok
+test_UT_REP_08_unsupported_action (tests.test_unit.ReplayTests.test_UT_REP_08_unsupported_action) ... ok
+test_UT_REP_09_navigate_without_url (tests.test_unit.ReplayTests.test_UT_REP_09_navigate_without_url) ... ok
+test_UT_REP_10_relative_navigate_uses_this_server (tests.test_unit.ReplayTests.test_UT_REP_10_relative_navigate_uses_this_server) ... ok
+test_UT_RUN_01_no_steps_fails_closed (tests.test_unit.RunTests.test_UT_RUN_01_no_steps_fails_closed) ... ok
+test_UT_RUN_02_missing_recording (tests.test_unit.RunTests.test_UT_RUN_02_missing_recording) ... ok
+test_UT_SAVE_01_stop_survives_a_slow_export (tests.test_unit.SaveCrashTests.test_UT_SAVE_01_stop_survives_a_slow_export)
+SAVE must not die with 'NoneType' object has no attribute 'cancel'. ... ok
+test_UT_SAVE_02_stop_closes_the_browser_even_if_the_export_raises (tests.test_unit.SaveCrashTests.test_UT_SAVE_02_stop_closes_the_browser_even_if_the_export_raises) ... ok
+test_UT_SEC_01_redact_password (tests.test_unit.SecurityTests.test_UT_SEC_01_redact_password) ... ok
+test_UT_URL_01_blank_sample_app (tests.test_unit.UrlTests.test_UT_URL_01_blank_sample_app) ... ok
+test_UT_URL_02_relative_loopback (tests.test_unit.UrlTests.test_UT_URL_02_relative_loopback) ... ok
+test_UT_URL_03_scheme_less_https (tests.test_unit.UrlTests.test_UT_URL_03_scheme_less_https) ... ok
+test_UT_URL_04_external_unchanged (tests.test_unit.UrlTests.test_UT_URL_04_external_unchanged) ... ok
+test_UT_URL_05_file_scheme_rejected (tests.test_unit.UrlTests.test_UT_URL_05_file_scheme_rejected) ... ok
+test_UT_URL_06_preview_host_rewritten (tests.test_unit.UrlTests.test_UT_URL_06_preview_host_rewritten) ... ok
+test_UT_URL_07_other_local_port_preserved (tests.test_unit.UrlTests.test_UT_URL_07_other_local_port_preserved) ... ok
+test_UT_URL_08_query_preserved (tests.test_unit.UrlTests.test_UT_URL_08_query_preserved) ... ok
+test_UT_VAR_01_known_keys (tests.test_unit.VariableTests.test_UT_VAR_01_known_keys) ... ok
+test_UT_VAR_02_unknown_key_kept (tests.test_unit.VariableTests.test_UT_VAR_02_unknown_key_kept) ... ok
+test_UT_VAR_03_empty_text (tests.test_unit.VariableTests.test_UT_VAR_03_empty_text) ... ok
+test_UT_VAR_04_inner_whitespace (tests.test_unit.VariableTests.test_UT_VAR_04_inner_whitespace) ... ok
+test_UT_FLOW_01_repeated_action_merges_distinct_actions_keep_order (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_01_repeated_action_merges_distinct_actions_keep_order)
+Consecutive identical actions become one step carrying a repeat count. ... ok
+test_UT_FLOW_02_stop_without_session_and_edit_with_screenshot (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_02_stop_without_session_and_edit_with_screenshot) ... ok
+test_UT_FLOW_03_export_templates_and_formula_safety (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_03_export_templates_and_formula_safety) ... ok
+test_UT_FLOW_04_variable_capture_and_replay_value (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_04_variable_capture_and_replay_value) ... ok
+test_UT_FLOW_05_capture_new_and_existing_variable (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_05_capture_new_and_existing_variable) ... ok
+test_UT_FLOW_06_compact_png_preserves_format_and_never_grows (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_06_compact_png_preserves_format_and_never_grows) ... ok
+test_UT_FLOW_07_merged_repeat_replays_every_occurrence (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_07_merged_repeat_replays_every_occurrence)
+A merged step must still perform the action as many times as recorded. ... ok
+test_UT_FLOW_08_save_variable_is_never_merged (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_08_save_variable_is_never_merged)
+Two captures of the same field hold different values, so both stay. ... ok
+test_UT_FLOW_09_compress_existing_recording (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_09_compress_existing_recording)
+A recording saved before merging can be collapsed on demand. ... ok
+
+----------------------------------------------------------------------
+Ran 60 tests in 5.725s
+
+OK

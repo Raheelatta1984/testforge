@@ -71,6 +71,13 @@ function App() {
   const [tab, setTab] = useState("projects");
   const [activeProject, setActiveProject] = useState(() => JSON.parse(localStorage.getItem("tf_project") || 'null'));
   const [activeRunId, setActiveRunId] = useState(null);
+  // Live browser window for execution. Off means the replay runs without the
+  // screencast, which is the cheapest way to run a suite.
+  const [liveWindow, setLiveWindow] = useState(() => localStorage.getItem("tf_live_window") !== "0");
+  const toggleLiveWindow = (next) => {
+    setLiveWindow(next);
+    localStorage.setItem("tf_live_window", next ? "1" : "0");
+  };
   const tabs = [["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["github","🐙"]];
 
   return e('div', { className: "h-full flex flex-col" },
@@ -85,8 +92,8 @@ function App() {
       tab === "projects" && e(Projects, { setActiveProject, activeProject }),
       tab === "variables" && e(Variables, { project: activeProject }),
       tab === "record" && e(Recorder, { project: activeProject }),
-      tab === "library" && e(Library, { project: activeProject, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
-      tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId }),
+      tab === "library" && e(Library, { project: activeProject, liveWindow, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
+      tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId, liveWindow, setLiveWindow: toggleLiveWindow }),
       tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts), tab === "github" && e(Github)
     ),
     e('nav', { className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex" },
@@ -280,7 +287,7 @@ function Recorder({ project }) {
         }),
         e("button", { className: "bg-indigo-600 px-4 rounded font-bold text-sm", onClick: () => { if (text) { send({ type: "text", text: text }); setText(""); } } }, "Type")
       ),
-      e("p", { className: "text-[9px] text-slate-500" }, "💡 Each action is saved as an editable step in its original execution order.")
+      e("p", { className: "text-[9px] text-slate-500" }, "💡 Each action is saved as an editable step in execution order. Repeating the same action merges it into one step with a ×N count.")
     )
   );
 
@@ -290,7 +297,7 @@ function Recorder({ project }) {
         e("h2", { className: "font-bold text-lg text-indigo-300" }, "Record in remote browser ⚡ FAST"),
         e("span", { className: "fast-badge" }, "OPTIMIZED")
       ),
-      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on server (free-tier optimized, low CPU). SAVE pushes immediately to GitHub branch with description. Each step remains editable."),
+      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on server (free-tier optimized, low CPU). SAVE pushes immediately to GitHub branch with description. Repeated actions merge into one editable step with a repeat count."),
       varsList.length > 0 && e("div", { className: "bg-slate-950 p-3 rounded-xl border border-slate-800" },
         e("div", { className: "text-xs font-bold text-indigo-300 mb-2" }, `📦 ${varsList.length} Variables available for reuse:`),
         e("div", { className: "flex flex-wrap gap-1" },
@@ -309,7 +316,7 @@ function Recorder({ project }) {
   );
 }
 
-function Runs({ runId, setRunId }) {
+function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
   const [runs, setRuns] = useState([]);
   const [activeLog, setActiveLog] = useState([]);
   const [frame, setFrame] = useState(null);
@@ -317,6 +324,8 @@ function Runs({ runId, setRunId }) {
   const [runStatus, setRunStatus] = useState("");
   const [runError, setRunError] = useState("");
   const [queueInfo, setQueueInfo] = useState(null);
+  const [windowOff, setWindowOff] = useState(false);
+  const windowOffRef = useRef(false);
   const frameUrl = useRef(null);
 
   const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
@@ -326,10 +335,13 @@ function Runs({ runId, setRunId }) {
   useEffect(() => {
     if (!runId) return undefined;
     setActiveLog([]); setPercent(0); setRunStatus("queued"); setRunError(""); setFrame(null);
+    setWindowOff(false); windowOffRef.current = false;
     let stop = false;
     const ws = new WebSocket((location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + "/ws/runs/" + runId);
     ws.onmessage = (ev) => {
       const message = JSON.parse(ev.data);
+      // The server states the window mode on the first status event of the run.
+      if (message.display_window === false) { setWindowOff(true); windowOffRef.current = true; }
       if (message.type === "frame" && message.data) setFrame("data:image/jpeg;base64," + message.data);
       if (message.percent !== undefined) setPercent(message.percent);
       if (message.type === "done") {
@@ -353,6 +365,9 @@ function Runs({ runId, setRunId }) {
         if (Array.isArray(run.log) && run.log.length) setActiveLog(run.log);
         if (run.status) setRunStatus(run.status);
         if (run.rog_monitor_log && run.status && run.status !== "running" && run.status !== "queued") setRunError(run.rog_monitor_log);
+        if (run.display_window === false) { setWindowOff(true); windowOffRef.current = true; }
+        // No point polling for a picture the run was told not to produce.
+        if (!windowOffRef.current) {
         const img = await fetch("/api/runs/" + runId + "/live.jpg?t=" + Date.now());
         if (img.ok && (img.headers.get("content-type") || "").indexOf("image") !== -1) {
           const blob = await img.blob();
@@ -360,6 +375,7 @@ function Runs({ runId, setRunId }) {
           if (frameUrl.current && frameUrl.current.indexOf("blob:") === 0) URL.revokeObjectURL(frameUrl.current);
           frameUrl.current = next;
           setFrame(next);
+        }
         }
       } catch (_) {}
       if (!stop) setTimeout(poll, 500); // Faster poll for immediate display
@@ -376,6 +392,25 @@ function Runs({ runId, setRunId }) {
       ),
       e("p", { className: "text-[10px] text-slate-400 mt-1" }, `${queueInfo.passed} passed (${queueInfo.passed_pct}%) · ${queueInfo.failed} failed · ${queueInfo.pending} pending` )
     ),
+    e("div", { className: "bg-slate-900 p-3 rounded-xl border border-slate-800 flex items-center justify-between gap-3" },
+      e("div", {},
+        e("div", { className: "text-xs font-bold text-indigo-300" }, "Live browser window"),
+        e("p", { className: "text-[10px] text-slate-400 mt-0.5" },
+          liveWindow
+            ? "Streams the browser while a run executes."
+            : "Off: runs headless with no screencast. Replay is unchanged, CPU is lower.")
+      ),
+      e("button", {
+        type: "button",
+        role: "switch",
+        "aria-checked": !!liveWindow,
+        "aria-label": "Display live browser window during execution",
+        onClick: () => setLiveWindow(!liveWindow),
+        className: "shrink-0 w-14 h-7 rounded-full relative transition-colors " + (liveWindow ? "bg-emerald-500" : "bg-slate-700")
+      },
+        e("span", { className: "absolute top-1 w-5 h-5 bg-white rounded-full transition-all " + (liveWindow ? "left-8" : "left-1") })
+      )
+    ),
     runId && e("div", { className: "bg-slate-900 border-2 border-indigo-500 rounded-3xl p-5 shadow-2xl" },
       e("div", { className: "flex justify-between font-bold text-xs" },
         e("span", {}, "EXECUTION ⚡ IMMEDIATE"),
@@ -385,13 +420,19 @@ function Runs({ runId, setRunId }) {
         e("div", { className: "progress-bar", style: { width: percent + "%" } })
       ),
       runError && e("p", { className: "text-xs text-red-300 mt-2" }, runError),
-      e("div", { className: "mt-3 rounded-xl overflow-hidden border border-slate-800 bg-black min-h-[200px] flex items-center justify-center" },
-        frame
-          ? e("img", { src: frame, alt: "Execution browser", className: "w-full" })
-          : e("div", { className: "text-slate-400 text-sm p-8 text-center" },
-              runStatus === "queued" ? "⏳ Queued - browser launching immediately..." : "Waiting for execution browser… (window displays immediately)"
-            )
-      ),
+      windowOff
+        ? e("div", { className: "mt-3 rounded-xl border border-slate-800 bg-slate-950 min-h-[120px] flex flex-col items-center justify-center p-6 text-center" },
+            e("div", { className: "text-2xl" }, "🖥️"),
+            e("p", { className: "text-xs text-slate-300 font-bold mt-2" }, "Live browser window is off for this run"),
+            e("p", { className: "text-[10px] text-slate-500 mt-1" }, "Execution is running headless. Switch the toggle on to stream the browser on the next run.")
+          )
+        : e("div", { className: "mt-3 rounded-xl overflow-hidden border border-slate-800 bg-black min-h-[200px] flex items-center justify-center" },
+            frame
+              ? e("img", { src: frame, alt: "Execution browser", className: "w-full" })
+              : e("div", { className: "text-slate-400 text-sm p-8 text-center" },
+                  runStatus === "queued" ? "⏳ Queued - browser launching immediately..." : "Waiting for execution browser… (window displays immediately)"
+                )
+          ),
       e("div", { className: "max-h-40 overflow-y-auto mt-3 space-y-1" },
         activeLog.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).map((step, i) => e("div", { key: step.order || i, className: "text-[10px] p-2 bg-slate-950 rounded border border-slate-900" },
           e("div", { className: "flex justify-between gap-2" },
@@ -413,7 +454,7 @@ function Runs({ runId, setRunId }) {
   );
 }
 
-function Library({ project, onRun }) {
+function Library({ project, liveWindow, onRun }) {
   const [recs, setRecs] = useState([]);
   const [error, setError] = useState("");
   const [running, setRunning] = useState("");
@@ -448,7 +489,7 @@ function Library({ project, onRun }) {
   const run = async (recording) => {
     setRunning(recording.id); setError("");
     try {
-      const res = await API.post("/api/runs", { target_id: recording.id });
+      const res = await API.post("/api/runs", { target_id: recording.id, display_window: liveWindow !== false });
       onRun(res.run_id);
     } catch (err) {
       setError(err.message);
@@ -713,17 +754,32 @@ function Github() {
       e('h2', {className:"font-bold text-xl text-indigo-300 text-center"}, "GITHUB LIBRARY"),
       e('span', { className: "fast-badge" }, "CURRENT BRANCH ⚡")
     ),
-    e('p', {className:"text-sm text-slate-400"}, "Projects, variables, recordings stored in library/ folder of current branch only. Dashboard loads super fast from catalog. Creating project or saving recording commits and pushes to the active branch immediately with description. Each step remains editable."),
+    e('p', {className:"text-sm text-slate-400"}, "Projects, variables, recordings stored in library/ folder of current branch only. Dashboard loads super fast from catalog. Creating project or saving recording commits and pushes to the active branch immediately with description. Repeated actions are stored as one step with a repeat count."),
     info && e('div', { className: "text-xs text-slate-400 font-mono space-y-1" },
-      e('div', {}, "Branch " + (info.branch || "—")),
-      e('div', { className: info.remote_verification?.synced ? "text-emerald-400" : "text-amber-300" }, info.remote_verification?.synced ? "Remote verified: fully synced" : "Remote not verified / sync pending"),
+      e('div', {}, "Branch " + (info.branch || "— " + (info.git_state === "no-checkout" ? "(no git checkout here)" : "(unknown)"))),
+      e('div', { className: info.remote_verification?.synced ? "text-emerald-400" : "text-amber-300" },
+        info.remote_verification?.synced
+          ? "Remote verified: fully synced"
+          : "Remote not verified / sync pending" + (info.remote_verification?.state ? " · " + info.remote_verification.state : "")),
       e('div', {}, "Revision " + (info.revision || "—")),
       e('div', {}, info.publish_enabled ? "Push to the active branch enabled ⚡" : "Push disabled"),
       info.dirty && e('div', { className: "text-amber-300" }, "Unpublished changes - will push to the active branch immediately"),
       fastInfo && e('div', { className: "text-emerald-400" }, `Fast load: ${fastInfo.load_time || "cached"} from catalog ⚡`)
     ),
+    info && info.status_reason && e('div', { role: "status", className: "text-[11px] bg-amber-950/40 border border-amber-800/40 text-amber-200 p-3 rounded-xl" },
+      e('div', { className: "font-bold mb-1" }, "Why the panel reads this way"),
+      e('p', {}, info.status_reason),
+      info.remote_verification?.reason && e('p', { className: "mt-1 text-amber-300/80" }, info.remote_verification.reason),
+      info.git_state === "no-checkout" && e('p', { className: "mt-2 text-[10px] text-amber-300/70" },
+        "Library folder: " + (info.library_dir || "library") + " · " + (info.projects_on_disk || 0) + " project(s) on disk · catalog " + (info.catalog_present ? "present" : "missing"))
+    ),
     e('div', { className: "space-y-2" },
-      projects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center" }, "No projects in the branch yet."),
+      projects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center" },
+        info && info.projects_error
+          ? "Projects could not be listed: " + info.projects_error
+          : info && info.projects_on_disk > 0
+            ? `${info.projects_on_disk} project(s) are on disk but are not listed. Reload, or create a project to rebuild the catalog.`
+            : "No projects in the branch yet."),
       projects.map(project => e('div', { key: project.id, className: "p-3 bg-slate-950 rounded-xl border border-slate-800" },
         e('div', { className: "flex justify-between" },
           e('div', { className: "font-bold text-sm" }, project.name),
@@ -740,7 +796,7 @@ function Github() {
     error && e('p', { role: "alert", className: "text-sm text-red-300" }, error),
     e('div', { className: "flex flex-col gap-2" },
       e('a', { href: tree, target: "_blank", rel: "noopener noreferrer", className: "text-center bg-slate-700 px-8 py-3 rounded-2xl font-bold" }, "OPEN LIBRARY ON GITHUB BRANCH"),
-      e('button', { type: "button", onClick: publish, disabled: publishing, className: "bg-indigo-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "PUSHING…⚡" : "PUSH LIBRARY TO GITHUB ⚡"),
+      e('button', { type: "button", onClick: publish, disabled: publishing || !(info && info.publish_enabled), title: info && info.publish_enabled ? "" : "Publishing is disabled: no git checkout in this deployment", className: "bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed px-8 py-3 rounded-2xl font-bold" }, publishing ? "PUSHING…⚡" : (info && info.publish_enabled ? "PUSH LIBRARY TO GITHUB ⚡" : "PUSH DISABLED — NO GIT CHECKOUT")),
       e('button', { type: "button", onClick: sync, disabled: publishing, className: "bg-emerald-600 disabled:opacity-60 px-8 py-3 rounded-2xl font-bold" }, publishing ? "SYNCING…⚡" : "VERIFY / SYNC NOW ⚡")
     ),
     e('p', { className: "text-xs text-slate-500" }, "Pushes are verified against the remote branch. Unavailable GitHub or a rejected push remains pending and is retried after one minute.")

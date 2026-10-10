@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import threading
@@ -38,7 +39,7 @@ from app.db import (
 )
 
 LOCK = threading.RLock()
-_ID = __import__("re").compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
+_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 
 # --- Caching layer for super fast loads ---
 _CACHE: dict[str, Any] = {
@@ -644,6 +645,16 @@ def _steps_from_db(recording: Recording) -> list[dict]:
 
 
 # ---- Step compression: deduplicate repeated actions ----
+_REPEAT_SUFFIX = re.compile(r"\s*×\s*\d+$")
+
+
+def strip_repeat_suffix(label) -> str:
+    """Return `label` without a trailing ' ×N' marker, so signatures stay stable."""
+    text = (label or "").rstrip()
+    match = _REPEAT_SUFFIX.search(text)
+    return text[: match.start()] if match else text
+
+
 def _step_signature(step: dict) -> tuple:
     """Signature for equality check ignoring id/order/screenshot."""
     action = (step.get("action") or "").lower()
@@ -670,6 +681,11 @@ def _step_signature(step: dict) -> tuple:
         return (action, sel_sig, value, label)
 
 
+# Public alias: the recorder uses the same equality rule as the exporter so a
+# step it merges at record time is exactly one `compress_steps` would merge.
+step_signature = _step_signature
+
+
 def compress_steps(steps: list[dict]) -> list[dict]:
     """Compress repeated steps: merge identical consecutive and detect repeating blocks.
 
@@ -694,8 +710,9 @@ def compress_steps(steps: list[dict]) -> list[dict]:
         if count > 1:
             new_step = dict(cur)
             new_step["repeat"] = count
-            # Update label to show repeat
-            base_label = cur.get("label") or cur.get("action") or "Step"
+            # Update label to show repeat, without stacking a suffix on a step
+            # the recorder already merged.
+            base_label = strip_repeat_suffix(cur.get("label") or cur.get("action") or "Step")
             new_step["label"] = f"{base_label} ×{count}"
             merged.append(new_step)
             i = j
@@ -858,10 +875,23 @@ def _publish_current_branch(message: str) -> bool:
 
 
 def remote_library_status() -> dict:
-    """Read the remote ref, not a possibly stale local tracking branch."""
+    """Read the remote ref, not a possibly stale local tracking branch.
+
+    Always carries a `state` and a human-readable `reason`, because a bare
+    `synced: false` tells the dashboard nothing it can act on.
+    """
     root = git_root()
     if root is None:
-        return {"synced": False, "error": "No git checkout"}
+        return {
+            "synced": False,
+            "state": "no-checkout",
+            "error": "No git checkout",
+            "reason": (
+                "No .git directory was found at or above the library folder, so "
+                "there is no branch to verify or publish to. Mount or copy a git "
+                "checkout (or set TF_GIT_REMOTE with credentials) to enable pushing."
+            ),
+        }
     remote = os.environ.get("TF_GIT_REMOTE", "origin")
     try:
         branch = _run_git(["symbolic-ref", "--short", "HEAD"], root)
@@ -870,10 +900,27 @@ def remote_library_status() -> dict:
         remote_sha = heads[0] if heads else None
         relative = Path(os.path.relpath(library_dir().resolve(), root.resolve())).as_posix()
         dirty = bool(_run_git(["status", "--porcelain", "--", relative], root))
+        if remote_sha is None:
+            state, reason = "no-remote-branch", (
+                f"Branch {branch} does not exist on remote {remote} yet. "
+                "The first successful push creates it."
+            )
+        elif dirty:
+            state, reason = "dirty", "Library files have changed since the last commit."
+        elif remote_sha != local:
+            state, reason = "ahead", "Local commits have not reached the remote branch yet."
+        else:
+            state, reason = "synced", "Remote branch SHA matches local HEAD."
         return {"branch": branch, "local_sha": local, "remote_sha": remote_sha,
-                "dirty": dirty, "synced": bool(remote_sha == local and not dirty)}
+                "dirty": dirty, "synced": bool(remote_sha == local and not dirty),
+                "state": state, "reason": reason}
     except PublishError as exc:
-        return {"synced": False, "error": str(exc)}
+        return {
+            "synced": False,
+            "state": "unreachable",
+            "error": str(exc),
+            "reason": f"Could not read remote {remote}: {exc}",
+        }
 
 
 def _publish_unlocked(message: str) -> bool:
@@ -1117,6 +1164,73 @@ def export_recording(recording_id: str, *, publish: bool = False) -> dict | None
         return payload
 
 
+def compress_recording(recording_id: str, *, publish: bool = True) -> dict:
+    """Collapse consecutive repeated steps of a saved recording into one step.
+
+    Rewrites the database rows so the recording, its export and the replay all
+    agree on the shorter step list. Recordings made before record-time merging
+    keep their original rows until this runs.
+    """
+    with LOCK:
+        with SessionLocal() as db:
+            recording = db.get(Recording, recording_id)
+            if recording is None:
+                raise NotFound("Recording not found")
+            rows = sorted(list(recording.steps or []), key=lambda row: row.order or 0)
+            before = len(rows)
+            steps = [
+                {
+                    "id": row.id,
+                    "order": row.order,
+                    "action": row.action,
+                    "value": row.value,
+                    "label": row.label,
+                    "selector": row.selector if isinstance(row.selector, dict) else None,
+                    "repeat": row.repeat_count or 1,
+                    "screenshot": Path(row.screenshot_path).name if row.screenshot_path else None,
+                }
+                for row in rows
+            ]
+        compressed = compress_steps(steps)
+
+        if len(compressed) != before:
+            with SessionLocal() as db:
+                recording = db.get(Recording, recording_id)
+                for row in list(recording.steps or []):
+                    db.delete(row)
+                db.flush()
+                for item in compressed:
+                    repeat = item.get("repeat") or 1
+                    try:
+                        repeat = max(1, min(int(repeat), 100))
+                    except (TypeError, ValueError):
+                        repeat = 1
+                    db.add(RecordingStep(
+                        recording_id=recording_id,
+                        order=item["order"],
+                        action=item.get("action"),
+                        value=item.get("value"),
+                        label=item.get("label"),
+                        selector=item.get("selector"),
+                        repeat_count=repeat,
+                        screenshot_path=item.get("screenshot"),
+                    ))
+                db.commit()
+            _CACHE["materialize_ts"] = 0
+
+        payload = export_recording(recording_id, publish=publish)
+        if payload is None:
+            raise NotFound("Recording not found")
+        return {
+            "recording_id": recording_id,
+            "before": before,
+            "after": len(compressed),
+            "changed": len(compressed) != before,
+            "steps": payload.get("steps") or [],
+            "published": bool(payload.get("published")),
+        }
+
+
 def attach_step_image(recording_id: str, order: int, data: bytes) -> str | None:
     if not data:
         return None
@@ -1271,13 +1385,39 @@ def materialize_recording(recording_id: str) -> bool:
         return True
 
 
+def _library_disk_report() -> dict:
+    """What is actually on disk under library/, independent of git."""
+    folder = library_dir()
+    projects_dir = folder / "projects"
+    dirs = [item.name for item in projects_dir.iterdir() if item.is_dir()] if projects_dir.is_dir() else []
+    with_project_file = [
+        name for name in dirs
+        if (projects_dir / name / "project.json").is_file()
+    ]
+    return {
+        "library_dir": str(folder),
+        "projects_on_disk": len(with_project_file),
+        "project_dirs": sorted(with_project_file),
+        "catalog_present": (folder / "catalog.json").is_file(),
+    }
+
+
 def status() -> dict:
     root = git_root()
     branch = None
     revision = None
     remote_url = "https://github.com/Raheelatta1984/testforge"
     dirty = False
-    if root is not None:
+    git_state = "ok"
+    git_error = None
+    if root is None:
+        git_state = "no-checkout"
+        git_error = (
+            "No .git directory at or above the library folder. A container image "
+            "built from app/ only has no checkout, so there is no branch to "
+            "publish to; the library is served from local files."
+        )
+    else:
         try:
             branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root)
             revision = _run_git(["rev-parse", "--short", "HEAD"], root)
@@ -1286,8 +1426,11 @@ def status() -> dict:
             porcelain = _run_git(["status", "--porcelain", "--", relative], root)
             dirty = bool(porcelain.strip())
         except PublishError as exc:
+            git_state = "unavailable"
+            git_error = str(exc)
             logger.info("LIBRARY STATUS %s", exc)
     projects = []
+    projects_error = None
     try:
         for project in list_projects():
             recordings = []
@@ -1307,7 +1450,21 @@ def status() -> dict:
                 "recordings": recordings,
             })
     except LibraryError as exc:
+        projects_error = str(exc)
         logger.info("LIBRARY LIST %s", exc)
+    disk = _library_disk_report()
+    if projects_error:
+        reason = f"Library listing failed: {projects_error}"
+    elif git_state != "ok":
+        reason = git_error
+    elif not projects:
+        reason = (
+            "The library tree is empty. Create a project to add the first one."
+            if disk["projects_on_disk"] == 0
+            else f"{disk['projects_on_disk']} project(s) are on disk but not listed."
+        )
+    else:
+        reason = None
     return {
         "source": "repository",
         "publish_enabled": publish_enabled(),
@@ -1318,6 +1475,13 @@ def status() -> dict:
         "library_path": "library",
         "dirty": dirty,
         "projects": projects,
+        # Diagnostics: the dashboard used to render bare dashes with no cause.
+        "git_state": git_state,
+        "git_error": git_error,
+        "git_available": git_state == "ok",
+        "projects_error": projects_error,
+        "status_reason": reason,
+        **disk,
     }
 
 
