@@ -377,6 +377,13 @@ class LibraryStoreTests(unittest.TestCase):
             try:
                 payload = library_store.create_project("Pushed", "https://example.com")
                 self.assertTrue(payload["published"])
+                self.assertTrue(library_store.remote_library_status()["synced"])
+                mismatch = _env_set(TF_GIT_BRANCH="main")
+                try:
+                    with self.assertRaises(library_store.PublishError):
+                        library_store.publish_pending()
+                finally:
+                    _env_restore(mismatch)
                 clone = tmp / "clone"
                 subprocess.check_call(
                     ["git", "clone", "--branch", "library-test", str(bare), str(clone)],
@@ -393,7 +400,7 @@ class LibraryStoreTests(unittest.TestCase):
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
-    def test_UT_LIB_07_failed_push_does_not_keep_the_project(self):
+    def test_UT_LIB_07_failed_push_keeps_local_project_for_retry(self):
         import shutil
         import subprocess
         import tempfile
@@ -412,11 +419,11 @@ class LibraryStoreTests(unittest.TestCase):
             subprocess.check_call(["git", "remote", "add", "origin", str(tmp / "missing.git")], cwd=repo)
             saved = _env_set(TF_LIBRARY_DIR=str(repo / "library"), TF_LIBRARY_PUBLISH="1")
             try:
-                with self.assertRaises(library_store.PublishError):
-                    library_store.create_project("Nope", "")
-                self.assertEqual(library_store.list_projects(), [])
+                project = library_store.create_project("Nope", "")
+                self.assertFalse(project["published"])
+                self.assertIn(project["id"], [p["id"] for p in library_store.list_projects()])
                 with SessionLocal() as db:
-                    self.assertEqual(db.query(Project).filter_by(name="Nope").count(), 0)
+                    self.assertEqual(db.query(Project).filter_by(name="Nope").count(), 1)
             finally:
                 _env_restore(saved)
         finally:
@@ -483,5 +490,145 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(missing, "IDs missing from tests/SCENARIOS.md: " + ", ".join(missing))
 
 
+
+class WorkflowRegressionTests(unittest.TestCase):
+    """Record/save/edit/export regressions that do not require Chromium."""
+
+    def test_UT_FLOW_01_each_action_keeps_its_order_and_png(self):
+        from app import library_store
+        from app.db import RecordingStep, SessionLocal
+        from app.recorder import RecorderSession
+
+        project = library_store.create_project("Workflow steps", "")
+        rec = library_store.create_recording(project["id"], "steps", "/demo.html")
+        session = RecorderSession(rec["id"], "", 0)
+        async def exercise():
+            first = await session._record("click", selector={"x": 1, "y": 2}, label="click")
+            second = await session._record("click", selector={"x": 1, "y": 2}, label="click")
+            self.assertEqual([first["order"], second["order"]], [1, 2])
+            self.assertNotEqual(first["id"], second["id"])
+            await session._attach_image(second, b"\x89PNG\r\n\x1a\n")
+            await session.stop()
+        asyncio.run(exercise())
+        exported = library_store.export_recording(rec["id"])
+        self.assertEqual([step["order"] for step in exported["steps"]], [1, 2])
+        self.assertEqual(exported["steps"][1]["screenshot"], "step-002.png")
+        with SessionLocal() as db:
+            self.assertEqual(db.query(RecordingStep).filter_by(recording_id=rec["id"]).count(), 2)
+
+    def test_UT_FLOW_02_stop_without_session_and_edit_with_screenshot(self):
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+        from app.db import RecordingStep, SessionLocal
+        project = library_store.create_project("Edit steps", "")
+        rec = library_store.create_recording(project["id"], "edit", "/demo.html")
+        with SessionLocal() as db:
+            row = RecordingStep(recording_id=rec["id"], order=1, action="type", value="before", label="Before")
+            db.add(row); db.commit(); db.refresh(row)
+            step_id = row.id
+        with TestClient(app) as client:
+            response = client.post(f"/api/recordings/{rec['id']}/stop")
+            self.assertEqual(response.status_code, 200)
+            self.assertTrue(response.json()["ok"])
+            response = client.patch(f"/api/recordings/{rec['id']}/steps/{step_id}", json={"value": "{{user}}", "label": "After"})
+            self.assertEqual(response.status_code, 200)
+            response = client.get(f"/api/recordings/{rec['id']}")
+            self.assertEqual(response.json()["steps"][0]["value"], "{{user}}")
+            self.assertEqual(client.get(f"/api/recordings/{rec['id']}/steps/{step_id}/screenshot").status_code, 404)
+            self.assertEqual(client.get("/api/runs/queue/status").json()["pending"], 0)
+
+    def test_UT_FLOW_03_export_templates_and_formula_safety(self):
+        from app import library_store
+        from openpyxl import load_workbook
+        project = library_store.create_project("Exports", "")
+        rec = library_store.create_recording(project["id"], "Export", "/demo.html")
+        from app.db import RecordingStep, SessionLocal
+        with SessionLocal() as db:
+            db.add(RecordingStep(recording_id=rec["id"], order=1, action="type", value="=1+2", label="Formula"))
+            db.commit()
+        library_store.export_recording(rec["id"])
+        folder = Path(os.environ["TF_LIBRARY_DIR"]) / "projects" / project["id"] / "recordings" / rec["id"] / "resources"
+        for name in ("Jenkinsfile", "playwright_test.py", "playwright_test.js", "recording.feature", "azure-devops.csv", "azure-devops.xlsx", "jira.csv", "jira.xlsx", "testcomplete.csv", "testcomplete.xlsx"):
+            self.assertTrue((folder / name).is_file(), name)
+        sheet = load_workbook(folder / "azure-devops.xlsx").active
+        self.assertEqual(sheet["D2"].value, "'=1+2")
+        import py_compile
+        py_compile.compile(str(folder / "playwright_test.py"), doraise=True)
+
+    def test_UT_FLOW_04_variable_capture_and_replay_value(self):
+        from app import library_store
+        from app.db import SessionLocal, resolve_variables
+        from app.recorder import RecorderSession
+        project = library_store.create_project("Vars replay", "")
+        rec = library_store.create_recording(project["id"], "vars", "/demo.html")
+        library_store.create_variable(project["id"], "user", "actual-value")
+
+        class Keyboard:
+            def __init__(self): self.typed = []
+            async def type(self, text, delay=0): self.typed.append(text)
+        class Page:
+            def __init__(self): self.keyboard = Keyboard(); self.url = "/demo.html"
+            async def evaluate(self, script): return {"selector": "#user", "tag": "input"}
+            async def screenshot(self, **kwargs): return b"\x89PNG\r\n\x1a\n"
+        class Preview:
+            def __init__(self): self.lock = asyncio.Lock()
+            def touch(self): pass
+            async def stop(self): pass
+        session = RecorderSession(rec["id"], "", 0)
+        session.page = Page(); session.preview = Preview(); session._ready.set()
+        async def exercise():
+            step = await session.handle_input({"type": "text", "text": "{{user}}"})
+            self.assertEqual(session.page.keyboard.typed, ["actual-value"])
+            self.assertEqual(step["value"], "{{user}}")
+            await session.stop()
+        asyncio.run(exercise())
+        with SessionLocal() as db:
+            self.assertEqual(resolve_variables(db, project["id"])["user"], "actual-value")
+
+    def test_UT_FLOW_05_capture_new_and_existing_variable(self):
+        from app import library_store
+        from app.db import SessionLocal, RecordingStep, resolve_variables
+        from app.recorder import RecorderSession
+        project = library_store.create_project("Captured variables", "")
+        rec = library_store.create_recording(project["id"], "capture", "/demo.html")
+
+        class Page:
+            url = "/demo.html"
+            current = "alpha"
+            async def evaluate(self, script):
+                return self.current if "document.activeElement.value" in script else {"selector": "#input"}
+            async def screenshot(self, **kwargs): return b"\x89PNG\r\n\x1a\n"
+        class Preview:
+            def __init__(self): self.lock = asyncio.Lock()
+            def touch(self): pass
+            async def stop(self): pass
+        session = RecorderSession(rec["id"], "", 0)
+        session.page = Page(); session.preview = Preview(); session._ready.set()
+        async def exercise():
+            await session._record("click", selector={"primary": "#input"}, label="Select input")
+            await session.handle_input({"type": "save_variable", "name": "captured", "existing": False})
+            session.page.current = "beta"
+            await session.handle_input({"type": "save_variable", "name": "captured", "existing": True})
+            await session.stop()
+        asyncio.run(exercise())
+        with SessionLocal() as db:
+            self.assertEqual(resolve_variables(db, project["id"])["captured"], "beta")
+            self.assertEqual([s.order for s in db.query(RecordingStep).filter_by(recording_id=rec["id"]).order_by(RecordingStep.order)], [1, 2, 3])
+
+    def test_UT_FLOW_06_compact_png_preserves_format_and_never_grows(self):
+        import io
+        from PIL import Image
+        from app.images import compact_png
+        image = Image.new("RGB", (128, 128), "#19405c")
+        buffer = io.BytesIO()
+        image.save(buffer, format="PNG")
+        original = buffer.getvalue()
+        smaller = compact_png(original)
+        self.assertTrue(smaller.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertLessEqual(len(smaller), len(original))
+        self.assertEqual(Image.open(io.BytesIO(smaller)).size, (128, 128))
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()

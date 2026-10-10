@@ -1,9 +1,9 @@
-"""GitHub-backed library with caching, compression, and main-branch push.
+"""GitHub-backed library with caching and verified current-branch publication.
 
 Projects, variables, recordings, and the files a recording depends on live
 under ``library/`` in this repository. The dashboard reads that tree, not
 leftover database rows. A new project or recording is written here and, unless
-publishing is turned off, committed and pushed to main branch immediately.
+publishing is turned off, committed and pushed to the checked-out branch when possible.
 
 ``TF_LIBRARY_DIR`` relocates the tree (the harness uses a copy).
 ``TF_LIBRARY_PUBLISH=0`` writes the files but does not commit or push.
@@ -11,8 +11,8 @@ publishing is turned off, committed and pushed to main branch immediately.
 Performance improvements:
 - catalog.json fast path for project listing
 - in-memory cache with TTL and mtime checks
-- compressed step handling for repeated actions
-- immediate push to main with merge handling
+- individual steps remain editable
+- verified push to the checked-out branch, with a one-minute retry in the API
 """
 
 from __future__ import annotations
@@ -763,8 +763,8 @@ def _write_recording_files(recording_id: str) -> dict:
             raise NotFound("Recording not found")
         project_id = recording.project_id
         raw_steps = _steps_from_db(recording)
-        # Compress steps to deduplicate repeated actions
-        compressed = compress_steps(raw_steps)
+        # Preserve each editable step and its original execution sequence.
+        compressed = raw_steps
         data = {
             "id": recording.id,
             "project_id": project_id,
@@ -793,10 +793,11 @@ def _write_recording_files(recording_id: str) -> dict:
         if source.is_file() and source.parent != resources:
             (resources / name).write_bytes(source.read_bytes())
             step["screenshot"] = name
-    for leftover in resources.glob("step-*.jpg"):
+    for leftover in list(resources.glob("step-*.jpg")) + list(resources.glob("step-*.png")):
         if leftover.name not in referenced:
             leftover.unlink()
-    (resources / "Jenkinsfile").write_text(jenkins_script(data["steps"]), encoding="utf-8")
+    from app.export_formats import write_exports
+    write_exports(resources, data)
     _dump(folder / "recording.json", data)
     data["resources"] = _resource_names(project_id, recording_id)
     # Invalidate cache
@@ -822,188 +823,62 @@ def _discard_project(project_id: str) -> None:
     _CACHE["variables"].pop(project_id, None)
 
 
-def _publish_to_main(message: str) -> bool:
-    """Publish library changes immediately to main branch only, with merge handling.
+def _publish_current_branch(message: str) -> bool:
+    """Publish only the checked-out branch; never merge/rebase or touch main.
 
-    Implements requirements 6 and 9:
-    - push immediately with description
-    - only main branch (but also pushes to current for test compat)
-    - push if difference with main, merge if required
+    A successful push is verified against the remote ref before it is reported.
+    Failed pushes retain the local commit for the next retry.
     """
     if not publish_enabled():
         return False
     root = git_root()
     if root is None:
-        raise PublishError("Library directory is not inside a git checkout, so it cannot be pushed")
+        raise PublishError("Library is not inside a git checkout")
     remote = os.environ.get("TF_GIT_REMOTE", "origin")
-    target_branch = os.environ.get("TF_GIT_BRANCH", "main")
-
-    current_branch = None
-    try:
-        current_branch = _run_git(["rev-parse", "--abbrev-ref", "HEAD"], root)
-        if current_branch == "HEAD":
-            current_branch = None
-    except PublishError:
-        current_branch = None
-
-    try:
-        _run_git(["remote", "get-url", remote], root)
-    except PublishError:
-        raise PublishError(f"Git remote '{remote}' not found, cannot push to {target_branch}")
-
+    branch = _run_git(["symbolic-ref", "--short", "HEAD"], root)
+    configured = os.environ.get("TF_GIT_BRANCH")
+    if configured and configured != branch:
+        raise PublishError(f"Refusing to publish {branch} to {configured}: branch mismatch")
+    _run_git(["remote", "get-url", remote], root)
     relative = Path(os.path.relpath(library_dir().resolve(), root.resolve())).as_posix()
     _run_git(["add", "--", relative], root)
+    staged = subprocess.run(["git", "diff", "--cached", "--quiet", "--", relative], cwd=root)
+    if staged.returncode == 1:
+        _run_git(["commit", "-m", message, "--", relative], root)
+    elif staged.returncode != 0:
+        raise PublishError("Unable to inspect staged library changes")
+    head = _run_git(["rev-parse", "HEAD"], root)
+    remote_head = _run_git(["ls-remote", "--heads", remote, branch], root, timeout=15).split()
+    if not remote_head or remote_head[0] != head:
+        _run_git(["push", remote, f"HEAD:refs/heads/{branch}"], root, timeout=30)
+        remote_head = _run_git(["ls-remote", "--heads", remote, branch], root, timeout=15).split()
+        if not remote_head or remote_head[0] != head:
+            raise PublishError("Push completed but remote branch did not match local HEAD")
+    return True
 
-    staged_result = subprocess.run(
-        ["git", "diff", "--cached", "--quiet", "--", relative],
-        cwd=root,
-        capture_output=True,
-        text=True,
-    )
-    has_staged = staged_result.returncode == 1
-    if staged_result.returncode not in (0, 1):
-        detail = (staged_result.stderr or staged_result.stdout or "git diff failed").strip().splitlines()
-        raise PublishError(detail[-1][:500] if detail else "git diff failed")
 
-    fetch_ok = True
+def remote_library_status() -> dict:
+    """Read the remote ref, not a possibly stale local tracking branch."""
+    root = git_root()
+    if root is None:
+        return {"synced": False, "error": "No git checkout"}
+    remote = os.environ.get("TF_GIT_REMOTE", "origin")
     try:
-        _run_git(["fetch", remote, target_branch], root, timeout=30)
-    except PublishError as e:
-        logger.info("LIBRARY FETCH %s/%s failed: %s", remote, target_branch, e)
-        fetch_ok = False
-        if current_branch and current_branch != target_branch:
-            try:
-                _run_git(["fetch", remote, current_branch], root, timeout=30)
-                fetch_ok = True
-            except PublishError:
-                pass
-
-    if not has_staged:
-        if fetch_ok:
-            diff_check = subprocess.run(
-                ["git", "diff", "--quiet", f"{remote}/{target_branch}", "--", relative],
-                cwd=root,
-                capture_output=True,
-            )
-            if diff_check.returncode == 0:
-                if current_branch and current_branch != target_branch:
-                    diff_cur = subprocess.run(
-                        ["git", "diff", "--quiet", f"{remote}/{current_branch}", "--", relative],
-                        cwd=root,
-                        capture_output=True,
-                    )
-                    if diff_cur.returncode == 0:
-                        return True
-                else:
-                    return True
-        else:
-            return True
-
-    before = None
-    try:
-        before = _run_git(["rev-parse", "HEAD"], root)
-    except PublishError:
-        before = None
-
-    try:
-        if has_staged:
-            full_message = f"{message} [main] - {datetime.utcnow().isoformat()}Z"
-            _run_git(["commit", "-m", full_message, "--", relative], root)
-            logger.info("LIBRARY COMMITTED %s", full_message)
-
-        def _push_with_merge(branch):
-            try:
-                _run_git(["push", remote, f"HEAD:{branch}"], root, timeout=90)
-                logger.info("LIBRARY PUSHED TO %s/%s %s", remote, branch, message)
-                return True
-            except PublishError as push_err:
-                err_text = str(push_err).lower()
-                if "non-fast-forward" in err_text or "rejected" in err_text or "fetch first" in err_text or "failed to push" in err_text:
-                    logger.info("LIBRARY PUSH REJECTED, attempting merge with %s/%s", remote, branch)
-                    try:
-                        _run_git(["fetch", remote, branch], root, timeout=30)
-                        _run_git(["merge", "--no-edit", f"{remote}/{branch}"], root, timeout=30)
-                        _run_git(["push", remote, f"HEAD:{branch}"], root, timeout=90)
-                        logger.info("LIBRARY PUSHED AFTER MERGE TO %s/%s", remote, branch)
-                        return True
-                    except PublishError:
-                        try:
-                            logger.info("LIBRARY MERGE FAILED, trying rebase for %s", branch)
-                            _run_git(["rebase", f"{remote}/{branch}"], root, timeout=30)
-                            _run_git(["push", remote, f"HEAD:{branch}"], root, timeout=90)
-                            return True
-                        except PublishError as rebase_err:
-                            raise PublishError(f"Push to {branch} failed after merge/rebase: {rebase_err}") from rebase_err
-                else:
-                    raise
-
-        pushed_main = False
-        main_error = None
-        try:
-            pushed_main = _push_with_merge(target_branch)
-        except PublishError as e:
-            main_error = e
-            if current_branch and current_branch != target_branch:
-                logger.info("PUSH TO %s FAILED %s, trying current branch %s", target_branch, e, current_branch)
-            else:
-                if has_staged and before:
-                    try:
-                        _run_git(["reset", "--mixed", before], root)
-                    except:
-                        pass
-                raise
-
-        if current_branch and current_branch != target_branch:
-            try:
-                _run_git(["push", remote, f"HEAD:{current_branch}"], root, timeout=90)
-                logger.info("LIBRARY ALSO PUSHED TO CURRENT %s/%s", remote, current_branch)
-                # If main failed but current succeeded, still consider success for test compat
-                if not pushed_main:
-                    pushed_main = True
-            except PublishError as e:
-                logger.info("PUSH TO CURRENT BRANCH %s FAILED (non-critical): %s", current_branch, e)
-                if not pushed_main:
-                    # Both failed, raise main error
-                    if has_staged and before:
-                        try:
-                            _run_git(["reset", "--mixed", before], root)
-                        except:
-                            pass
-                    if main_error:
-                        raise main_error
-                    raise
-
-        if not pushed_main and main_error:
-            if has_staged and before:
-                try:
-                    _run_git(["reset", "--mixed", before], root)
-                except:
-                    pass
-            raise main_error
-
-        return True
-
-    except PublishError:
-        if before:
-            try:
-                _run_git(["merge", "--abort"], root)
-            except:
-                pass
-            try:
-                _run_git(["rebase", "--abort"], root)
-            except:
-                pass
-            if has_staged:
-                try:
-                    _run_git(["reset", "--mixed", before], root)
-                except:
-                    pass
-        raise
+        branch = _run_git(["symbolic-ref", "--short", "HEAD"], root)
+        local = _run_git(["rev-parse", "HEAD"], root)
+        heads = _run_git(["ls-remote", "--heads", remote, branch], root, timeout=15).split()
+        remote_sha = heads[0] if heads else None
+        relative = Path(os.path.relpath(library_dir().resolve(), root.resolve())).as_posix()
+        dirty = bool(_run_git(["status", "--porcelain", "--", relative], root))
+        return {"branch": branch, "local_sha": local, "remote_sha": remote_sha,
+                "dirty": dirty, "synced": bool(remote_sha == local and not dirty)}
+    except PublishError as exc:
+        return {"synced": False, "error": str(exc)}
 
 
 def _publish_unlocked(message: str) -> bool:
-    """Legacy wrapper now routes to main branch push."""
-    return _publish_to_main(message)
+    """Publish pending library changes on the current branch."""
+    return _publish_current_branch(message)
 
 
 def publish_pending() -> bool:
@@ -1013,7 +888,11 @@ def publish_pending() -> bool:
 
 def _finish(message: str) -> bool:
     _write_catalog()
-    return _publish_unlocked(message)
+    try:
+        return _publish_unlocked(message)
+    except PublishError as exc:
+        logger.warning("LIBRARY SAVED LOCALLY; PUSH PENDING: %s", exc)
+        return False
 
 
 def create_project(name: str, base_url: str) -> dict:
@@ -1066,7 +945,7 @@ def create_recording(project_id: str, name: str, start_url: str, parent_id: str 
                 db.refresh(recording)
                 recording_id = recording.id
             payload = _write_recording_files(recording_id)
-            payload["published"] = _finish(f"Save library recording {name} - Project {project_id} - {start_url}")
+            payload["published"] = _finish(f"Save library recording {name} - Project {project_id}")
             return payload
         except Exception:
             if recording_id:
@@ -1098,7 +977,11 @@ def create_variable(project_id: str, name: str, value: str) -> dict:
     with LOCK:
         if _read_project(project_id) is None:
             raise NotFound("Project not found")
-        _materialize_unlocked()
+        # Do not rehydrate recordings from a lagging export while recording.
+        with SessionLocal() as db:
+            present = db.get(Project, project_id) is not None
+        if not present:
+            _materialize_unlocked()
         variable_id = None
         try:
             with SessionLocal() as db:
@@ -1211,6 +1094,9 @@ def export_recording(recording_id: str, *, publish: bool = False) -> dict | None
         if publish:
             try:
                 payload["published"] = _finish(f"Save library recording {payload['name']} - {payload['id']} - {datetime.utcnow().isoformat()}Z")
+                if not payload["published"]:
+                    payload["publish_error"] = ("Push not verified; saved locally for retry" if publish_enabled()
+                                                else "GitHub publishing is disabled")
             except PublishError as pe:
                 # Even if publish fails, file is saved locally - log and return with published=False
                 logger.warning("PUBLISH FAILED %s %s", recording_id, pe)
@@ -1240,12 +1126,13 @@ def attach_step_image(recording_id: str, order: int, data: bytes) -> str | None:
             if recording is None:
                 return None
             project_id = recording.project_id
-        name = f"step-{int(order):03d}.jpg"
+        name = f"step-{int(order):03d}.png"
         folder = _recording_dir(project_id, recording_id) / "resources"
         folder.mkdir(parents=True, exist_ok=True)
         # Atomic write
         tmp = folder / f"{name}.tmp"
-        tmp.write_bytes(data)
+        from app.images import compact_png
+        tmp.write_bytes(compact_png(data))
         tmp.replace(folder / name)
         return name
 
@@ -1357,7 +1244,11 @@ def _materialize_unlocked() -> None:
                         recording = _read_recording_file(project_id, path.name)
                         if recording is not None:
                             file_recs.add(path.name)
-                            _upsert_recording(db, recording)
+                            import sys
+                            recorder_module = sys.modules.get("app.recorder")
+                            live = recorder_module and recorder_module.get_session(path.name)
+                            if not live:
+                                _upsert_recording(db, recording)
             for recording in list(db.query(Recording).filter_by(project_id=project_id)):
                 if recording.id not in file_recs:
                     db.delete(recording)
@@ -1471,7 +1362,7 @@ def list_all_recordings_fast() -> list[dict]:
     return all_recs
 
 
-def force_push_to_main(message: str = "Force sync library to main") -> bool:
-    """Force push library to main branch immediately if difference exists."""
+def push_current_branch(message: str = "Sync library") -> bool:
+    """Compatibility wrapper: publish the current checked-out branch only."""
     with LOCK:
-        return _publish_to_main(message)
+        return _publish_current_branch(message)
