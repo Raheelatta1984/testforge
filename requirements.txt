@@ -1,11 +1,21 @@
+# Runtime dependencies for the deployed service.
+#
+# Kept deliberately short: this runs on a 512MB instance and every extra package
+# is image size, install time and import cost at boot.
 fastapi==0.115.6
 uvicorn==0.34.0
 sqlalchemy==2.0.36
+# Only imported by SQLAlchemy when DATABASE_URL is a postgres URL, but the hosted
+# deployment uses Neon, so it has to be present.
 psycopg2-binary==2.9.10
 playwright==1.49.1
-anthropic==0.42.0
 python-multipart==0.0.20
+# uvicorn's websocket implementation; the recorder and run streams need it.
 websockets==14.1
-mcp==1.2.0
 openpyxl==3.1.5
 Pillow==11.0.0
+
+# Removed: anthropic, mcp.
+# Their only consumer was app/agent.py, which is not imported anywhere and fails
+# on import (`cannot import name 'Scenario' from 'app.db'`). Re-add both if that
+# module is ever repaired and wired back in.
