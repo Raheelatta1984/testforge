@@ -2,8 +2,10 @@ import uuid
 import re
 from datetime import datetime
 from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, func, Column)
+from sqlalchemy import inspect, text, types as sqltypes
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 from app.config import DATABASE_URL
+from app.errors import redact
 
 engine = create_engine(
     DATABASE_URL, 
@@ -83,12 +85,152 @@ class Run(Base):
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     recording: Mapped["Recording"] = relationship(back_populates="runs")
 
+# Result of the most recent schema check. Exposed by /api/diagnostics so a bad
+# deployment can be diagnosed from the dashboard instead of the server logs.
+SCHEMA_STATUS = {
+    "ready": False,
+    "dialect": None,
+    "error": None,
+    "repairs": [],
+    "tables": {},
+}
+
+
+def _backfill_sql(column, dialect):
+    """SQL literal used to populate a newly added column on rows that already exist.
+
+    Returns None when the column can simply stay NULL.
+    """
+    for source in (column.server_default, column.default):
+        if source is None:
+            continue
+        arg = getattr(source, "arg", None)
+        if arg is None:
+            continue
+        if isinstance(arg, bool):
+            return "true" if arg else "false"
+        if isinstance(arg, (int, float)):
+            return str(arg)
+        if isinstance(arg, str):
+            return "'" + arg.replace("'", "''") + "'"
+    if getattr(column.default, "is_scalar", False) is False and column.default is not None:
+        # Python-side defaults such as `default=list` are not SQL literals.
+        pass
+    if column.nullable:
+        return None
+    column_type = column.type
+    if isinstance(column_type, sqltypes.JSON):
+        return "'{}'"
+    if isinstance(column_type, sqltypes.Boolean):
+        return "false"
+    if isinstance(column_type, (sqltypes.Integer, sqltypes.Numeric)):
+        return "0"
+    if isinstance(column_type, sqltypes.DateTime):
+        return "CURRENT_TIMESTAMP"
+    if isinstance(column_type, (sqltypes.String, sqltypes.Text)):
+        return "''"
+    return None
+
+
+def _add_missing_columns(inspector, connection, table, repairs):
+    """Add columns that the models declare but the existing table does not have.
+
+    `create_all()` only creates missing *tables*, so a database created by an
+    older revision keeps its original columns. A stale `projects` table (no
+    `industry_type`) is exactly what made project creation return HTTP 500.
+    """
+    existing = {column["name"] for column in inspector.get_columns(table.name)}
+    quote = connection.dialect.identifier_preparer.quote
+    for column in table.columns:
+        if column.name in existing:
+            continue
+        try:
+            type_sql = column.type.compile(connection.dialect)
+        except Exception as exc:
+            repairs.append(f"{table.name}.{column.name}: not added ({redact(exc)})")
+            continue
+        connection.execute(
+            text(f"ALTER TABLE {quote(table.name)} ADD COLUMN {quote(column.name)} {type_sql}")
+        )
+        fill = _backfill_sql(column, connection.dialect)
+        if fill is not None:
+            connection.execute(
+                text(
+                    f"UPDATE {quote(table.name)} SET {quote(column.name)} = {fill} "
+                    f"WHERE {quote(column.name)} IS NULL"
+                )
+            )
+        repairs.append(
+            f"{table.name}.{column.name}: added"
+            + (f" (backfilled with {fill})" if fill is not None else "")
+        )
+
+
+def _relax_legacy_columns(inspector, connection, table, repairs):
+    """Make NOT NULL columns that the models no longer know about nullable.
+
+    Older revisions had columns such as `runs.target_id` and `variables.scope`
+    that were NOT NULL. Inserts built from the current models never supply them,
+    so they have to accept NULL or every write to those tables fails.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    model_columns = {column.name for column in table.columns}
+    quote = connection.dialect.identifier_preparer.quote
+    for info in inspector.get_columns(table.name):
+        name = info["name"]
+        if name in model_columns or info.get("nullable", True):
+            continue
+        try:
+            connection.execute(
+                text(f"ALTER TABLE {quote(table.name)} ALTER COLUMN {quote(name)} DROP NOT NULL")
+            )
+            repairs.append(f"{table.name}.{name}: NOT NULL relaxed (legacy column)")
+        except Exception as exc:
+            repairs.append(f"{table.name}.{name}: NOT NULL not relaxed ({redact(exc)})")
+
+
+def _ensure_schema():
+    Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        inspector = inspect(connection)
+        tables_in_db = set(inspector.get_table_names())
+        SCHEMA_STATUS["dialect"] = connection.dialect.name
+        for table in Base.metadata.sorted_tables:
+            if table.name not in tables_in_db:
+                SCHEMA_STATUS["tables"][table.name] = "created"
+                continue
+            _add_missing_columns(inspector, connection, table, SCHEMA_STATUS["repairs"])
+            _relax_legacy_columns(inspector, connection, table, SCHEMA_STATUS["repairs"])
+            SCHEMA_STATUS["tables"][table.name] = "ok"
+
+
 def init_db():
+    """Create missing tables and migrate existing ones to the current schema.
+
+    Never raises: the dashboard stays up and /api/diagnostics reports the
+    problem, which is far easier to debug than an opaque HTTP 500.
+    """
+    SCHEMA_STATUS["repairs"] = []
+    SCHEMA_STATUS["tables"] = {}
+    SCHEMA_STATUS["error"] = None
     try:
-        Base.metadata.create_all(bind=engine)
+        _ensure_schema()
+        SCHEMA_STATUS["ready"] = True
         print("ROG DATABASE INITIALIZED")
-    except Exception as e:
-        print(f"DATABASE FATAL ERROR: {e}")
+        for repair in SCHEMA_STATUS["repairs"]:
+            print(f"SCHEMA REPAIR: {repair}")
+    except Exception as exc:
+        SCHEMA_STATUS["ready"] = False
+        SCHEMA_STATUS["error"] = redact(exc)
+        print(f"DATABASE FATAL ERROR: {SCHEMA_STATUS['error']}")
+    return SCHEMA_STATUS
+
+
+def repair_schema():
+    """Re-run the schema check, e.g. after a write fails because of schema drift."""
+    status = init_db()
+    return status["ready"]
 
 # VARIABLE INTERPOLATION ENGINE
 VAR_REGEX = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")

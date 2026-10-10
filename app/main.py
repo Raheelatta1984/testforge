@@ -1,12 +1,15 @@
 import asyncio, os, io, zipfile, datetime
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Response
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import text
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.config import ARTIFACTS, DEMO_MODE
+from app.errors import redact
 from app.db import (
-    SessionLocal, engine, init_db, Project, Recording, RecordingStep, Variable, Run,
+    SCHEMA_STATUS, SessionLocal, engine, init_db, repair_schema,
+    Project, Recording, RecordingStep, Variable, Run,
 )
 
 # Browser-dependent features are optional at boot so the dashboard and its API
@@ -26,6 +29,22 @@ except Exception as exc:
 app = FastAPI(title="TestForge Titan ERP")
 init_db()
 RUN_STREAMS = {}
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Report unexpected failures as JSON so the dashboard can explain them.
+
+    Without this, Starlette answers with a plain-text "Internal Server Error"
+    and the UI can only show the bare status code. Credentials are stripped
+    before the message leaves the server.
+    """
+    if request.scope.get("type") == "websocket":
+        raise exc
+    return JSONResponse(
+        status_code=500,
+        content={"detail": f"{type(exc).__name__}: {redact(exc)}"},
+    )
 
 async def broadcast_run(run_id, payload):
     if run_id in RUN_STREAMS:
@@ -66,12 +85,80 @@ def create_project(body: dict):
     if len(name) > 200 or len(base_url) > 500:
         raise HTTPException(status_code=422, detail="Project name or application URL is too long")
 
+    try:
+        return _insert_project(name, base_url)
+    except SQLAlchemyError as exc:
+        # A database created by an older revision can be missing columns.
+        # Repair it and try once more before surfacing the failure.
+        try:
+            if repair_schema():
+                return _insert_project(name, base_url)
+        except SQLAlchemyError:
+            pass
+        raise HTTPException(
+            status_code=503,
+            detail=f"Database rejected the project: {redact(exc)}",
+        ) from exc
+
+
+def _insert_project(name: str, base_url: str) -> Project:
     with SessionLocal() as db:
         project = Project(name=name, base_url=base_url)
         db.add(project)
         db.commit()
         db.refresh(project)
         return project
+
+def _probe_project_write():
+    """Try writing a throwaway project inside a transaction that is rolled back."""
+    db = SessionLocal()
+    try:
+        db.add(Project(name="__diagnostics_probe__", base_url=""))
+        db.flush()
+        return {"ok": True}
+    except Exception as exc:
+        return {"ok": False, "error": redact(exc)}
+    finally:
+        db.rollback()
+        db.close()
+
+
+@app.get("/api/diagnostics")
+def diagnostics():
+    """Read-only deployment report: schema state, live columns, and a write probe.
+
+    Used to explain failures such as project creation returning HTTP 500 without
+    needing shell access to the host.
+    """
+    report = {
+        "status": "ok",
+        "revision": os.environ.get("RENDER_GIT_COMMIT", "local"),
+        "schema": dict(SCHEMA_STATUS),
+        "tables": {},
+    }
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+            inspector = inspect(connection)
+            report["database"] = "ok"
+            report["dialect"] = connection.dialect.name
+            for table_name in inspector.get_table_names():
+                report["tables"][table_name] = [
+                    {
+                        "name": column["name"],
+                        "type": str(column["type"]),
+                        "nullable": bool(column.get("nullable", True)),
+                    }
+                    for column in inspector.get_columns(table_name)
+                ]
+    except Exception as exc:
+        report["database"] = f"unavailable: {redact(exc)}"
+        report["status"] = "degraded"
+    report["write_probe"] = _probe_project_write()
+    if not report["write_probe"]["ok"]:
+        report["status"] = "degraded"
+    return report
+
 
 @app.get("/api/variables")
 def get_vars(project_id: str):
