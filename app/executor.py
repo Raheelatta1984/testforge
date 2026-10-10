@@ -4,7 +4,8 @@ Optimized for:
 - Immediate queue processing and display
 - Fast execution on free tier (lower viewport, no video by default for speed)
 - Handling repeat/loop steps (deduplicated recordings)
-- Smooth live preview
+- Smooth live preview, and no preview at all when the window is switched off
+- No frame is rendered unless somebody is watching it
 """
 
 import asyncio
@@ -25,6 +26,22 @@ execution_lock = asyncio.Semaphore(1)
 LIVE_FRAMES = {}
 RUN_QUEUE = []  # for immediate display
 RUN_QUEUE_LOCK = asyncio.Lock()
+
+# Per-step body-text excerpt kept for the run audit and the library scenarios.
+# It is the only per-step work that is not required to replay, so it is the one
+# thing worth switching off when a run must be as cheap as possible.
+RUN_EXCERPT = os.environ.get("TF_RUN_EXCERPT", "1").strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def _persist_shot(directory, name, data):
+    """Palette-compress and write a step screenshot off the replay path."""
+    try:
+        from app.images import compact_png
+
+        optimized = await asyncio.to_thread(compact_png, data)
+        await asyncio.to_thread(Path(os.path.join(directory, name)).write_bytes, optimized)
+    except Exception as exc:
+        logger.warning("RUN SCREENSHOT FAILED %s %s", name, exc)
 
 
 def live_frame(run_id):
@@ -193,7 +210,14 @@ async def _expand_steps_with_repeat(steps):
     return expanded
 
 
-async def execute_run(run_id, on_event, on_frame=None):
+async def execute_run(run_id, on_event, on_frame=None, display_window=True, viewer_count=None):
+    """Replay one recording.
+
+    `display_window=False` skips the live screencast entirely: no preview loop,
+    no frames, no per-frame CPU. `viewer_count` is a callable returning how many
+    clients are watching; while it reports zero the preview renders nothing.
+    """
+    display_window = bool(display_window)
     # Immediate queue display - broadcast queued status right away
     await on_event({"type": "status", "status": "queued", "percent": 0, "message": "Queued, starting immediately..."})
     _save(run_id, status="queued", progress_pct=0, execution_log=[])
@@ -253,9 +277,28 @@ async def execute_run(run_id, on_event, on_frame=None):
                 if asyncio.iscoroutine(result):
                     asyncio.create_task(result)
 
+        def viewers_present() -> bool:
+            if not display_window:
+                return False
+            if viewer_count is None:
+                return True
+            try:
+                return int(viewer_count()) > 0
+            except Exception:
+                return True
+
         # Broadcast running immediately so UI shows window
-        await on_event({"type": "status", "status": "running", "percent": 1, "message": "Browser launching..."})
-        logger.info("RUN START %s steps=%s (expanded from %s)", run_id, len(steps), len(raw_steps))
+        await on_event({
+            "type": "status",
+            "status": "running",
+            "percent": 1,
+            "message": "Browser launching..." if display_window else "Browser launching (live window off)...",
+            "display_window": display_window,
+        })
+        logger.info(
+            "RUN START %s steps=%s (expanded from %s) window=%s",
+            run_id, len(steps), len(raw_steps), display_window,
+        )
 
         try:
             async with async_playwright() as playwright:
@@ -270,7 +313,16 @@ async def execute_run(run_id, on_event, on_frame=None):
                     context_kwargs["record_video_size"] = {"width": min(vw, 640), "height": min(vh, 400)}
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
-                preview = Preview(page, on_jpeg=publish).start()
+                # The Preview always exists so replay and capture share one lock;
+                # its loop only runs when the live window is switched on.
+                preview = Preview(
+                    page,
+                    on_jpeg=publish if display_window else None,
+                    should_capture=viewers_present,
+                )
+                if display_window:
+                    preview.start()
+                shot_tasks = set()
                 video = page.video
                 try:
                     total = len(steps)
@@ -296,19 +348,22 @@ async def execute_run(run_id, on_event, on_frame=None):
                                 else:
                                     await replay_step(page, step, variables)
                                     shot_name = f"step-{index}.png"
-                                    shot_path = os.path.join(run_dir, shot_name)
                                     try:
-                                        from app.images import compact_png
+                                        # The capture must happen now, while the page
+                                        # still shows this step's result. Encoding and
+                                        # writing it does not, so they run detached.
                                         png = await page.screenshot(type="png", animations="disabled")
-                                        optimized = await asyncio.to_thread(compact_png, png)
-                                        await asyncio.to_thread(Path(shot_path).write_bytes, optimized)
+                                        task = asyncio.create_task(_persist_shot(run_dir, shot_name, png))
+                                        shot_tasks.add(task)
+                                        task.add_done_callback(shot_tasks.discard)
                                         entry["screenshot"] = f"/api/runs/screenshot/{run_id}/{shot_name}"
                                     except Exception:
                                         pass
-                                    try:
-                                        entry["excerpt"] = (await page.inner_text("body"))[:300]
-                                    except Exception:
-                                        pass
+                                    if RUN_EXCERPT:
+                                        try:
+                                            entry["excerpt"] = (await page.inner_text("body"))[:300]
+                                        except Exception:
+                                            pass
                                     entry["status"] = "passed"
                                     entry["percent"] = int(index / total * 100)
                         except Exception as exc:
@@ -325,6 +380,10 @@ async def execute_run(run_id, on_event, on_frame=None):
                         await on_event(entry)
                         _save(run_id, progress_pct=entry["percent"], execution_log=list(log_entries))
                 finally:
+                    # Screenshots still being written must land before the browser
+                    # closes, or the audit shows links to files that do not exist.
+                    if shot_tasks:
+                        await asyncio.gather(*list(shot_tasks), return_exceptions=True)
                     await preview.stop()
                     video_path = None
                     try:
@@ -360,5 +419,8 @@ async def execute_run(run_id, on_event, on_frame=None):
         else:
             fields["rog_qa_log"] = f"QA: every recorded step completed in {elapsed:.1f}s."
         _save(run_id, **fields)
-        await on_event({"type": "done", "status": status, "error": error_text, "log": log_entries, "elapsed": elapsed})
+        await on_event({
+            "type": "done", "status": status, "error": error_text, "log": log_entries,
+            "elapsed": elapsed, "display_window": display_window,
+        })
         logger.info("RUN DONE %s status=%s elapsed=%.1fs", run_id, status, elapsed)

@@ -54,6 +54,17 @@ except Exception as exc:
     print(f"LIBRARY LOAD FAILED: {redact(exc)}")
 RUN_STREAMS = {}
 RUN_BUFFERS = {}
+# run_id -> whether that run was queued with the live window on. Bounded, so a
+# long-lived worker does not accumulate one entry per run forever.
+RUN_WINDOWS = {}
+RUN_WINDOWS_MAX = 200
+
+
+def _remember_run_window(run_id: str, display_window: bool) -> None:
+    RUN_WINDOWS[run_id] = display_window
+    if len(RUN_WINDOWS) > RUN_WINDOWS_MAX:
+        for stale in list(RUN_WINDOWS)[:-RUN_WINDOWS_MAX]:
+            RUN_WINDOWS.pop(stale, None)
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
@@ -178,6 +189,7 @@ def _run_dict(run: Run) -> dict:
         "rog_qa_log": run.rog_qa_log,
         "created_at": run.created_at,
         "finished_at": run.finished_at,
+        "display_window": RUN_WINDOWS.get(run.id, True),
     }
 
 
@@ -682,6 +694,22 @@ async def edit_recording_step(rid: str, step_id: str, body: dict):
     return result
 
 
+@app.post("/api/recordings/{rid}/steps/compress")
+async def compress_recording_steps(rid: str):
+    """Collapse repeated steps of an existing recording into one step per action.
+
+    New recordings already merge as they are recorded; this covers recordings
+    saved before that, and lets a user re-collapse after manual edits.
+    """
+    try:
+        result = await asyncio.to_thread(library_store.compress_recording, rid)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+    if not result["published"]:
+        schedule_publish_retry()
+    return result
+
+
 @app.get("/api/recordings/{rid}/resources/{filename}")
 def download_recording_resource(rid: str, filename: str):
     if not _SAFE_NAME.fullmatch(filename) or ".." in filename:
@@ -714,6 +742,9 @@ async def queue_run(body: dict):
     target_id = body.get("target_id") or body.get("recording_id")
     if not target_id:
         raise HTTPException(status_code=422, detail="Recording id is required")
+    # The Runs tab toggle. Off means no live screencast at all: the replay is
+    # identical, only the picture is not produced.
+    display_window = True if body.get("display_window") is None else bool(body.get("display_window"))
     # Fast check
     rec = library_store.get_recording(target_id)
     if rec is None:
@@ -728,9 +759,13 @@ async def queue_run(body: dict):
         db.commit()
         db.refresh(run)
         rid = run.id
+    _remember_run_window(rid, display_window)
 
     # Immediate broadcast of queued status for instant UI feedback (requirement 8)
     await broadcast_run(rid, {"type": "status", "status": "queued", "percent": 0, "message": "Queued - starting immediately"})
+
+    def viewer_count():
+        return len(RUN_STREAMS.get(rid, ()))
 
     async def task_wrapper():
         async def on_frame(data):
@@ -740,7 +775,10 @@ async def queue_run(body: dict):
             await broadcast_run(rid, event)
 
         try:
-            await execute_run_task(rid, on_event, on_frame=on_frame)
+            await execute_run_task(
+                rid, on_event, on_frame=on_frame,
+                display_window=display_window, viewer_count=viewer_count,
+            )
         except Exception as exc:
             from datetime import datetime
             with SessionLocal() as db:
@@ -753,7 +791,12 @@ async def queue_run(body: dict):
             await broadcast_run(rid, {"type": "done", "status": "error", "error": redact(exc)})
 
     asyncio.create_task(task_wrapper())
-    return {"run_id": rid, "status": "queued", "message": "Execution queue started immediately", "display_window": True}
+    return {
+        "run_id": rid,
+        "status": "queued",
+        "message": "Execution queue started immediately",
+        "display_window": display_window,
+    }
 
 
 @app.get("/api/runs")
@@ -814,7 +857,12 @@ def get_live_frame(run_id: str):
         path = os.path.join(ARTIFACTS, "runs", run_id, "live.jpg")
         if os.path.isfile(path):
             return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "no-store", "X-Optimized": "true"})
-        return Response(status_code=204, headers={"X-Status": "waiting-for-frame"})
+        return Response(status_code=204, headers={
+            "Cache-Control": "no-store",
+            # The Runs tab reads this so a switched-off window is not reported as
+            # a stalled browser.
+            "X-Status": "window-disabled" if RUN_WINDOWS.get(run_id) is False else "waiting-for-frame",
+        })
     return Response(content=data, media_type="image/jpeg", headers={"Cache-Control": "no-store", "X-Optimized": "true"})
 
 
@@ -978,7 +1026,11 @@ async def ws_run(ws: WebSocket, run_id: str):
         queue.put_nowait(event)
     # Immediately send queued status so window displays (requirement 8)
     try:
-        await ws.send_json({"type": "status", "status": "queued", "percent": 0, "message": "Connected - execution starting immediately", "display_window": True})
+        await ws.send_json({
+            "type": "status", "status": "queued", "percent": 0,
+            "message": "Connected - execution starting immediately",
+            "display_window": RUN_WINDOWS.get(run_id, True),
+        })
     except:
         pass
     try:
