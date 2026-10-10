@@ -4,16 +4,26 @@ from datetime import datetime
 from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, func, Column)
 from sqlalchemy import inspect, text, types as sqltypes
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy.pool import StaticPool
 from app.config import DATABASE_URL
 from app.errors import redact
 
-engine = create_engine(
-    DATABASE_URL, 
-    pool_pre_ping=True, 
-    pool_size=20, 
-    max_overflow=10,
-    pool_recycle=3600
-)
+# SQLite cannot use a large QueuePool (and the default pool is not safe to share
+# with Playwright tasks on the event-loop thread). Postgres keeps a real pool.
+if DATABASE_URL.startswith("sqlite"):
+    engine = create_engine(
+        DATABASE_URL,
+        connect_args={"check_same_thread": False, "timeout": 30},
+        poolclass=StaticPool,
+    )
+else:
+    engine = create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        pool_size=20,
+        max_overflow=10,
+        pool_recycle=3600,
+    )
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
 def generate_uuid(): return str(uuid.uuid4())
@@ -245,3 +255,7 @@ def apply_variables(text, var_map):
         key = match.group(1)
         return str(var_map.get(key, match.group(0)))
     return VAR_REGEX.sub(replacer, str(text))
+
+
+# Older modules import this name. Keep both so execution can load.
+interpolate = apply_variables

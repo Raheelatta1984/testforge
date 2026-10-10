@@ -14,6 +14,14 @@
   .canvas-window { background: #000; border: 2px solid #1e293b; border-radius: 16px; overflow: hidden; aspect-ratio: 16/10; }
   .progress-bar { height: 100%; background: #6366f1; transition: width 0.4s ease; box-shadow: 0 0 15px #6366f1; }
   .key-btn { background: #1e293b; padding: 8px; border-radius: 6px; font-size: 10px; font-weight: bold; border: 1px solid #334155; }
+  .browser-shell { background: #020617; border: 2px solid #334155; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column; min-height: 240px; }
+  .browser-bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #0f172a; border-bottom: 1px solid #1e293b; }
+  .browser-url { flex: 1; font-size: 11px; color: #cbd5e1; background: #020617; border-radius: 999px; padding: 4px 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dot { width: 8px; height: 8px; border-radius: 99px; display: inline-block; }
+  .dot.red { background: #ef4444; } .dot.yellow { background: #eab308; } .dot.green { background: #22c55e; }
+  .browser-viewport { position: relative; background: #000; min-height: 200px; }
+  .browser-viewport img { width: 100%; height: auto; display: block; cursor: crosshair; user-select: none; -webkit-user-drag: none; }
+  .browser-wait { min-height: 180px; display: flex; align-items: center; justify-content: center; color: #94a3b8; text-align: center; padding: 24px; font-size: 13px; background: #000; }
 </style>
 </head>
 <body>
@@ -83,31 +91,145 @@ function App() {
 function Recorder({ project }) {
   const [recId, setRecId] = useState(null);
   const [frame, setFrame] = useState(null);
-  const [zoom, setZoom] = useState(1);
-  const ws = useRef(null);
+  const [status, setStatus] = useState("");
+  const [error, setError] = useState("");
+  const [steps, setSteps] = useState([]);
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [text, setText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const recRef = useRef(null);
+  const frameUrl = useRef(null);
 
-  if (!project) return e('div', {className:"py-20 text-center text-slate-500 font-bold"}, "SELECT PROJECT TO BEGIN");
+  useEffect(() => {
+    if (!project) return;
+    setUrl(prev => prev || project.base_url || "");
+    setName(prev => prev || ("Session " + new Date().toLocaleString()));
+  }, [project]);
+  useEffect(() => { recRef.current = recId; }, [recId]);
+  useEffect(() => () => {
+    const id = recRef.current;
+    if (id) fetch("/api/recordings/" + id + "/stop", { method: "POST" }).catch(() => {});
+  }, []);
+  useEffect(() => {
+    if (!recId) return undefined;
+    let stop = false;
+    const tick = async () => {
+      if (stop) return;
+      try {
+        const session = await API.get("/api/recordings/" + recId + "/session");
+        if (session.error) { setError(session.error); setStatus("Browser error"); }
+        else if (session.status === "live") setStatus("Browser live");
+        else if (session.status === "starting") setStatus("Launching browser…");
+        const res = await fetch("/api/recordings/" + recId + "/frame?t=" + Date.now());
+        if (res.ok && (res.headers.get("content-type") || "").indexOf("image") !== -1) {
+          const blob = await res.blob();
+          const next = URL.createObjectURL(blob);
+          if (frameUrl.current) URL.revokeObjectURL(frameUrl.current);
+          frameUrl.current = next;
+          setFrame(next);
+          if (!session.error) { setStatus("Browser live"); setError(""); }
+        } else if (res.status !== 204) {
+          let detail = "Browser unavailable (" + res.status + ")";
+          try { const payload = await res.json(); detail = payload.detail || detail; } catch (_) {}
+          setError(detail);
+          setStatus("Browser error");
+        }
+      } catch (err) { setError(err.message); }
+      if (!stop) setTimeout(tick, 400);
+    };
+    tick();
+    return () => { stop = true; };
+  }, [recId]);
 
+  if (!project) return e("div", { className: "py-20 text-center text-slate-500 font-bold" }, "SELECT A PROJECT TO BEGIN");
+
+  const send = async (msg) => {
+    try {
+      const res = await API.post("/api/recordings/" + recId + "/input", msg);
+      if (res.step) setSteps(prev => prev.concat([res.step]));
+      setError("");
+    } catch (err) { setError(err.message); }
+  };
   const start = async () => {
-    const r = await API.post("/api/recordings", { project_id: project.id, name: "ERP_Session", start_url: project.base_url || "https://google.com" });
-    setRecId(r.id);
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    ws.current = new WebSocket(`${proto}://${location.host}/ws/record/${r.id}`);
-    ws.current.onmessage = ev => { const m = JSON.parse(ev.data); if (m.type === "frame") setFrame("data:image/jpeg;base64," + m.data); };
+    setBusy(true); setError("");
+    try {
+      const recording = await API.post("/api/recordings", {
+        project_id: project.id,
+        name: (name || "Session").trim(),
+        start_url: (url || "").trim() || "/demo.html"
+      });
+      setSteps([]); setFrame(null); setStatus("Launching browser…"); setRecId(recording.id);
+      await API.post("/api/recordings/" + recording.id + "/session", {});
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  const stop = async () => {
+    const id = recId;
+    recRef.current = null;
+    setRecId(null); setFrame(null); setStatus("");
+    if (id) { try { await API.post("/api/recordings/" + id + "/stop", {}); } catch (_) {} }
   };
 
-  if (recId) return e('div', { className: "fixed inset-0 bg-slate-950 z-[100] flex flex-col p-2" },
-    e('div', { className: "flex justify-between p-2" }, e('span', {className:"text-xs font-bold text-red-500 animate-pulse"}, "● ROG RECORDING"), e('button', { onClick:()=> { ws.current.send(JSON.stringify({type:"stop"})); setRecId(null); }, className:"bg-red-600 px-4 py-1 rounded font-bold text-xs" }, "SAVE")),
-    e('div', { className: "flex-1 overflow-auto bg-black rounded-2xl relative border-2 border-slate-800" }, frame && e('img', { src: frame, className: "origin-top-left", style: { transform: `scale(${zoom})` }, onClick: (evt) => {
-        const r = evt.target.getBoundingClientRect();
-        ws.current.send(JSON.stringify({ type: "tap", x: Math.round(((evt.clientX - r.left)/zoom / r.width) * 1280), y: Math.round(((evt.clientY - r.top)/zoom / r.height) * 800) }));
-    }})),
-    e('div', { className: "bg-slate-900 p-2 space-y-2 rounded-b-xl" },
-      e('div', { className: "grid grid-cols-4 gap-1" }, ["Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].map(k => e('button', { key: k, className: "key-btn", onClick: () => ws.current.send(JSON.stringify({type:"key", key: k})) }, k))),
-      e('div', { className: "flex gap-2" }, e('input', { className: "flex-1 bg-slate-800 p-2 rounded text-sm", placeholder: "Remote Text Type..." }), e('button', { className: "bg-indigo-600 px-4 rounded" }, "Type"))
+  if (recId) return e("div", { className: "fixed inset-0 bg-slate-950 z-[100] flex flex-col p-2 gap-2" },
+    e("div", { className: "flex justify-between items-center px-1" },
+      e("span", { className: "text-xs font-bold " + (status === "Browser live" ? "text-emerald-400" : "text-red-400") }, status === "Browser live" ? "● BROWSER LIVE" : "● " + (status || "RECORDING")),
+      e("button", { onClick: stop, className: "bg-red-600 px-4 py-1 rounded font-bold text-xs" }, "SAVE")
+    ),
+    error && e("p", { role: "alert", className: "text-sm text-red-300 px-1" }, error),
+    e("div", { className: "browser-shell flex-1 min-h-0" },
+      e("div", { className: "browser-bar" },
+        e("span", { className: "dot red" }), e("span", { className: "dot yellow" }), e("span", { className: "dot green" }),
+        e("span", { className: "browser-url" }, url || "/demo.html")
+      ),
+      e("div", { className: "browser-viewport flex-1 overflow-auto" },
+        frame
+          ? e("img", {
+              src: frame, alt: "Remote browser", draggable: false,
+              onClick: (evt) => {
+                const img = evt.target;
+                const rect = img.getBoundingClientRect();
+                if (!rect.width || !rect.height) return;
+                const x = Math.round((evt.clientX - rect.left) / rect.width * (img.naturalWidth || 1280));
+                const y = Math.round((evt.clientY - rect.top) / rect.height * (img.naturalHeight || 800));
+                send({ type: "tap", x: x, y: y });
+              }
+            })
+          : e("div", { className: "browser-wait" }, error || status || "Starting the remote browser…")
+      )
+    ),
+    steps.length > 0 && e("div", { className: "max-h-16 overflow-y-auto text-[10px] text-slate-400 px-1" },
+      steps.map(step => e("div", { key: step.id || step.order }, step.order + ". " + (step.label || step.action)))
+    ),
+    e("div", { className: "bg-slate-900 p-2 space-y-2 rounded-xl" },
+      e("div", { className: "grid grid-cols-4 gap-1" },
+        ["Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].map(key =>
+          e("button", { key: key, className: "key-btn", onClick: () => send({ type: "key", key: key }) }, key))
+      ),
+      e("div", { className: "flex gap-2" },
+        e("input", {
+          className: "flex-1 bg-slate-800 p-2 rounded text-sm", placeholder: "Type into the focused field…", value: text,
+          onChange: (evt) => setText(evt.target.value),
+          onKeyDown: (evt) => { if (evt.key === "Enter" && text) { send({ type: "text", text: text }); setText(""); } }
+        }),
+        e("button", { className: "bg-indigo-600 px-4 rounded font-bold text-sm", onClick: () => { if (text) { send({ type: "text", text: text }); setText(""); } } }, "Type")
+      )
     )
   );
-  return e('button', { onClick: start, className: "w-full bg-red-600 py-10 rounded-3xl font-bold text-xl shadow-2xl" }, "● START AI RECORDING");
+
+  return e("div", { className: "space-y-4" },
+    e("div", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-3" },
+      e("h2", { className: "font-bold text-lg text-indigo-300" }, "Record in a remote browser"),
+      e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on the server and shows it here. Clicks and typing are saved, then replayed from the library."),
+      e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-name" }, "Recording name"),
+      e("input", { id: "rec-name", value: name, onChange: (evt) => setName(evt.target.value), className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-url" }, "Page to open"),
+      e("input", { id: "rec-url", value: url, onChange: (evt) => setUrl(evt.target.value), placeholder: "Leave blank to open the sample app", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e("button", { type: "button", onClick: () => setUrl("/demo.html"), className: "text-xs text-indigo-300 underline" }, "Use sample app"),
+      e("button", { type: "button", onClick: start, disabled: busy, className: "w-full bg-red-600 disabled:opacity-60 py-4 rounded-2xl font-bold text-lg" }, busy ? "OPENING BROWSER…" : "● START AI RECORDING"),
+      error && e("p", { role: "alert", className: "text-sm text-red-300" }, error)
+    )
+  );
 }
 
 function Runs({ runId, setRunId }) {
@@ -115,47 +237,122 @@ function Runs({ runId, setRunId }) {
   const [activeLog, setActiveLog] = useState([]);
   const [frame, setFrame] = useState(null);
   const [percent, setPercent] = useState(0);
+  const [runStatus, setRunStatus] = useState("");
+  const [runError, setRunError] = useState("");
+  const frameUrl = useRef(null);
 
-  const load = () => API.get("/api/runs").then(setRuns);
+  const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, []);
 
   useEffect(() => {
-    if (runId) {
-      const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/runs/${runId}`);
-      ws.onmessage = ev => {
-        const m = JSON.parse(ev.data);
-        if (m.type === "frame") setFrame("data:image/jpeg;base64," + m.data);
-        if (m.percent !== undefined) setPercent(m.percent);
-        if (m.status) setActiveLog(prev => [...prev.filter(x => x.order !== m.order), m]);
-      };
-      return () => ws.close();
-    }
+    if (!runId) return undefined;
+    setActiveLog([]); setPercent(0); setRunStatus("queued"); setRunError(""); setFrame(null);
+    let stop = false;
+    const ws = new WebSocket((location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + "/ws/runs/" + runId);
+    ws.onmessage = (ev) => {
+      const message = JSON.parse(ev.data);
+      if (message.type === "frame" && message.data) setFrame("data:image/jpeg;base64," + message.data);
+      if (message.percent !== undefined) setPercent(message.percent);
+      if (message.type === "done") {
+        setRunStatus(message.status || "done");
+        if (message.error) setRunError(message.error);
+        load();
+      } else if (message.status && message.order !== undefined) {
+        setActiveLog(prev => prev.filter(item => item.order !== message.order).concat([message]));
+      }
+    };
+    const poll = async () => {
+      if (stop) return;
+      try {
+        const run = await API.get("/api/runs/" + runId);
+        if (run.progress_pct != null) setPercent(run.progress_pct);
+        if (Array.isArray(run.log) && run.log.length) setActiveLog(run.log);
+        if (run.status) setRunStatus(run.status);
+        if (run.rog_monitor_log && run.status && run.status !== "running" && run.status !== "queued") setRunError(run.rog_monitor_log);
+        const img = await fetch("/api/runs/" + runId + "/live.jpg?t=" + Date.now());
+        if (img.ok && (img.headers.get("content-type") || "").indexOf("image") !== -1) {
+          const blob = await img.blob();
+          const next = URL.createObjectURL(blob);
+          if (frameUrl.current && frameUrl.current.indexOf("blob:") === 0) URL.revokeObjectURL(frameUrl.current);
+          frameUrl.current = next;
+          setFrame(next);
+        }
+      } catch (_) {}
+      if (!stop) setTimeout(poll, 700);
+    };
+    poll();
+    return () => { stop = true; ws.close(); };
   }, [runId]);
 
-  return e('div', { className: "space-y-4" },
-    runId && e('div', { className: "bg-slate-900 border-2 border-indigo-500 rounded-3xl p-5 shadow-2xl" },
-      e('div', { className: "flex justify-between font-bold text-xs" }, e('span', {}, "AI EXECUTION PROGRESS"), e('span', {}, `${percent}%`)),
-      e('div', { className: "w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-2" }, e('div', { className: "progress-fill", style: { width: `${percent}%` } })),
-      e('img', { src: frame, className: "w-full rounded-xl bg-black mt-3 border border-slate-800" }),
-      e('div', { className: "max-h-40 overflow-y-auto mt-3 space-y-1" }, activeLog.sort((a,b)=>b.order-a.order).map((s,i) => e('div', {key:i, className:"text-[10px] p-2 bg-slate-950 rounded flex justify-between border border-slate-900"}, e('span',{},s.label), e('span',{},s.status==='passed'?'✅':'⏳'))))
+  return e("div", { className: "space-y-4" },
+    runId && e("div", { className: "bg-slate-900 border-2 border-indigo-500 rounded-3xl p-5 shadow-2xl" },
+      e("div", { className: "flex justify-between font-bold text-xs" },
+        e("span", {}, "EXECUTION"),
+        e("span", {}, (runStatus || "running") + " · " + percent + "%")
+      ),
+      e("div", { className: "w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-2" },
+        e("div", { className: "progress-bar", style: { width: percent + "%" } })
+      ),
+      runError && e("p", { className: "text-xs text-red-300 mt-2" }, runError),
+      frame
+        ? e("img", { src: frame, alt: "Execution browser", className: "w-full rounded-xl bg-black mt-3 border border-slate-800" })
+        : e("div", { className: "browser-wait mt-3 rounded-xl" }, "Waiting for the execution browser…"),
+      e("div", { className: "max-h-40 overflow-y-auto mt-3 space-y-1" },
+        activeLog.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).map((step, i) => e("div", { key: step.order || i, className: "text-[10px] p-2 bg-slate-950 rounded border border-slate-900" },
+          e("div", { className: "flex justify-between gap-2" },
+            e("span", {}, step.label || step.action),
+            e("span", {}, step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏳")
+          ),
+          step.error && e("div", { className: "text-red-300 mt-1" }, step.error)
+        ))
+      )
     ),
-    runs.map(r => e('div', { key: r.id, onClick: () => setRunId(r.id), className: "p-4 bg-slate-900 rounded-2xl border border-slate-800 mb-2" },
-      e('div', {className:"flex justify-between items-center"}, e('span', {className:"font-bold text-indigo-400 text-xs font-mono"}, `RUN #${r.id.slice(0,8)}`), e('span', {className:"text-[10px] uppercase font-bold text-slate-500"}, r.status)),
-      r.rog_monitor_log && e('div', {className:"text-[9px] bg-red-950/20 p-2 mt-2 rounded border border-red-900/30 text-red-200 font-mono"}, r.rog_monitor_log)
+    runs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-6" }, "No runs yet. Record a session, then press RUN in the library."),
+    runs.map(r => e("div", { key: r.id, onClick: () => setRunId(r.id), className: "p-4 bg-slate-900 rounded-2xl border border-slate-800 mb-2 cursor-pointer" },
+      e("div", { className: "flex justify-between items-center" },
+        e("span", { className: "font-bold text-indigo-400 text-xs font-mono" }, "RUN #" + r.id.slice(0, 8)),
+        e("span", { className: "text-[10px] uppercase font-bold text-slate-500" }, r.status + (r.progress_pct ? " " + r.progress_pct + "%" : ""))
+      ),
+      r.rog_monitor_log && e("div", { className: "text-[9px] bg-red-950/20 p-2 mt-2 rounded border border-red-900/30 text-red-200 font-mono" }, r.rog_monitor_log)
     ))
   );
 }
 
 function Library({ project, onRun }) {
   const [recs, setRecs] = useState([]);
-  useEffect(() => { project && API.get(`/api/projects/${project.id}/recordings`).then(setRecs); }, [project]);
-  return e('div', { className: "space-y-4" }, recs.map(r => e('div', { key: r.id, className: "p-5 bg-slate-900 rounded-2xl border border-slate-800 flex justify-between shadow-xl" },
-    e('div', {}, e('div', {className:"font-bold text-indigo-300"}, r.name), e('div', {className:"text-[10px] text-slate-500 font-mono uppercase tracking-tighter"}, `Tree Root: ${r.id.slice(0,8)}`)),
-    e('div', {className:"flex gap-2"},
-      e('a', { href: `/api/recordings/${r.id}/jenkins`, className: "bg-slate-800 p-2 rounded text-[10px]" }, "🥒"),
-      e('button', { onClick: () => onRun(r.id), className: "bg-emerald-600 px-6 py-2 rounded-xl font-bold text-xs" }, "RUN")
-    )
-  )));
+  const [error, setError] = useState("");
+  const [running, setRunning] = useState("");
+  useEffect(() => {
+    if (!project) return;
+    API.get("/api/projects/" + project.id + "/recordings")
+      .then(rows => { setRecs(Array.isArray(rows) ? rows : []); setError(""); })
+      .catch(err => setError(err.message));
+  }, [project]);
+  if (!project) return e("div", { className: "py-20 text-center text-slate-500" }, "SELECT PROJECT FIRST");
+  const run = async (recording) => {
+    setRunning(recording.id); setError("");
+    try {
+      const res = await API.post("/api/runs", { target_id: recording.id });
+      onRun(res.run_id);
+    } catch (err) {
+      setError(err.message);
+      setRunning("");
+    }
+  };
+  return e("div", { className: "space-y-4" },
+    error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),
+    recs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No recordings yet. Open the record tab and capture a session."),
+    recs.map(r => e("div", { key: r.id, className: "p-5 bg-slate-900 rounded-2xl border border-slate-800 flex justify-between shadow-xl gap-3" },
+      e("div", { className: "min-w-0" },
+        e("div", { className: "font-bold text-indigo-300" }, r.name),
+        e("div", { className: "text-[10px] text-slate-500 font-mono truncate" }, (r.step_count || 0) + " steps · " + (r.start_url || ""))
+      ),
+      e("div", { className: "flex gap-2 items-start" },
+        e("a", { href: "/api/recordings/" + r.id + "/jenkins", className: "bg-slate-800 p-2 rounded text-[10px]" }, "J"),
+        e("button", { onClick: () => run(r), disabled: running === r.id, className: "bg-emerald-600 px-6 py-2 rounded-xl font-bold text-xs disabled:opacity-60" }, running === r.id ? "…" : "RUN")
+      )
+    ))
+  );
 }
 
 function Projects({ setActiveProject }) {
@@ -264,8 +461,21 @@ function Comparison() {
 
 function Artifacts() {
   const [runs, setRuns] = useState([]);
-  useEffect(() => { API.get("/api/runs").then(setRuns); }, []);
-  return e('div', { className: "space-y-4" }, runs.filter(r => r.video_path).map(r => e('div', { key: r.id, className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-2xl" }, e('video', { controls: true, className: "w-full rounded-2xl bg-black shadow-inner", src: `/api/runs/video/${r.id}` }))));
+  useEffect(() => { API.get("/api/runs").then(setRuns).catch(() => {}); }, []);
+  const withMedia = runs.filter(r => r.video_path || (r.log || []).some(step => step.screenshot));
+  return e("div", { className: "space-y-4" },
+    withMedia.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No artifacts yet. Run a recording to capture screenshots."),
+    withMedia.map(r => e("div", { key: r.id, className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-2xl space-y-3" },
+      e("div", { className: "text-xs font-bold text-indigo-300" }, "RUN #" + r.id.slice(0, 8) + " · " + r.status),
+      r.video_path && e("video", { controls: true, className: "w-full rounded-2xl bg-black shadow-inner", src: "/api/runs/video/" + r.id }),
+      e("div", { className: "grid grid-cols-2 gap-2" },
+        (r.log || []).filter(step => step.screenshot).map((step, i) => e("div", { key: i },
+          e("div", { className: "text-[9px] text-slate-400 mb-1" }, step.label || step.action),
+          e("img", { src: step.screenshot, alt: step.label || "step", className: "rounded-lg border border-slate-800" })
+        ))
+      )
+    ))
+  );
 }
 
 function Github() {

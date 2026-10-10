@@ -6,6 +6,11 @@
 - **Execution:** Live CDP screencast window in 'Runs' tab with completion % and visual diff potential.
 - **Maintenance:** Reset branch with `git fetch origin && git reset --hard origin/main` to fix sync issues.
 
+## Record and run
+Open a project, then the record tab. Leave the page blank to open the built-in sample app, or enter the application URL. The remote Chromium picture is polled over HTTP (so it still works when a proxy drops websockets). Click the picture to click in the browser, type with the text box, then SAVE. In the library, RUN replays those steps and the Runs tab shows the live browser plus each step.
+
+The server needs Chromium: `playwright install chromium`. Docker already does this. If the browser cannot start, the record screen shows the error instead of a blank canvas.
+
 ## Deployment and manual QA
 - Open `/api/health` on the deployed service to verify the app and database are ready. On Render, the response includes the `RENDER_GIT_COMMIT` revision.
 - Open `/api/diagnostics` when something fails. It reports the database dialect, the schema repairs applied at boot, the live columns of every table, and the result of a test project insert that is rolled back.
