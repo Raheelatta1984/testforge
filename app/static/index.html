@@ -232,7 +232,10 @@ function Recorder({ project }) {
       setSaveNote(result.publish_message || (result.published
         ? `Published to ${result.branch || "the repository"}.`
         : `Saved locally${result.publish_error ? ": " + result.publish_error : ""}.`));
-      setSaveState(result.published ? "published" : (result.retry_scheduled ? "retry" : "local"));
+      // Four ends, not three: a refused push is red and final, not a countdown.
+      setSaveState(result.published ? "published"
+        : result.publish_state === "refused" ? "refused"
+        : (result.retry_scheduled ? "retry" : "local"));
       setError("");
     } catch (err) {
       setError(err.message);
@@ -258,9 +261,11 @@ function Recorder({ project }) {
     error && e("p", { role: "alert", className: "text-sm text-red-300 px-1" }, error),
     saveNote && e("p", { role: "status", className: "text-[11px] px-2 py-1 rounded-lg border " +
       (saveState === "published" ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-200"
+        : saveState === "refused" ? "bg-red-950/40 border-red-800/40 text-red-200"
         : saveState === "retry" ? "bg-amber-950/40 border-amber-800/40 text-amber-200"
         : "bg-slate-950 border-slate-800 text-slate-300") },
-      (saveState === "published" ? "✅ " : saveState === "retry" ? "⏳ " : "💾 ") + saveNote),
+      (saveState === "published" ? "✅ " : saveState === "refused" ? "⛔ "
+        : saveState === "retry" ? "⏳ " : "💾 ") + saveNote),
     e("div", { className: "browser-shell flex-1 min-h-0" },
       e("div", { className: "browser-bar" },
         e("span", { className: "dot red" }), e("span", { className: "dot yellow" }), e("span", { className: "dot green" }),
@@ -1168,6 +1173,18 @@ function Github() {
   const [plan, setPlan] = useState(null);
   const [publishing, setPublishing] = useState(false);
   const [fastInfo, setFastInfo] = useState(null);
+  // Token diagnosis: what GitHub says this token may do, read on demand.
+  const [access, setAccess] = useState(null);
+  const [checking, setChecking] = useState(false);
+  const checkAccess = async (force) => {
+    setChecking(true);
+    try {
+      const result = await API.get("/api/github/access" + (force ? "?force=1" : ""));
+      setAccess(result);
+      setError("");
+    } catch (err) { setError(err.message); }
+    finally { setChecking(false); }
+  };
   const load = () => {
     API.get("/api/library").then(data => { setInfo(data); setError(""); }).catch(err => setError(err.message));
     API.get("/api/library/fast").then(setFastInfo).catch(() => {});
@@ -1257,6 +1274,27 @@ function Github() {
       info.git_state === "no-checkout" && e('p', { className: "mt-2 text-[10px] text-amber-300/70 font-mono" },
         "To enable publishing: set TF_GITHUB_REPO=owner/name and TF_GITHUB_TOKEN (repo scope), or mount a git checkout.")
     ),
+    // A push GitHub refused outright (401/403). Say it was refused, say why, and
+    // say no retry is coming — the old text read "will be retried in 60s" for a
+    // token that can never succeed.
+    info && info.publish_blocked && e('div', { role: "alert", className: "text-[11px] bg-red-950/40 border border-red-800/40 text-red-200 p-3 rounded-xl space-y-1" },
+      e('div', { className: "font-bold" }, "GITHUB REFUSED THE LAST PUSH — NO RETRY IS RUNNING"),
+      info.last_publish_error && e('p', { className: "font-mono break-all" }, info.last_publish_error),
+      info.publish_hint && e('p', { className: "text-red-100" }, info.publish_hint),
+      e('button', { type: "button", onClick: () => checkAccess(true), disabled: checking,
+        className: "mt-1 bg-red-700 disabled:opacity-40 px-3 py-1 rounded-lg font-bold text-[10px]" },
+        checking ? "CHECKING…" : "CHECK TOKEN PERMISSIONS ⚡")),
+    access && e('div', { role: "status", className: "text-[11px] bg-slate-950 border p-3 rounded-xl space-y-1 " +
+      (access.can_write ? "border-emerald-800/40 text-emerald-200" : "border-amber-800/40 text-amber-200") },
+      e('div', { className: "font-bold" }, access.can_write ? "TOKEN CAN PUSH ⚡" : "TOKEN CANNOT PUSH"),
+      e('p', { className: "font-mono" }, `${access.slug}@${access.branch} · ${access.token_label}` +
+        (access.scopes ? ` · scopes: ${access.scopes.join(", ")}` : "") +
+        (access.permissions ? ` · push: ${access.permissions.push ? "yes" : "no"}, pull: ${access.permissions.pull ? "yes" : "no"}` : "")),
+      e('p', {}, access.reason),
+      access.fix && e('p', { className: "text-amber-100" }, access.fix),
+      e('button', { type: "button", onClick: () => checkAccess(true), disabled: checking,
+        className: "mt-1 bg-slate-700 disabled:opacity-40 px-3 py-1 rounded-lg font-bold text-[10px]" },
+        checking ? "CHECKING…" : "RE-CHECK AFTER ROTATING THE TOKEN ⚡")),
     e('div', { className: "space-y-2" },
       projects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center" },
         info && info.projects_error
@@ -1292,7 +1330,11 @@ function Github() {
         className: "bg-emerald-600 disabled:opacity-40 disabled:cursor-not-allowed px-8 py-3 rounded-2xl font-bold" },
         publishing ? "SYNCING…⚡" : "VERIFY / SYNC NOW ⚡"),
       e('button', { type: "button", onClick: preview, disabled: publishing || !(info && info.publish_enabled),
-        className: "bg-slate-700 disabled:opacity-40 px-8 py-3 rounded-2xl font-bold" }, "WHAT WOULD THIS PUBLISH?")
+        className: "bg-slate-700 disabled:opacity-40 px-8 py-3 rounded-2xl font-bold" }, "WHAT WOULD THIS PUBLISH?"),
+      e('button', { type: "button", onClick: () => checkAccess(true), disabled: checking || !(info && info.publish_enabled),
+        title: "Ask GitHub what this token may do to the repository",
+        className: "bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed px-8 py-3 rounded-2xl font-bold" },
+        checking ? "CHECKING…⚡" : "CHECK TOKEN PERMISSIONS ⚡")
     ),
     plan && plan.available && e('div', { className: "text-[10px] font-mono text-slate-400 bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-1" },
       e('div', {}, `${plan.slug || ""}@${plan.branch || ""} · remote ${String(plan.remote_sha || "—").slice(0, 7)} · ${plan.files || 0} local file(s), ${Math.round((plan.bytes || 0) / 1024)}KB`),
@@ -1305,7 +1347,7 @@ function Github() {
     note && e('p', { role: "status", className: "text-xs text-emerald-300" }, note),
     e('p', { className: "text-xs text-slate-500" },
       (info && info.publish_enabled)
-        ? "Every publish is verified by reading the remote branch back. A push that GitHub rejects stays pending and is retried once a minute; the local library is never rolled back."
+        ? "Every publish is verified by reading the remote branch back. A push that fails is retried once a minute; a push GitHub refuses (401/403) is not, because no wait changes the answer — fix the token and publish again. The local library is never rolled back."
         : "Publishing is disabled here, so saves stay on this instance and no retry is scheduled. Configure TF_GITHUB_REPO with TF_GITHUB_TOKEN (or mount a checkout) to enable it.")
   );
 }

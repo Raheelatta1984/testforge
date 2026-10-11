@@ -956,7 +956,13 @@ def _publish_over_api(message: str) -> bool:
     try:
         report = github_api.publish(message, library_dir())
     except github_api.GitHubAPIError as exc:
-        raise PublishError(str(exc)) from exc
+        # Keep the classification the transport worked out: whether this failure
+        # is worth retrying, and the sentence that says how to clear it.
+        error = PublishError(str(exc))
+        error.status = getattr(exc, "status", None)
+        error.hint = getattr(exc, "hint", None)
+        error.permanent = bool(getattr(exc, "permanent", False))
+        raise error from exc
     _LAST_API_PUSH.clear()
     _LAST_API_PUSH.update(report)
     _remember_api_head(report.get("remote_sha") or report.get("local_sha"), report.get("branch"))
@@ -1044,16 +1050,31 @@ def publish_outcome(published: bool, error: str | None = None) -> dict:
     The dashboard used to build this sentence itself and always promised a retry,
     including when publishing was disabled and nothing would ever retry. Every
     caller now returns these fields and the UI prints `publish_message` verbatim.
+
+    Three ends, not two: a push can succeed, fail in a way that a retry can fix,
+    or be *refused* — a 401/403 the token cannot retry its way out of. The third
+    used to be reported as "will be retried in 60s", which is why an expired
+    token looked like a temporary outage.
     """
     mode = publish_mode()
     enabled = mode != "disabled"
-    error = error or last_publish_error()
+    detail = last_publish_detail()
+    given_error = error
+    error = given_error or detail.get("error")
     if error:
         # This string is printed verbatim in the save banner and stored in
         # publish_error. A git or API failure can quote a credentialized remote
         # URL or an Authorization header back at us; scrub it here so no caller
         # has to remember to.
         error = github_api._safe(error)
+    # A refusal is only ever reported for the failure still on record: never for
+    # a save that did publish, and never for a different error a caller passes in
+    # (an old refusal must not relabel an unrelated failure as refused).
+    refused = (
+        bool(detail.get("permanent")) and not published and bool(error)
+        and (given_error is None or given_error == detail.get("error"))
+    )
+    hint = detail.get("hint") if refused else None
     branch = None
     if mode == "checkout":
         root = git_root()
@@ -1077,23 +1098,33 @@ def publish_outcome(published: bool, error: str | None = None) -> dict:
             "is scheduled and no retry will run. " + (publish_disabled_reason() or "")
         ).strip()
         retry = False
+    elif refused:
+        state = "refused"
+        message = (
+            f"Saved locally. The push to {where} was refused ({error}) and no retry "
+            f"will run: {hint}"
+        )
+        retry = False
     else:
         state = "retry-pending"
-        detail = f" ({error})" if error else ""
+        suffix = f" ({error})" if error else ""
         message = (
-            f"Saved locally. The push to {where} did not complete{detail} and will be "
+            f"Saved locally. The push to {where} did not complete{suffix} and will be "
             f"retried in {PUBLISH_RETRY_SECONDS}s."
         )
         retry = True
     return {
         "published": bool(published),
         "publish_error": None if published else (
-            (publish_disabled_reason() if not enabled else error) or "Push not verified"
+            (publish_disabled_reason() if not enabled else (f"{error} {hint}".strip() if refused else error))
+            or "Push not verified"
         ),
         "publish_state": state,
         "publish_mode": mode,
         "publish_enabled": enabled,
         "publish_branch": branch,
+        "publish_hint": hint,
+        "publish_refused": refused,
         "retry_scheduled": retry,
         "retry_in_seconds": PUBLISH_RETRY_SECONDS if retry else None,
         "publish_message": message,
@@ -1108,11 +1139,24 @@ def publish_pending() -> bool:
 # Why the most recent publish attempt did not complete. `_finish` swallows the
 # PublishError on purpose (the local save succeeded), but the dashboard still has
 # to say what went wrong instead of a generic "not verified".
-_LAST_PUBLISH_ERROR: dict[str, Any] = {"error": None}
+#
+# `permanent` is what separates "the network/branch will sort itself out" from
+# "GitHub refused this token". The retry loop reads it and stops, so a refused
+# push costs one attempt instead of one a minute for the life of the process.
+_LAST_PUBLISH_ERROR: dict[str, Any] = {"error": None, "status": None, "hint": None, "permanent": False}
 
 
 def last_publish_error() -> str | None:
     return _LAST_PUBLISH_ERROR.get("error")
+
+
+def last_publish_detail() -> dict:
+    return dict(_LAST_PUBLISH_ERROR)
+
+
+def publish_blocked() -> bool:
+    """True when the last push was refused in a way no retry can clear."""
+    return bool(_LAST_PUBLISH_ERROR.get("permanent"))
 
 
 def _finish(message: str) -> bool:
@@ -1120,10 +1164,30 @@ def _finish(message: str) -> bool:
     try:
         published = _publish_unlocked(message)
     except PublishError as exc:
-        logger.warning("LIBRARY SAVED LOCALLY; PUSH PENDING: %s", exc)
-        _LAST_PUBLISH_ERROR["error"] = str(exc)
+        # The transport already classified an API failure. A `git push` gives us
+        # prose instead of a status code, so recognise the refusal by its wording
+        # — otherwise a checkout with a read-only token retries forever.
+        permanent = bool(getattr(exc, "permanent", False))
+        hint = getattr(exc, "hint", None)
+        if not permanent:
+            git_hint = github_api.classify_git_refusal(str(exc))
+            if git_hint:
+                permanent, hint = True, git_hint
+        logger.warning("LIBRARY SAVED LOCALLY; %s: %s",
+                       "PUSH REFUSED" if permanent else "PUSH PENDING", exc)
+        _LAST_PUBLISH_ERROR.update({
+            "error": str(exc),
+            "status": getattr(exc, "status", None),
+            "hint": hint,
+            "permanent": permanent,
+        })
         return False
-    _LAST_PUBLISH_ERROR["error"] = None if published else "Push completed but the remote branch did not match"
+    _LAST_PUBLISH_ERROR.update({
+        "error": None if published else "Push completed but the remote branch did not match",
+        "status": None,
+        "hint": None,
+        "permanent": False,
+    })
     return published
 
 
@@ -1669,9 +1733,21 @@ def status() -> dict:
     else:
         reason = None
     api_info = github_api.describe()
+    last_error = last_publish_detail()
+    if last_error.get("permanent"):
+        # This outranks the ordinary reason: the library may look perfectly
+        # healthy while nothing can leave the instance.
+        reason = " ".join(part for part in (
+            "The last push was refused, so no retry is running:",
+            last_error.get("error"), last_error.get("hint")) if part)
     return {
         "source": "repository",
         "publish_enabled": publish_enabled(),
+        # The last push failure, and the sentence that clears it, so the GitHub
+        # tab can explain a refusal without another round trip.
+        "last_publish_error": last_error.get("error"),
+        "publish_hint": last_error.get("hint"),
+        "publish_blocked": bool(last_error.get("permanent")),
         # How a save reaches GitHub: "checkout" (git push), "api" (REST commit) or
         # "disabled". The dashboard keys its wording off this, so it can never
         # promise a retry that nothing will perform.

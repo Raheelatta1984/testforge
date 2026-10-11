@@ -37,6 +37,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 DEFAULT_REPO = "Raheelatta1984/testforge"
 DEFAULT_BRANCH = "main"
@@ -76,8 +77,184 @@ def valid_branch(name: str) -> bool:
     return not any(part.startswith(".") or part.endswith(".") for part in name.split("/"))
 
 
+# Statuses that a retry cannot fix once the token is what GitHub is rejecting.
+PERMANENT_STATUSES = frozenset({401, 403})
+
+
 class GitHubAPIError(Exception):
-    """Any failure of the REST publisher, with credentials already removed."""
+    """Any failure of the REST publisher, with credentials already removed.
+
+    ``status``, ``hint`` and ``permanent`` travel with the error because the
+    caller decides what to promise next: a 5xx or a rate-limit 403 is worth
+    retrying, a 401 or a permissions 403 never is, and the dashboard has to say
+    which of the two it is instead of promising a retry that cannot succeed.
+    """
+
+    def __init__(self, message, status: int | None = None, method: str | None = None,
+                 path: str | None = None, hint: str | None = None, permanent: bool | None = None):
+        super().__init__(message)
+        self.status = status
+        self.method = method
+        self.path = path
+        self.hint = hint
+        # A rate-limited 403 is a 403 that a later retry *can* fix, so the status
+        # alone must not decide this.
+        self.permanent = (
+            bool(permanent) if permanent is not None
+            else bool(status in PERMANENT_STATUSES and not is_rate_limited(message))
+        )
+
+    def as_detail(self) -> dict:
+        return {
+            "error": str(self),
+            "status": self.status,
+            "hint": self.hint,
+            "permanent": bool(self.permanent),
+        }
+
+
+# GitHub answers both "you are too fast" and "you may not do this" with 403, so
+# the body is what separates a backoff from a permission problem.
+_RATE_LIMIT_RE = re.compile(r"rate limit|secondary rate|abuse detection", re.I)
+_SSO_RE = re.compile(r"sso|single sign[- ]?on|must be authorized|organization approval|pending approval", re.I)
+
+# The prefixes GitHub actually issues, so the hint can name the right screen
+# instead of describing all of them at once.
+_TOKEN_PREFIXES = (
+    ("github_pat_", "fine-grained", "fine-grained personal access token"),
+    ("ghp_", "classic", "classic personal access token"),
+    ("gho_", "oauth-app", "OAuth app token"),
+    ("ghu_", "app-user", "GitHub App user token"),
+    ("ghs_", "app-installation", "GitHub App installation token"),
+    ("ghr_", "unknown", "refresh token"),
+)
+
+
+def is_rate_limited(message) -> bool:
+    """True when GitHub is asking us to slow down rather than refusing us."""
+    return bool(_RATE_LIMIT_RE.search(str(message or "")))
+
+
+def token_kind(token: str | None = None) -> dict:
+    """Classify the configured token locally, without a network round trip.
+
+    Fine-grained and classic tokens are fixed in different places — repository
+    permissions versus scopes — so the hint the operator gets has to know which
+    one they are holding.
+    """
+    value = (token if token is not None else _token()) or ""
+    for prefix, kind, label in _TOKEN_PREFIXES:
+        if value.startswith(prefix):
+            return {"kind": kind, "label": label, "prefix": prefix, "present": True}
+    return {"kind": "unknown", "label": "unrecognised token format", "prefix": None,
+            "present": bool(value)}
+
+
+def _write_hint(slug: str, kind: str, label: str) -> str:
+    if kind == "fine-grained":
+        return (
+            f"The token is a {label}. GitHub refused a write to {slug}: open the "
+            "token in GitHub → Settings → Developer settings → Personal access "
+            f"tokens → Fine-grained tokens, set Repository access to {slug} and "
+            'give Contents: "Read and write", then redeploy with the new value of '
+            "TF_GITHUB_TOKEN. (Metadata: read is enough; Contents: read-only is "
+            "the usual cause of this exact error.)"
+        )
+    if kind == "classic":
+        return (
+            f"The token is a {label}. GitHub refused a write to {slug}: it needs "
+            "the `repo` scope (full control of private repositories). `public_repo` "
+            "only covers public repositories and no scope at all covers none. "
+            "Regenerate the token with `repo`, then redeploy with the new value of "
+            "TF_GITHUB_TOKEN."
+        )
+    if kind in {"app-installation", "app-user", "oauth-app"}:
+        return (
+            f"The token belongs to a GitHub App ({label}). GitHub refused a write "
+            f'to {slug}: the app needs Contents: "Read and write" permission, it must '
+            "be installed on that repository, and permissions changed on an app take "
+            "effect only after the installation accepts them."
+        )
+    return (
+        f"GitHub refused a write to {slug}: the token needs write access to the "
+        'repository contents. For a fine-grained token grant Contents: "Read and write" '
+        "on this repository; for a classic token grant the `repo` scope. "
+        "Then redeploy with the new value of TF_GITHUB_TOKEN."
+    )
+
+
+# A checkout does not get a status code, it gets git's prose for the same
+# rejections. "Repository not found" is how git reports a 403 on a repository
+# the credential may not see, which is why it belongs in this list.
+_GIT_REFUSAL_RE = re.compile(
+    r"permission to \S+ denied|repository not found|authentication failed|"
+    r"the requested url returned error: 40[13]|could not read (?:username|from remote)|"
+    r"invalid username or password|access denied|permission denied \(publickey\)",
+    re.I,
+)
+
+
+def classify_git_refusal(message) -> str | None:
+    """Recognise a `git push` refusal and say what would clear it.
+
+    The checkout path never sees a status code, only git's wording, so without
+    this a deployment pushing with a read-only token retries once a minute for
+    the life of the process — the same bug the API path had.
+    """
+    text = str(message or "")
+    if not _GIT_REFUSAL_RE.search(text):
+        return None
+    slug = repo_slug() or "the repository"
+    kind = token_kind()
+    return (
+        f"git was refused by GitHub, not by the network: {_write_hint(slug, kind['kind'], kind['label'])} "
+        "For a checkout the credential is the remote URL or the git credential "
+        "helper this deployment runs with, so update that too if the token itself "
+        "is already correct."
+    )
+
+
+def explain(status: int | None, method: str | None, path: str | None, detail: str,
+            slug: str | None = None) -> str | None:
+    """Turn a GitHub rejection into the sentence that tells the operator what to do."""
+    text = str(detail or "")
+    slug = slug or repo_slug() or "the repository"
+    kind = token_kind()
+    writing = str(method or "GET").upper() not in {"GET", "HEAD", "OPTIONS"}
+    if status == 401:
+        return (
+            "GitHub rejected the token itself (401): it is expired, revoked or "
+            'malformed. Generate a new token with Contents: "Read and write" and set '
+            "it as TF_GITHUB_TOKEN."
+        )
+    if status == 403 and is_rate_limited(text):
+        return (
+            "GitHub is rate-limiting this token (403), not refusing it. The retry "
+            "will run once the limit resets; no change is needed."
+        )
+    if status == 403 and _SSO_RE.search(text):
+        return (
+            f"GitHub refused the token for {slug} because it is not authorized for "
+            "single sign-on. Open the token in GitHub → Settings → Developer "
+            "settings and click *Configure SSO* for the organization that owns the "
+            "repository, approve it, then publish again."
+        )
+    if status == 403:
+        if writing:
+            return _write_hint(slug, kind["kind"], kind["label"])
+        return (
+            f"GitHub refused to let this token read {slug} (403). The token cannot "
+            "see the repository at all: for a fine-grained token add it under "
+            "Repository access, for a classic token grant the `repo` scope, and "
+            "check the repository is the one you meant to publish to."
+        )
+    if status == 404:
+        return (
+            f"GitHub reports {slug} as not found for this token (404). Either the "
+            "token cannot see the repository or TF_GITHUB_REPO is misspelled; "
+            "TF_GITHUB_REPO must be owner/name, both visible to this token."
+        )
+    return None
 
 
 def _token() -> str | None:
@@ -223,6 +400,9 @@ class GitHubClient:
         self.branch = ref or info["branch"]
         self.token = token if token is not None else _token()
         self.calls: list[tuple[str, str]] = []
+        # Headers of the last response, lower-cased. `X-OAuth-Scopes` on any
+        # authenticated call is how a classic token reports its scopes.
+        self.response_headers: dict[str, str] = {}
 
     # --- transport ----------------------------------------------------------
     def request(self, method: str, path: str, payload=None, accept: str = "application/vnd.github+json"):
@@ -250,6 +430,10 @@ class GitHubClient:
             with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
                 body = response.read()
                 status = response.status
+                try:
+                    self.response_headers = {str(k).lower(): str(v) for k, v in response.headers.items()}
+                except Exception:
+                    self.response_headers = {}
         except urllib.error.HTTPError as exc:
             detail = ""
             try:
@@ -261,7 +445,15 @@ class GitHubClient:
                 detail = parsed.get("message") or detail
             except Exception:
                 pass
-            raise GitHubAPIError(f"GitHub {exc.code} for {method} {path.split('?')[0]}: {_safe(detail)}") from None
+            # 401/403 carry a hint that names the fix, and `permanent` tells the
+            # retry loop that waiting will not change GitHub's answer.
+            raise GitHubAPIError(
+                f"GitHub {exc.code} for {method} {path.split('?')[0]}: {_safe(detail)}",
+                status=exc.code,
+                method=method,
+                path=path.split("?")[0],
+                hint=explain(exc.code, method, path, detail, self.slug),
+            ) from None
         except urllib.error.URLError as exc:
             raise GitHubAPIError(f"GitHub is unreachable: {_safe(getattr(exc, 'reason', exc))}") from None
         except Exception as exc:  # timeout and friends
@@ -409,6 +601,113 @@ def plan(local: dict[str, dict], remote: dict[str, dict]) -> dict:
     }
 
 
+_ACCESS_TTL = 30.0
+# One cached answer per (repo, branch, token fingerprint). The dashboard can ask
+# often; api.github.com should not hear about it every time.
+_ACCESS_CACHE: dict[str, Any] = {"key": None, "ts": 0.0, "value": None}
+
+
+def access_report(client: GitHubClient | None = None, force: bool = False) -> dict:
+    """Ask GitHub what this token may actually do to the repository.
+
+    ``GET /repos/{owner}/{name}`` answers the question the 403 leaves open: the
+    payload carries a ``permissions`` block (``pull``, ``push``, ``admin``) for
+    the *authenticated* caller, and any response carries ``X-OAuth-Scopes`` for a
+    classic token. Reading that once tells the operator whether the token is
+    missing write access, missing the repository entirely, or rejected outright,
+    instead of them waiting through retry cycles to find out.
+
+    Never raises: an unreachable API or a missing configuration is reported the
+    same way everything else in this module reports it.
+    """
+    info = describe()
+    kind = token_kind()
+    base = {
+        "mode": "api",
+        "slug": info["slug"],
+        "branch": info["branch"],
+        "token_kind": kind["kind"],
+        "token_label": kind["label"],
+        "scopes": None,
+        "permissions": None,
+        "checked": False,
+    }
+    slug = info["slug"]
+    if not info["available"]:
+        return {**base, "state": "unconfigured", "can_read": False, "can_write": False,
+                "reason": info["reason"], "fix": info["reason"]}
+    token = (client.token if client is not None else _token()) or ""
+    cache_key = f"{slug}|{info['branch']}|{hashlib.sha256(token.encode('utf-8')).hexdigest()[:12]}"
+    now = time.time()
+    if not force and _ACCESS_CACHE.get("key") == cache_key and now - float(_ACCESS_CACHE.get("ts") or 0) < _ACCESS_TTL:
+        cached = dict(_ACCESS_CACHE["value"])
+        cached["cached"] = True
+        return cached
+    client = client or GitHubClient()
+    try:
+        _, payload = client.request("GET", f"/repos/{slug}")
+    except GitHubAPIError as exc:
+        report = {**base, "state": "unreachable", "can_read": False, "can_write": False,
+                  "error": _safe(exc), "hint": exc.hint, "permanent": exc.permanent,
+                  "reason": f"Could not read {slug} with this token: {_safe(exc)}",
+                  "fix": exc.hint or "Check the token and the network, then try again."}
+        _ACCESS_CACHE.update({"key": cache_key, "ts": now, "value": {k: v for k, v in report.items() if k != "cached"}})
+        return report
+    payload = payload or {}
+    permissions = payload.get("permissions") or {}
+    raw_scopes = getattr(client, "response_headers", {}).get("x-oauth-scopes") or ""
+    scopes = [item.strip() for item in raw_scopes.split(",") if item.strip()]
+    can_push = bool(permissions.get("push"))
+    can_pull = bool(permissions.get("pull"))
+    write_hint = _write_hint(slug, kind["kind"], kind["label"])
+    if can_push:
+        state = "ok"
+        reason = f"This token can read and write {slug} on {client.branch}."
+        fix = None
+    elif can_pull:
+        state = "read-only"
+        reason = (
+            f"This token can read {slug} but GitHub will not let it write: "
+            "every commit fails with \"Resource not accessible by personal access "
+            "token\" until the permission is granted."
+        )
+        fix = write_hint
+    elif permissions:
+        state = "no-access"
+        reason = f"This token has no access to {slug} at all."
+        fix = write_hint
+    else:
+        # No permissions block (an App token on some endpoints, or a proxy that
+        # strips it): honest uncertainty beats a confident wrong answer.
+        state = "unknown"
+        reason = (
+            f"GitHub did not report permissions for {slug}, so write access could "
+            "not be confirmed. Publishing is still possible; the next push will "
+            "show whether it is allowed."
+        )
+        fix = None
+    report = {
+        **base,
+        "state": state,
+        "checked": True,
+        "private": bool(payload.get("private")),
+        "default_branch": payload.get("default_branch"),
+        "permissions": {
+            "pull": can_pull,
+            "push": can_push,
+            "admin": bool(permissions.get("admin")),
+            "maintain": bool(permissions.get("maintain")),
+        },
+        "scopes": scopes or None,
+        "can_read": can_pull or not permissions,
+        "can_write": can_push,
+        "reason": reason,
+        "fix": fix,
+    }
+    _ACCESS_CACHE.update({"key": cache_key, "ts": now, "value": dict(report)})
+    return report
+
+
 def remote_status(client: GitHubClient | None = None, library_root: Path | None = None) -> dict:
     """Compare the branch with the local library. Never raises: it reports instead."""
     info = describe()
@@ -471,6 +770,10 @@ def remote_status(client: GitHubClient | None = None, library_root: Path | None 
             "slug": client.slug,
             "branch": client.branch,
             "error": _safe(exc),
+            "hint": exc.hint,
+            # A 401/403 will still be a 401/403 in a minute: the retry loop uses
+            # this to stop instead of polling a door that stays locked.
+            "permanent": exc.permanent,
             "reason": f"Could not reach the GitHub API for {client.slug}: {_safe(exc)}",
         }
 

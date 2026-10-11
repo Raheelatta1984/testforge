@@ -27,7 +27,9 @@ A save writes `library/` and then publishes it. Which mechanism runs depends on 
 | `api` | No checkout, but `TF_GITHUB_REPO` (or a `TF_GIT_REMOTE` URL) **and** `TF_GITHUB_TOKEN` are set | Commit the same files through the GitHub REST API — blobs, tree, commit, ref update — then read the branch back. No git binary and no clone needed. |
 | `disabled` | Neither | Files are written locally, nothing is committed, and **no retry is scheduled**. |
 
-Every save response carries `publish_state`, `publish_message`, `retry_scheduled` and `retry_in_seconds`, and the dashboard prints `publish_message` verbatim. A retry is only promised when the retry loop was actually started; with publishing disabled the message says so and names the missing configuration. That wording comes from one function, `library_store.publish_outcome()`, so the record tab, the step editor and the GitHub tab cannot disagree.
+Every save response carries `publish_state`, `publish_message`, `retry_scheduled` and `retry_in_seconds`, and the dashboard prints `publish_message` verbatim. A retry is only promised when the retry loop was actually started; with publishing disabled the message says so and names the missing configuration, and with a push GitHub *refused* (`401`/`403`, or a denied `git push`) the message says refused, gives the fix, and schedules nothing — no wait changes GitHub's answer. A rate-limit `403` is the exception the classification keeps: same status, still retried. That wording comes from one function, `library_store.publish_outcome()`, so the record tab, the step editor and the GitHub tab cannot disagree.
+
+`GET /api/github/access` answers the question behind a refusal: one read of `GET /repos/{owner}/{name}` reports the token's `push`/`pull` permissions (and a classic token's scopes), so `state` is `ok`, `read-only`, `no-access`, `unknown` or `unconfigured` before another save is attempted.
 
 API publishing is opt-in on purpose. A CI runner exports `GITHUB_TOKEN` automatically, and a token alone must not be enough to start committing to a repository nobody named: without `TF_GITHUB_REPO` the mode stays `disabled`. Pushes are bounded by `TF_GITHUB_MAX_FILES`, `TF_GITHUB_MAX_FILE_BYTES` and `TF_GITHUB_MAX_PUSH_BYTES`; anything skipped is listed in the response rather than dropped silently, and credentials are scrubbed from every error message. The pen-test scenarios (`UT-SEC-*` in `tests/SCENARIOS.md`) attack this surface: token exfiltration through responses, error bodies and request paths, and the blast radius of a single push.
 
@@ -114,7 +116,7 @@ The dashboard also stops polling while its tab is hidden.
 | `TF_RUN_LIST_MAX` | `100` | Hard cap on that page size. |
 | `TF_MAX_ZIP_BYTES` | `67108864` | Largest artifact export before it returns 413. |
 | `TF_GITHUB_REPO` | none | `owner/name` to publish to over the API. Required for `publish_mode=api`; there is no built-in default. |
-| `TF_GITHUB_TOKEN` | none | API token with `repo` scope. `GITHUB_TOKEN`/`GH_TOKEN` are also read. |
+| `TF_GITHUB_TOKEN` | none | API token that may write repository contents: a fine-grained token with **Contents: Read and write** on `TF_GITHUB_REPO`, or a classic token with the `repo` scope. `GITHUB_TOKEN`/`GH_TOKEN` are also read. |
 | `TF_GITHUB_BRANCH` | `main` | Branch the API publisher commits to. |
 | `TF_GITHUB_API` | `https://api.github.com` | Override for a proxy or an Enterprise host. |
 | `TF_GITHUB_MAX_FILES` | `400` | Most files in one API push. |
@@ -160,6 +162,26 @@ The server needs Chromium: `playwright install chromium`. Docker already does th
 - Create a project from **Projects**. It is written to `library/` and a push is attempted on the checked-out Git branch. GitHub status verifies the remote SHA; a failed push is not presented as published.
 - Open the **GitHub** tab to see the repository catalog and publish any unpublished library changes. It shows the publish mode (`GIT CHECKOUT`, `GITHUB API` or `LOCAL ONLY`), the branch and revision that mode can actually know, and *Why the panel reads this way* when something is missing. `GET /api/library` returns the same detail as `publish_mode`, `publish_disabled_reason`, `api_publish`, `last_api_push`, `git_state`, `git_note`, `git_error`, `status_reason`, `projects_on_disk` and `library_dir`.
 - Set `TF_GITHUB_REPO` and `TF_GITHUB_TOKEN` on a container deployment to make the GitHub tab publish without a checkout; *WHAT WOULD THIS PUBLISH?* then diffs this instance against the remote branch before anything is committed.
+- **CHECK TOKEN PERMISSIONS** in the GitHub tab asks GitHub what the configured token may do (`GET /api/github/access`, one read of `GET /repos/{owner}/{name}`) and answers *can push* / *read-only* / *cannot see the repository* with the fix for each. Use it after rotating `TF_GITHUB_TOKEN` instead of waiting for the next save.
+
+### When a save says "the push did not complete"
+A save ends in one of four ways, and the message in the record tab says which:
+
+| Message | What it means | What to do |
+| --- | --- | --- |
+| `Published to owner/name@branch` | The push was verified against the remote branch. | Nothing. |
+| `…did not complete (…) and will be retried in 60s` | Transient: network, branch conflict, rate limit. | Nothing; the retry loop is running. |
+| `…was refused (…) and no retry will run` | GitHub rejected the token itself (401/403), or `git push` was denied. No wait will change the answer. | Fix the token (below), then publish again. |
+| `Saved locally. GitHub publishing is disabled…` | No checkout and no API configuration. | Set `TF_GITHUB_REPO` + `TF_GITHUB_TOKEN`, or mount a checkout. |
+
+`403 Resource not accessible by personal access token` on `POST /repos/{owner}/{name}/git/blobs` is the common one, and it is a *permission*, not an outage:
+
+- **Fine-grained token** (`github_pat_…`): open Settings → Developer settings → Personal access tokens → Fine-grained, set *Repository access* to this repository, and give **Contents: Read and write**. *Read and write* is the whole point — Contents: read-only reads fine and refuses every blob upload, which is exactly this error. Metadata: read is enough.
+- **Classic token** (`ghp_…`): it needs the **`repo`** scope. `public_repo` does not cover a private repository, and a token with no scopes covers nothing.
+- **Organization with SSO**: click *Configure SSO* on the token and approve it for the owning organization.
+- **GitHub App / installation token** (`ghs_`/`ghu_`): the app needs Contents: Read and write and must be installed on the repository.
+
+Then redeploy with the new value of `TF_GITHUB_TOKEN` and use **CHECK TOKEN PERMISSIONS** to confirm it before recording again.
 
 ## Database migrations
 `app/db.py` runs an idempotent schema check at startup. It creates missing tables, adds columns that the models declare but an older table lacks (backfilling existing rows), and relaxes `NOT NULL` on legacy columns the models no longer write. `create_all()` alone only creates missing tables, so a database created by an older revision keeps its original columns and every write to it fails until this migration runs.
