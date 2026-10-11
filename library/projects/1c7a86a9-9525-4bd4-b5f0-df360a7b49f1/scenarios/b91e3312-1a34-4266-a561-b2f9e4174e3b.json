@@ -1,0 +1,26 @@
+{
+  "id": "b91e3312-1a34-4266-a561-b2f9e4174e3b",
+  "name": "Extranet logon",
+  "plans": [
+    {
+      "entries": [
+        {
+          "id": "66384316-7860-44dd-87d0-2cd9e4a8444d",
+          "name": "Session 11/10/2026, 16:18:15",
+          "recording_id": "84337431-35b8-42c1-8141-ab01fde2591e",
+          "variables": {}
+        },
+        {
+          "id": "d9d05ab2-b4a3-4a12-b12a-c0532a9668ca",
+          "name": "Session 11/10/2026, 14:42:14",
+          "recording_id": "5c86e5ce-1c83-4894-8aa4-b77e1d2b737b",
+          "variables": {}
+        }
+      ],
+      "id": "eb7e3c27-a397-4fc6-8428-2c028920b6bf",
+      "name": "Execution plan - Extranet"
+    }
+  ],
+  "project_id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
+  "revision": 1
+}
