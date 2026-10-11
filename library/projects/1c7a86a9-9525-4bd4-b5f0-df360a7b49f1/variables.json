@@ -5,5 +5,12 @@
     "is_secret": false,
     "name": "Extranet_pass",
     "value": "3nefDtA9VuBn9XrSUr+n"
+  },
+  {
+    "category": "General",
+    "id": "5e2b3602-65e2-4b72-9d30-3b96f73454e0",
+    "is_secret": false,
+    "name": "Extranet_pass",
+    "value": "3nefDtA9VuBn9XrSUr+n"
   }
 ]
