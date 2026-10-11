@@ -17,6 +17,6 @@ We'll help you set up ano",,"{""primary"": ""#lightbox"", ""x"": 640, ""y"": 433
 "Session 12/10/2026, 8:22:44 am",14,Click Sort largest to smallest,,"{""primary"": ""#__Descending_GridHeader_Num_label"", ""x"": 465, ""y"": 224, ""text"": ""Sort largest to smallest"", ""tag"": ""span""}",step-014.png
 "Session 12/10/2026, 8:22:44 am",15,Click Order,,"{""primary"": ""#GridHeader_Num_3_0_header > div:nth-of-type(1)"", ""x"": 441, ""y"": 412, ""text"": ""Order"", ""tag"": ""div""}",step-015.png
 "Session 12/10/2026, 8:22:44 am",16,"Click Filter field: Order, operator: is equal to",,"{""primary"": ""#__FilterField_GridHeader_Num_Num_Input_0_0_input"", ""x"": 447, ""y"": 332, ""text"": ""Filter field: Order, operator: is equal to"", ""tag"": ""input""}",step-016.png
-"Session 12/10/2026, 8:22:44 am",17,Type: 91020262,91020262,"{""primary"": ""#__FilterField_GridHeader_Num_Num_Input_0_0_input""}",step-017.png
+"Session 12/10/2026, 8:22:44 am",17,Type: 91020262,{{filterfield_gridheader_num}},"{""primary"": ""#__FilterField_GridHeader_Num_Num_Input_0_0_input""}",step-017.png
 "Session 12/10/2026, 8:22:44 am",18,Click Apply,,"{""primary"": ""#__GridHeader_Num_ApplyFilters_label"", ""x"": 434, ""y"": 370, ""text"": ""Apply"", ""tag"": ""span""}",step-018.png
 "Session 12/10/2026, 8:22:44 am",19,Click 91020262,,"{""primary"": ""#GridHeader_Num_3_0_0_input"", ""x"": 442, ""y"": 448, ""text"": ""91020262"", ""tag"": ""input""}",step-019.png

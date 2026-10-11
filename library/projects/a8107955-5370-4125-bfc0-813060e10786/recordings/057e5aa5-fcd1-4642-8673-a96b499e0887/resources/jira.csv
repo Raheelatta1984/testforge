@@ -17,6 +17,6 @@ We'll help you set up ano",,step-010.png
 "Session 12/10/2026, 8:22:44 am",14,click,Click Sort largest to smallest,,step-014.png
 "Session 12/10/2026, 8:22:44 am",15,click,Click Order,,step-015.png
 "Session 12/10/2026, 8:22:44 am",16,click,"Click Filter field: Order, operator: is equal to",,step-016.png
-"Session 12/10/2026, 8:22:44 am",17,type,Type: 91020262,91020262,step-017.png
+"Session 12/10/2026, 8:22:44 am",17,type,Type: 91020262,{{filterfield_gridheader_num}},step-017.png
 "Session 12/10/2026, 8:22:44 am",18,click,Click Apply,,step-018.png
 "Session 12/10/2026, 8:22:44 am",19,click,Click 91020262,,step-019.png

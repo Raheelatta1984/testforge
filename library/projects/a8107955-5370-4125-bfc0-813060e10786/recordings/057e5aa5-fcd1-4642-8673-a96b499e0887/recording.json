@@ -234,7 +234,7 @@
       "selector": {
         "primary": "#__FilterField_GridHeader_Num_Num_Input_0_0_input"
       },
-      "value": "91020262"
+      "value": "{{filterfield_gridheader_num}}"
     },
     {
       "action": "click",

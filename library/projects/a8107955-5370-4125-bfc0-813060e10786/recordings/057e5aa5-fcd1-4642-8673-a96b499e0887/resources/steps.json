@@ -218,7 +218,7 @@
     "id": "a6c5dd5c-0cd6-46a4-acc3-9e98e56b2727",
     "order": 17,
     "action": "type",
-    "value": "91020262",
+    "value": "{{filterfield_gridheader_num}}",
     "label": "Type: 91020262",
     "selector": {
       "primary": "#__FilterField_GridHeader_Num_Num_Input_0_0_input"
