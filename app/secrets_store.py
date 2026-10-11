@@ -10,16 +10,66 @@ import re
 PREFIX = 'enc:v1:'
 MASK = '[encrypted]'
 
+# Named once so the API error, the health probe and the dashboard banner cannot
+# drift apart and send an operator looking for a variable that does not exist.
+KEY_ENV_VAR = 'TF_VARIABLE_ENCRYPTION_KEYS'
+GENERATE_KEY_COMMAND = (
+    'python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+)
+NOT_CONFIGURED = (
+    f'Encryption is not configured on this server, so encrypted values cannot be saved. '
+    f'Set {KEY_ENV_VAR} in the service environment and restart the service. '
+    f'Generate a key with: {GENERATE_KEY_COMMAND}'
+)
+INVALID_KEYRING = (
+    f'{KEY_ENV_VAR} is set but is not a usable keyring. It must be one or more comma-separated '
+    f'Fernet keys (44-character url-safe base64), newest first, with no quotes or line breaks. '
+    f'Generate a key with: {GENERATE_KEY_COMMAND}'
+)
+
+
+def _keys():
+    return [k.strip() for k in os.environ.get(KEY_ENV_VAR, '').split(',') if k.strip()]
+
 
 def cipher():
     from cryptography.fernet import Fernet, MultiFernet
-    raw = os.environ.get('TF_VARIABLE_ENCRYPTION_KEYS', '')
-    if not raw:
-        raise ValueError('Set TF_VARIABLE_ENCRYPTION_KEYS in the server environment before storing encrypted values')
+    keys = _keys()
+    if not keys:
+        raise ValueError(NOT_CONFIGURED)
     try:
-        return MultiFernet([Fernet(k.strip().encode()) for k in raw.split(',') if k.strip()])
+        return MultiFernet([Fernet(k.encode()) for k in keys])
     except Exception:
-        raise ValueError('Invalid encryption key configuration') from None
+        raise ValueError(INVALID_KEYRING) from None
+
+
+def status():
+    """Non-secret readiness report for the health probe and the dashboard.
+
+    Never returns key material: only whether the keyring loads, and how many
+    keys it holds so a rotation can be confirmed from the outside.
+    """
+    keys = _keys()
+    report = {
+        'variable': KEY_ENV_VAR,
+        'configured': bool(keys),
+        'ready': False,
+        'keys': len(keys),
+        'generate_command': GENERATE_KEY_COMMAND,
+        'reason': None,
+    }
+    try:
+        cipher()
+    except ValueError as exc:
+        report['reason'] = str(exc)
+    except Exception:  # cryptography missing or unimportable on this instance
+        report['reason'] = (
+            f'{KEY_ENV_VAR} could not be loaded on this server; the cryptography package is '
+            f'unavailable. Reinstall requirements.txt, then restart the service.'
+        )
+    else:
+        report['ready'] = True
+    return report
 
 
 def encrypt(value):

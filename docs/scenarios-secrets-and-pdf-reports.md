@@ -28,7 +28,19 @@ Install the pinned requirements and provision a stable Fernet key **outside Git*
 python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())'
 ```
 
-Run that command in your own protected administration environment, then store the result in the hosting platform's secret configuration as `TF_VARIABLE_ENCRYPTION_KEYS`. Do not paste it into a ticket/chat, commit it, bake it into the image, or generate a new key on every restart. Back it up securely: losing it loses access to the encrypted values. Docker Compose forwards this environment variable; Render declares it as an operator-provisioned secret.
+Run that command in your own protected administration environment, then store the result in the hosting platform's secret configuration as `TF_VARIABLE_ENCRYPTION_KEYS`. Do not paste it into a ticket/chat, commit it, bake it into the image, or generate a new key on every restart. Back it up securely: losing it loses access to the encrypted values. Docker Compose forwards this environment variable; Render declares it as an operator-provisioned secret (`sync: false` in `render.yaml`, so the value is **not** carried by the blueprint — fill it in on the service before the first encrypted save).
+
+### Checking whether this instance can encrypt
+
+`GET /api/health` reports readiness under `encryption`, carrying no key material:
+
+```json
+{"variable": "TF_VARIABLE_ENCRYPTION_KEYS", "configured": true, "ready": true, "keys": 2, "reason": null}
+```
+
+`configured` is whether the variable holds anything, `ready` is whether the keyring actually loads, and `keys` is how many keys are in it — enough to confirm a rotation from outside the service. When `ready` is false, `reason` is the same sentence the API returns when a save is refused.
+
+The **Variables** tab reads that report when it opens. While encryption is unavailable it shows the fix (which variable, how to generate a key, where to put it, rotation syntax) and disables **Encrypt at rest** rather than accepting a password into a field that is going to reject it; plaintext variables continue to save normally. Nothing is auto-generated: a key invented at boot would change on the next deploy and permanently strand every value sealed with the old one. After setting the variable, restart the service and press **RE-CHECK ENCRYPTION**.
 
 Encrypted values use authenticated Fernet envelopes (`enc:v1:...`) in the database, repository variable files, recording/link defaults, and queued input snapshots. Public variable responses omit the value; default maps return `[encrypted]`. Preserve that sentinel to keep an existing default. A password replacement is sealed before storage. A missing/wrong key fails closed. API flags must be booleans, not strings such as `"true"`.
 

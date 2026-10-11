@@ -1,6 +1,7 @@
 # TestForge AI Tracking
 - **Database:** Permanently stored in Neon PostgreSQL / SQLite (Configured in config.py).
-- **Architecture:** 10-tab Persistent Dashboard (Optimized for Android 12).
+- **Architecture:** 11-tab Persistent Dashboard (Optimized for Android 12). The bar is icon-only to fit a phone; every tab carries its name as a hover/long-press title and an accessible label.
+- **Demo tab:** the first tab. A guided walkthrough over the built-in sample app and the five synthetic domain fixtures, so recording, replay and evidence can be proved without pointing TestForge at a real application. See below.
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
 - **Local helpers (no paid AI calls):** Browser-dependent voice input, deterministic text cleanup, and recording-variable association tagging. Autonomous AI execution is not connected.
 - **Tree Hierarchy:** Parent Group -> Sub-recording chunk organization.
@@ -181,6 +182,26 @@ Scenarios are documented in `tests/SCENARIOS.md`. Each run writes a timestamped 
 
 No test or harness run ever publishes to GitHub. The API publisher is exercised against a fake transport, and the harness strips `TF_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`, `TF_GITHUB_REPO`, `TF_GITHUB_BRANCH` and `TF_GIT_REMOTE` from the server environment it starts.
 
+## Demo tab
+The **Demo** tab (🧪, first in the bar) is the no-setup route into the product. Everything it shows
+is a static file served by this instance: nothing signs in anywhere, reaches an external site, or
+touches a real account, payment, policy, employee or booking.
+
+1. **Select the sample project** — `TestForge Sample App` ships in `library/projects/qa-sample-app`,
+   points at `/demo.html` and already defines `{{user}} = Ada`. If an instance was started against an
+   empty `TF_LIBRARY_DIR` the tab offers to create it, as an ordinary project save.
+2. **Replay a ready-made test** — `Hello literal` types a fixed name; `Hello variable` types `{{user}}`,
+   which demonstrates substitution at replay time. RUN queues the recording and jumps to **Runs**.
+3. **Record your own** — shortcuts into the Record and Library tabs. A blank URL in Record opens
+   `/demo.html` on the server browser.
+4. **Check the evidence** — shortcuts into Runs and Artifacts.
+
+The sample app and the chosen domain fixture are also embedded in the tab, rendered by *your* browser
+so you can see what the steps do. That costs the service nothing: no server-side browser, no
+screencast and no run budget. The five synthetic packs (commerce, banking, insurance, HRMS, travel)
+are listed with their positive/negative dataset rows; saving one as a real test is still the explicit
+**Library → UPLOAD TEST SCRIPTS → synthetic domain pack** path, which tests before it publishes.
+
 ## Record and run
 Open a project, then the record tab. Leave the page blank to open the built-in sample app, or enter the application URL. The remote Chromium picture is polled over HTTP (so it still works when a proxy drops websockets). Click the picture to click in the browser, type with the text box, then SAVE. In the library, RUN replays those steps and the Runs tab shows the live browser plus each step.
 
@@ -236,6 +257,16 @@ session. Review per-recording inputs before execution; project variables and
 parameters remain persistent. Password fields support authenticated encryption at
 rest with an operator-provisioned key. Completed single and batch runs offer cached
 PDFs from the same low-quality JPEG captured once per step.
+
+**Encryption is operator-provisioned and the dashboard says so up front.** `TF_VARIABLE_ENCRYPTION_KEYS`
+must hold a Fernet keyring before an encrypted value can be saved; `render.yaml` declares it
+`sync: false`, so a new Render service starts without one. `GET /api/health` reports
+`encryption: {configured, ready, keys, reason}` — no key material — and the **Variables** tab reads
+that when it opens: while the keyring is missing or unusable it prints which variable to set, the
+command that generates a key, where to put it and the `new,old` rotation syntax, and it disables
+**Encrypt at rest** instead of taking a password into a field that will reject it. Plaintext
+variables keep saving normally. Nothing is generated automatically — a key invented at boot would
+change on the next deploy and permanently strand every value sealed with the old one.
 
 PDFs can be uploaded as GitHub release assets with 48-hour retention and oldest-first
 hourly maintenance; only summaries/links enter Git. Remote publication is opt-in,

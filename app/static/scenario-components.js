@@ -10,27 +10,79 @@ function InputFields({definitions=[], defaults={}, values={}, onChange}) {
           placeholder:secret?'Stored encrypted value is retained unless replaced':'Value',onChange:ev=>{const next={...values}; if(secret && !ev.target.value) delete next[name]; else next[name]=ev.target.value; onChange(next);}}));}));
 }
 
+// Encryption is operator-provisioned on purpose: a key invented at boot would
+// change on the next deploy and silently strand every value sealed with the old
+// one. So the dashboard cannot fix this itself - it can only say exactly what to
+// set, where, and how to produce a valid key.
+function EncryptionNotice({status,onRecheck,busy}) {
+  const [copied,setCopied]=useState('');
+  if(!status || status.ready) return null;
+  const variable=status.variable||'TF_VARIABLE_ENCRYPTION_KEYS';
+  const command=status.generate_command||'';
+  return e('div',{role:'alert',className:'border border-amber-500/60 bg-amber-950/40 rounded-xl p-4 space-y-2'},
+    e('p',{className:'text-xs font-bold text-amber-300'},status.configured
+      ? `⚠ ${variable} is set on this server but is not a usable keyring`
+      : '⚠ Encryption is not configured on this server'),
+    e('p',{className:'text-xs text-amber-100'},
+      `Plaintext variables still save normally. "Encrypt at rest" stays unavailable until ${variable} holds a valid Fernet keyring. No key is generated for you: one invented at boot would change on the next deploy and make every previously encrypted value permanently unreadable.`),
+    e('ol',{className:'text-xs text-amber-100 list-decimal ml-4 space-y-1'},
+      e('li',{},'Generate a key in your own administration environment — never in a ticket, chat or commit:'),
+      command && e('li',{className:'list-none -ml-4 flex items-center gap-2'},
+        e('code',{className:'flex-1 block bg-slate-950 border border-slate-700 rounded p-2 text-[10px] break-all'},command),
+        e('button',{type:'button',className:'key-btn shrink-0',onClick:async()=>{
+          try{await navigator.clipboard.writeText(command);setCopied('Command copied.');}
+          catch(_){setCopied('Clipboard blocked by the browser; select the text above instead.');}
+        }},'COPY')),
+      e('li',{},`Store it as ${variable} in the hosting platform's secret configuration — on Render: your service → Environment → the ${variable} entry, which ships as an operator-supplied secret. Docker Compose forwards the same name.`),
+      e('li',{},'Restart the service so the new environment is read, then re-check below.')),
+    e('p',{className:'text-xs text-amber-200'},
+      `Back the key up somewhere durable: losing it loses every value encrypted with it. To rotate, list the new key first and keep the old one — ${variable}=new,old — so existing values still decrypt.`),
+    status.reason && e('p',{className:'text-[10px] text-amber-400/80 break-words'},`Server reports: ${status.reason}`),
+    e('button',{type:'button',className:'key-btn',disabled:busy,onClick:onRecheck},busy?'CHECKING…':'RE-CHECK ENCRYPTION'),
+    copied && e('p',{role:'status',className:'text-[10px] text-amber-300'},copied));
+}
+
 function SecureVariables({project}) {
   const [rows,setRows]=useState([]), [edited,setEdited]=useState({}), [name,setName]=useState(''), [value,setValue]=useState('');
   const [secret,setSecret]=useState(false), [category,setCategory]=useState('General'), [notice,setNotice]=useState(''), [busy,setBusy]=useState(false);
+  const [encryption,setEncryption]=useState(null), [checking,setChecking]=useState(false);
   const load=async()=>{if(project) setRows(await API.get(`/api/variables?project_id=${project.id}`));};
+  // One cheap read of the readiness the server already computes, so the tab can
+  // answer "can I tick Encrypt?" before a password is typed into a doomed field.
+  const checkEncryption=async()=>{
+    setChecking(true);
+    try{const health=await API.get('/api/health');setEncryption(health.encryption||null);}
+    catch(_){/* a failed probe must not block plaintext work */}
+    finally{setChecking(false);}
+  };
+  useEffect(()=>{checkEncryption();},[]);
   useEffect(()=>{setEdited({}); load().catch(err=>setNotice(err.message));},[project]);
+  // Status can land after the name field already auto-ticked the box.
+  useEffect(()=>{if(encryption && !encryption.ready) setSecret(false);},[encryption]);
   if(!project) return e('p',{},'SELECT PROJECT FIRST');
-  const work=async(fn)=>{setBusy(true);try{const result=await fn();setNotice(result?.publish_message||'Saved. Persistent values are retained for subsequent executions.');setEdited({});await load();}catch(err){setNotice(err.message);}finally{setBusy(false);}};
+  const sealingReady = !encryption || encryption.ready;   // unknown stays permissive
+  const sealingBlocked = !!encryption && !encryption.ready;
+  const work=async(fn)=>{setBusy(true);try{const result=await fn();setNotice(result?.publish_message||'Saved. Persistent values are retained for subsequent executions.');setEdited({});await load();}catch(err){setNotice(err.message);if(/encryption|keyring|TF_VARIABLE_ENCRYPTION_KEYS/i.test(err.message||'')) checkEncryption();}finally{setBusy(false);}};
   return e('div',{className:'space-y-4'},
     e('h2',{className:'font-bold text-indigo-300'},`${project.name} · Variables & parameters`),
     e('p',{className:'text-xs text-slate-400'},'Use {{name}} in steps. Values are saved only when you press Save. Encrypted values stay masked; the server needs a stable TF_VARIABLE_ENCRYPTION_KEYS key outside Git. Plaintext exists briefly in memory and in the target app during use.'),
-    e('form',{className:'bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2',onSubmit:ev=>{ev.preventDefault();work(async()=>{const result=await API.post('/api/variables',{project_id:project.id,name,value,is_secret:secret,category});setName('');setValue('');return result;});}},
-      e('input',{className:fieldClass,required:true,'aria-label':'Variable name',placeholder:'Name, e.g. password or account',value:name,onChange:ev=>{setName(ev.target.value);setSecret(/password|secret|token/i.test(ev.target.value));}}),
+    e(EncryptionNotice,{status:encryption,onRecheck:checkEncryption,busy:checking}),
+    e('form',{className:'bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2',onSubmit:ev=>{ev.preventDefault();work(async()=>{const result=await API.post('/api/variables',{project_id:project.id,name,value,is_secret:secret&&sealingReady,category});setName('');setValue('');return result;});}},
+      e('input',{className:fieldClass,required:true,'aria-label':'Variable name',placeholder:'Name, e.g. password or account',value:name,onChange:ev=>{setName(ev.target.value);setSecret(sealingReady && /password|secret|token/i.test(ev.target.value));}}),
       e('input',{className:fieldClass,'aria-label':'Variable value',type:secret?'password':'text',autoComplete:'off',placeholder:'Saved value',value,onChange:ev=>setValue(ev.target.value)}),
       e('select',{className:fieldClass,'aria-label':'Input category',value:category,onChange:ev=>setCategory(ev.target.value)},e('option',{value:'General'},'Variable'),e('option',{value:'Parameter'},'Parameter')),
-      e('label',{className:'text-xs flex gap-2'},e('input',{type:'checkbox',checked:secret,onChange:ev=>setSecret(ev.target.checked)}),'Encrypt at rest (password / token)'),
+      e('label',{className:`text-xs flex gap-2 ${sealingBlocked?'text-slate-500':''}`,title:sealingBlocked?`Unavailable until ${encryption.variable} is configured on this server`:''},
+        e('input',{type:'checkbox',checked:secret,disabled:sealingBlocked,onChange:ev=>setSecret(ev.target.checked)}),
+        sealingBlocked?'Encrypt at rest — unavailable until the server keyring is configured (see above)':'Encrypt at rest (password / token)'),
       e('button',{className:'key-btn',disabled:busy},'SAVE INPUT')),
     notice && e('p',{role:'status',className:'text-xs text-amber-300'},notice),
     rows.map(row=>{const changes=edited[row.id]||{}; const sealed=row.is_secret||changes.is_secret; return e('div',{key:row.id,className:'bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2'},
       e('strong',{className:'text-xs'},`{{${row.name}}} · ${row.category}${sealed?' · encrypted':''}`),
       e('input',{className:fieldClass,'aria-label':`Saved ${row.name}`,type:sealed?'password':'text',autoComplete:'off',value:Object.hasOwn(changes,'value')?changes.value:(row.is_secret?'':row.value),placeholder:sealed?'Stored value hidden; leave unchanged to retain':'Saved value',onChange:ev=>setEdited({...edited,[row.id]:{...changes,value:ev.target.value}})}),
-      !row.is_secret && e('label',{className:'text-xs flex gap-2'},e('input',{type:'checkbox',checked:!!changes.is_secret,onChange:ev=>setEdited({...edited,[row.id]:{...changes,is_secret:ev.target.checked}})}),'Encrypt this saved value'),
+      !row.is_secret && e('label',{className:`text-xs flex gap-2 ${sealingBlocked?'text-slate-500':''}`,title:sealingBlocked?`Unavailable until ${encryption.variable} is configured on this server`:''},
+        e('input',{type:'checkbox',checked:!!changes.is_secret,disabled:sealingBlocked,onChange:ev=>setEdited({...edited,[row.id]:{...changes,is_secret:ev.target.checked}})}),
+        sealingBlocked?'Encrypt this saved value — unavailable until the server keyring is configured':'Encrypt this saved value'),
+      row.is_secret && sealingBlocked && e('p',{className:'text-[10px] text-amber-400'},'This value was sealed with a keyring this server cannot load. Restore the original key to read or replace it.'),
       e('button',{className:'key-btn',disabled:busy||!Object.keys(changes).length,onClick:()=>work(()=>API.patch(`/api/variables/${row.id}`,changes))},'SAVE CHANGES'),
       e('button',{className:'key-btn',disabled:busy,onClick:()=>{if(confirm(`Delete ${row.name}?`)) work(()=>API.del(`/api/variables/${row.id}`));}},'DELETE'));}));
 }

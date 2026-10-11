@@ -230,3 +230,64 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn('[redacted]',json.dumps(events))
         with SessionLocal() as db:
             self.assertNotIn(secret[:100],json.dumps(db.get(Run,rid).execution_log))
+
+    def test_UT_SCENE_14_unconfigured_keyring_is_reported_before_a_save_is_attempted(self):
+        """A missing keyring must be discoverable, not only discovered by failing.
+
+        The dashboard disables "Encrypt at rest" from this report, so it has to
+        say which variable to set and how to produce a key - and it must never
+        carry key material itself.
+        """
+        from app import secrets_store
+        live = os.environ['TF_VARIABLE_ENCRYPTION_KEYS']
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': ''}), TestClient(app) as client:
+            report = client.get('/api/health').json()['encryption']
+            self.assertEqual((report['configured'], report['ready'], report['keys']), (False, False, 0))
+            self.assertEqual(report['variable'], 'TF_VARIABLE_ENCRYPTION_KEYS')
+            self.assertIn('Fernet.generate_key()', report['generate_command'])
+            # The save path and the probe must blame the same thing.
+            refused = client.post('/api/variables', json={'project_id': self.pid, 'name': 'password',
+                                                          'value': 'not-allowed', 'is_secret': True})
+            self.assertEqual(refused.status_code, 422)
+            for message in (report['reason'], refused.json()['detail']):
+                self.assertIn('TF_VARIABLE_ENCRYPTION_KEYS', message)
+                self.assertIn('Fernet.generate_key()', message)
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': 'not-a-fernet-key'}):
+            broken = secrets_store.status()
+            self.assertEqual((broken['configured'], broken['ready']), (True, False))
+            self.assertIn('not a usable keyring', broken['reason'])
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': f'{Fernet.generate_key().decode()},{live}'}):
+            rotating = secrets_store.status()
+            self.assertEqual((rotating['configured'], rotating['ready'], rotating['keys']), (True, True, 2))
+            self.assertIsNone(rotating['reason'])
+            self.assertNotIn(live, json.dumps(rotating))
+
+    def test_UT_SCENE_15_demo_tab_is_registered_and_its_fixtures_are_served(self):
+        """The Demo tab must exist in the nav and everything it points at must resolve.
+
+        It is the only route a new user has to recording and replay without a
+        real application, so a stale script tag or a renamed fixture silently
+        removes that route.
+        """
+        static = Path(library_store.__file__).resolve().parent / 'static'
+        dashboard = (static / 'index.html').read_text()
+        self.assertIn('/demo-components.js', dashboard)
+        self.assertIn('["demo","🧪"]', dashboard)
+        self.assertIn('tab === "demo" && e(DemoTab', dashboard)
+        # Every tab needs a hover/assistive name: the bar is icon-only.
+        self.assertIn("title: k.toUpperCase()", dashboard)
+        component = (static / 'demo-components.js').read_text()
+        self.assertIn('function DemoTab', component)
+        for fixture in ('/demo.html', '/domain-demo.html'):
+            self.assertTrue((static / fixture.lstrip('/')).is_file(), fixture)
+            self.assertIn(fixture, component)
+        with TestClient(app) as client:
+            for path in ('/demo-components.js', '/demo.html', '/domain-demo.html'):
+                self.assertEqual(client.get(path).status_code, 200, path)
+            packs = client.get('/api/imports/packs').json()
+            self.assertEqual({p['id'] for p in packs},
+                             {'commerce', 'banking', 'insurance', 'hrms', 'travel'})
+            # The tab prints a one-line blurb per pack; an unexplained pack is a bug.
+            for pack in packs:
+                self.assertIn(f"  {pack['id']}:", component)
+                self.assertEqual(client.get(f"/api/imports/packs/{pack['id']}").status_code, 200)

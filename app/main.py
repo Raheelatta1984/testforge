@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import guardrails, logs_local, run_queue
+from app import guardrails, logs_local, run_queue, secrets_store
 from app.config import ARTIFACTS
 from app.errors import redact
 from app.db import (
@@ -276,6 +276,10 @@ def health():
         "optimized": True,
         "library_publish_enabled": library_store.publish_enabled(),
         "library_publish_mode": library_store.publish_mode(),
+        # Whether an encrypted variable can be saved at all. Reported here so the
+        # Variables tab can say so before the operator types a password into a
+        # field that is going to reject it. Carries no key material.
+        "encryption": secrets_store.status(),
         # Cheap, allocation-free, and it is what Render's health check hits.
         "guardrails": guardrails.report(),
     }

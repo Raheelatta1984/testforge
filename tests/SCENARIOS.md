@@ -282,6 +282,13 @@ for the browser checks; Firefox/WebKit are opt-in paths, not verified claims.
   after a variable definition is deleted; one-session fake replay; PDF caching and
   JPEG passthrough; oldest-first/hourly remote retention discovery; provider
   response contracts; one upload/summary-only publication; malformed inputs; redaction before truncation.
+- `UT-SCENE-14`: an unconfigured or unusable keyring is reported by `GET /api/health`
+  before a save is attempted — `configured`/`ready`/`keys` plus a `reason` that names
+  `TF_VARIABLE_ENCRYPTION_KEYS` and the key-generation command, matching the 422 the
+  save path returns, and never echoing a key.
+- `UT-SCENE-15`: the Demo tab is registered in the dashboard nav, its component file
+  loads, every tab carries a hover/assistive name, and both fixtures (`/demo.html`,
+  `/domain-demo.html`) plus all five synthetic packs resolve and are described in the tab.
 - `BR-SCENE-01`: real Chromium cross-project login→logout, one shared session,
   encrypted one-off password override, masked JPEG pixel check, nine captures for
   nine actions, single and aggregate PDFs without any additional capture; single
