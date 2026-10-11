@@ -2,13 +2,14 @@
 
 **Audience:** senior DevOps / development automation engineers.
 **Scope:** deploy the application runtime, its PostgreSQL database and the source repository into
-Azure + Azure DevOps, while the existing GitHub free-tier demo on Render continues to run untouched.
+Azure + Azure DevOps. This document is self-contained: the Azure topology, the database and the
+Azure DevOps pipeline are all described here, and nothing in it depends on another deployment guide.
 
 Everything below was verified against this repository at the commit you branch from. The claims
 about behaviour (`publish_mode`, `init_db`, pool sizes, the health payload) are read from
 `app/config.py`, `app/db.py`, `app/library_store.py` and `app/main.py` — not assumed. Where a fact
-is about the platform rather than the code, it is marked **[verify]** because Azure and Render
-quotas change.
+is about the platform rather than the code, it is marked **[verify]** because Azure quotas and
+SKU availability move under you.
 
 ---
 
@@ -16,9 +17,9 @@ quotas change.
 
 ### 0.1 The application has no authentication. None.
 
-`render.yaml` passes an `API_Key` environment variable to the service. **No line of application code
-reads it.** A grep of the whole package finds only outbound auth (the GitHub REST client sending its
-own token) and nothing inbound:
+The deployment configs in this repository pass an `API_Key` environment variable to the service.
+**No line of application code reads it.** A grep of the whole package finds only outbound auth
+(the GitHub REST client sending its own token) and nothing inbound:
 
 ```bash
 grep -rn "API_Key\|HTTPBearer\|Authorization" app/*.py
@@ -28,8 +29,8 @@ grep -rn "API_Key\|HTTPBearer\|Authorization" app/*.py
 There is no middleware, no dependency, no login. Every endpoint listed in `app/main.py` —
 `POST /api/projects`, `POST /api/runs`, `POST /api/recordings/{id}/session`,
 `POST /api/library/publish`, `POST /api/ai/rephrase`, `GET /api/diagnostics` — is reachable by
-anyone who can reach the port. On Render's private, sleeping, 512 MB instance this was an
-acceptable demo risk. **On an Azure VM with a public IP and a persistent database it is not.**
+anyone who can reach the port. That is survivable on a throwaway sandbox with no data and no
+credentials. **On an Azure VM with a public IP and a persistent database it is not.**
 
 The relevant capability: this service drives a headless Chromium on its own host and can push to
 `library/` in GitHub. An unauthenticated visitor can therefore consume all the VM's CPU with
@@ -37,19 +38,19 @@ batch runs, and — if a `TF_GITHUB_TOKEN` is present — write commits to your 
 `POST /api/library/publish`.
 
 > **Rule for the rest of this document:** the deployment is only allowed to listen on a loopback
-> interface. Section 6 enforces that with nginx + a reverse-proxy allow-list. Do not "just open
+> interface. Section 6 enforces that with a reverse proxy and an IP allow-list. Do not "just open
 > 80/443 to test it".
 
 If you need real authentication before a fix lands in the app, put it at the proxy (OIDC via
 Entra ID application proxy, or `auth_request` to an OAuth2 proxy sidecar) and treat the container
-port as a trusted network. Section 12 has the prompt for it.
+port as a trusted network. Section 11 has the prompt for it.
 
 ### 0.2 One process is a design constraint, not an oversight
 
 | Evidence | Consequence |
 | --- | --- |
-| `render.yaml`: `numInstances: 1` | Do not set an instance count > 1. |
-| `Dockerfile`: `--workers 1` | Do not add uvicorn workers. |
+| `Dockerfile`: `CMD ... --workers 1` | Do not add uvicorn workers. |
+| §6.4 compose file: no `deploy.replicas` | Do not add replicas to the Azure runtime either. |
 | `app/config.py`: `MAX_CONCURRENT_BROWSERS = 1` | Hard-coded; there is no env var to raise it. |
 | `app/db.py`: SQLite branch uses `StaticPool` | A single shared SQLite connection; two processes on one file DB will contend. |
 
@@ -58,15 +59,16 @@ Every guardrail (`TF_MAX_BROWSERS`, `TF_MAX_LIVE_FRAME_RUNS`, `TF_BATCH_MAX_RSS_
 fixed ceiling and multiplies Chromium launches. Scale **up** (bigger VM SKU) or split the queue
 consumer into its own container. Never scale out the API.
 
-### 0.3 Two environments must not share one database
+### 0.3 No two environments may share one database
 
 `app/main.py` runs `boot_hygiene()` on every startup, which calls `run_queue.reap_orphans()` and
 **cancels every `queued` and `running` row** so the queue cannot show a pending count that will
 never move. That is correct for a service that owns its database. It is destructive if two
-environments share one: every Azure deploy silently cancels runs in flight on the other.
+environments share one: every deploy silently cancels runs that are in flight on the other.
 
 Therefore: **one database per environment.** No shared staging/prod Postgres, no shared
-`TF_ARTIFACTS` volume. The table in section 8 makes this explicit.
+`TF_ARTIFACTS` volume. If this topology ever grows a second environment, it gets its own Flexible
+Server (§5.4), its own artifacts volume and its own token policy (§7.1).
 
 ### 0.4 The schema needs no migration tool — and that is deliberate
 
@@ -80,7 +82,7 @@ Consequences for your pipeline:
 
 * **Do not add an Alembic stage.** There is no `alembic/` directory and no revision history;
   introducing one without removing the boot-time repair just creates two competing authorities.
-* The deploy gate must assert on `/api/diagnostics` after the first boot (section 9), because a
+* The deploy gate must assert on `/api/diagnostics` after the first boot (section 8), because a
   schema repair that failed will *not* crash the container.
 * `create_all` needs DDL rights. The app role therefore cannot be a least-privilege
   `SELECT/INSERT/UPDATE/DELETE` role — see §5.3 for the compromise.
@@ -94,14 +96,15 @@ Consequences for your pipeline:
 3. `TF_GITHUB_REPO` **and** `TF_GITHUB_TOKEN` present → `api`
 4. otherwise → `disabled`
 
-The Render container is built from `app/` + `library/` only, so it has no `.git` and lands on
-**`api`**. If you naively deploy to a VM by `git clone`-ing the repo and running it in place, you get
-**`checkout`** mode instead: it will `git push` from the working tree, require git credentials on the
-VM, and — worse — fight the CI pipeline that also pushes to `main`.
+The image this repository builds copies `app/` + `library/` only (`Dockerfile`), so a container run
+of it has no `.git` and lands on **`api`**. If you naively deploy to a VM by `git clone`-ing the
+repo and running it in place, you get **`checkout`** mode instead: it will `git push` from the working
+tree, require git credentials on the VM, and — worse — fight the CI pipeline that also pushes to
+`main`.
 
-**Decision for this rollout: force `api` mode on the VM too**, by running the *image* (which contains
-no `.git`) with a bind-mount for `/app/artifacts` only. Keep one publishing code path across both
-environments. If you specifically need `checkout` mode, see §7.3.
+**Decision for this rollout: run the image, not the checkout.** Force `api` mode on the VM by
+running the *image* (which contains no `.git`) with a bind-mount for `/app/artifacts` only, so one
+publishing code path is in play. If you specifically need `checkout` mode, see §7.3.
 
 ---
 
@@ -110,28 +113,32 @@ environments. If you specifically need `checkout` mode, see §7.3.
 ```
                     GitHub  Raheelatta1984/testforge   ← source of truth (people push here)
                        │
-        ┌──────────────┴────────────────┐
-        │ mirror (Azure Pipeline, [skip ci]) │
-        ▼                               ▼
-  Azure Repos Git                  Azure Pipelines  ── azure-pipelines.yml lives in Azure Repos
-  testforge-mirror                 CI → build image → ACR → deploy → smoke gate
-        │                               │
-        │                               ├──▶ ACR (hardened) ──▶ Azure VM  ──▶ nginx+TLS ──▶ :8000 loopback
-        │                               │                          └─ /var/lib/testforge/artifacts (persistent)
-        │                               └──▶ Azure Database for PostgreSQL Flexible Server
-        │
-        └──▶ Render (unchanged, free)  demo/sandpit, read-only, no token, sleeps on idle
+                       │ mirror (Azure Pipelines, [skip ci]) — §3
+                       ▼
+              Azure Repos Git  ·  testforge-mirror      ← read-only for people
+                       │                                 only the mirror identity writes
+                       ▼
+              Azure Pipelines  ·  azure-pipelines.yml   ← §4
+                       │
+                       │  CI → build image → push → deploy → smoke gate
+                       │
+                       ├──▶ ACR (hardened) ──▶ Azure VM ──▶ Caddy + TLS ──▶ 127.0.0.1:8000
+                       │                          │           (public surface: 443 only)
+                       │                          └─ /mnt/artifacts (managed data disk, persistent)
+                       │
+                       └──▶ Azure Database for PostgreSQL Flexible Server
+                            (VNet-integrated, `--public-access none`) — §5
 ```
 
-| Concern | Azure | Render free | Notes |
-| --- | --- | --- | --- |
-| Role | primary / persistent | demo only | |
-| Repo | Azure Repos mirror (read) | GitHub (read) | GitHub is authoritative |
-| Image | ACR digest | built from `Dockerfile` by Render | same `Dockerfile`, so parity is real |
-| Database | Flexible Server Postgres | `DATABASE_URL` → separate Neon DB, or ephemeral SQLite | never share |
-| Artifacts | mounted volume, retained | container filesystem, **wiped on every deploy/spin-down** | inherent to Render free |
-| `TF_GITHUB_TOKEN` | present → can publish | **absent** → publishing reports `disabled` | exactly one holder |
-| Always on | yes | no: spins down after ~15 min idle, 30–60 s cold start **[verify]** | |
+| Concern | Azure target state | Notes |
+| --- | --- | --- |
+| Role | primary, always on | the environment people record into and schedule batches from |
+| Repo | Azure Repos mirror of GitHub (read) | GitHub stays authoritative for humans (§3) |
+| Image | ACR, digest-pinned by `apply.sh` | built from this repo's `Dockerfile`, so CI and runtime are the same bytes |
+| Database | Azure Database for PostgreSQL — Flexible Server, one per environment | never shared (§0.3, §5) |
+| Artifacts | managed data disk at `/mnt/artifacts`, bind-mounted into the container | survives a redeploy or an OS-disk swap (§6.1, §6.4) |
+| `TF_GITHUB_TOKEN` | present, in the VM's `/etc/testforge/.env` only | exactly one holder (§7.1); the pipeline never gets it (§4.2) |
+| Availability | always on: no idle spin-down, no cold start | you pay for 24/7 compute, so size it once (§2, §6.1) |
 
 ---
 
@@ -279,7 +286,7 @@ Set these before the first merge request; they are cheap now and painful to retr
 
 ---
 
-## 4. Pipeline: build once, publish once, deploy to both clouds
+## 4. Pipeline: build once, publish once, deploy to Azure
 
 ### 4.1 `azure-pipelines.yml`
 
@@ -288,7 +295,7 @@ Set these before the first merge request; they are cheap now and painful to retr
 trigger:
   branches: { include: [main] }
   paths:
-    include: ['app/*', 'Dockerfile', 'requirements.txt', 'render.yaml', 'azure-pipelines.yml']
+    include: ['app/*', 'Dockerfile', 'requirements.txt', 'azure-pipelines.yml']
     exclude: ['*.md', 'docs/*', 'logs/*', 'library/**']
 pr:
   branches: { include: ['*'] }
@@ -387,7 +394,7 @@ stages:
                   --scripts "$(Pipeline.Workspace)/s/deploy/azure/apply.sh" \
                   --parameters "$(ACR)" "testforge" "$(DIGEST_TAG)" "$(DIGEST_TAG)"
           - script: bash deploy/azure/smoke.sh "https://testforge.example.com" "$(DIGEST_TAG)"
-            displayName: Smoke gate (§9)
+            displayName: Smoke gate (§8)
 ```
 
 In the `variables:` block at the top, only the image coordinates are needed — the revision is derived
@@ -402,7 +409,7 @@ variables:
 > **Read `apply.sh`'s contract before wiring it:** §6.5 takes `ACR IMAGE TAG [TAG]` and pins the
 > compose file by *resolving the tag to a digest in ACR*. Passing the tag twice is deliberate — the
 > fourth argument is what `RENDER_GIT_COMMIT` is set to, so `/api/health` reports the same string the
-> pipeline echoed. If you skip that, every deployment looks like `local` (§13) and an operator
+> pipeline echoed. If you skip that, every deployment looks like `local` (§12) and an operator
 > comparing two environments has no way to tell them apart.
 
 
@@ -410,7 +417,7 @@ Notes on the parts that are easy to get wrong:
 
 * **`condition: eq(variables['Build.Reason'], 'BatchedCI')`** keeps PR builds from pushing images.
   Adjust to `'individualCI'` if you trigger on every push to `main` instead of batching.
-* **Tag by commit, never only `latest`.** Rollback (§10) depends on the previous digest still existing.
+* **Tag by commit, never only `latest`.** Rollback (§9) depends on the previous digest still existing.
 * The pipeline sets no `TF_GITHUB_TOKEN`; it only builds. Runtime secrets live in the VM's `.env`.
 * `pool: ubuntu-latest` has Docker and no browser to install — the build stage takes ~4–6 min for
   `playwright install --with-deps chromium` plus a 3-layer cache. Cache the base image with
@@ -432,12 +439,13 @@ Azure key vault link*. Linked secrets are fetched at runtime and are masked in l
 
 ### 4.3 Do not also add a GitHub Actions file that pushes
 
-The user-facing requirement "run parallel without break" is satisfied by *mirroring the repo* and
-*keeping Actions alive for the demo*. Adding a second publisher that also pushes images/tags to the
-same places is how you get two pipelines racing on `main`. If you want Actions to co-deploy Render,
-let it only call the Render deploy API; leave ACR and Azure to this pipeline, and add a CI check that
+The requirement "run parallel without break" is satisfied by *mirroring the repo* — GitHub stays
+the place humans push to, and Azure Repos is a read-only copy that policies attach to. Adding a
+second publisher that writes images or tags to the same places is how you get two pipelines racing
+on `main`. Keep the division strict: GitHub Actions may test and mirror, **only this pipeline**
+pushes to ACR and deploys. If a workflow file stays in the repo, add a CI check that
 `azure-pipelines.yml` and `.github/workflows/build.yml` reference the same `Dockerfile` and
-`requirements.txt` hashes.
+`requirements.txt` hashes, so the two can never drift on what a "build" means.
 
 ---
 
@@ -516,23 +524,26 @@ DATABASE_URL=postgresql://testforge_app:<password>@testforge-pg.postgres.databas
 seed or assertion step, run it from inside the VM (`az vm run-command`) or from a job on the VNet,
 not from a Microsoft-hosted agent.
 
-### 5.4 Render's database (the demo) — do not reuse this server
+### 5.4 One server per environment — and what happens if you forget `DATABASE_URL`
 
-Per §0.3, the demo gets its own. Options, in order of preference:
+Per §0.3, every environment gets its own server. If you add a staging or demo environment later, do
+**not** point it at the primary Flexible Server:
 
-1. A second, tiny Flexible Server in a separate resource group, `B1ms`, 128 GB minimum storage
-   (note: Flexible Server storage cannot be shrunk, so this is the one cost line that does not scale
-   down later).
-2. Neon, which `requirements.txt` already anticipates ("the hosted deployment uses Neon"), free tier,
-   and it sleeps too — which is *consistent* with a demo that sleeps.
-3. Nothing — leave `DATABASE_URL` unset and let the free demo use SQLite on an ephemeral filesystem,
-   which resets on every deploy. **This is the honest state of the current Render setup** and it is
-   documented as such in the Guide tab: "demos here are disposable by design; the durable record is
-   `library/` on GitHub."
+1. A second, tiny Flexible Server in a separate resource group (`B1ms`, smallest storage tier your
+   region offers **[verify]**) is the clean answer. Mind the storage floor: Flexible Server storage
+   cannot be shrunk afterwards, so this is the one cost line that never scales back down — pick it
+   once, deliberately, and do not assume §5.1's `--storage-size` will be honoured at a smaller value.
+2. Two environments sharing one server but separate *databases* is still wrong — the tables are
+   identical, so a mis-set `DATABASE_URL` silently reads and writes the other environment's rows.
+3. If `DATABASE_URL` is **unset**, `app/config.py` falls back to SQLite inside the container and
+   `TF_ARTIFACTS` stays on the container filesystem: runs, recordings and library rows then vanish on
+   every redeploy or `docker image prune`. That is why the smoke gate (§8) asserts
+   `database == "ok"` **and** a Postgres-backed `library_publish_mode == "api"`, and why the
+   durable record of any deployment is `library/` on GitHub (§7), not the container's disk.
 
-That last sentence is the current app's saving grace and should be preserved: `library/` is committed
-through the GitHub API (§7), so recorded work survives a Render rebuild even though the database rows
-do not. Do not "fix" this by pointing both environments at one Postgres.
+A bad `DATABASE_URL` is not the same as an unset one: `config.py` only falls back to SQLite when the
+variable is missing, so a typo'd or unreachable host fails loudly at startup instead of quietly
+starting a second, throwaway database. That is the behaviour you want, so do not "work around" it.
 
 ---
 
@@ -557,11 +568,11 @@ az vm create -g $RG -n $VM --size Standard_B2ats_v4 \
   --nsg nsg-testforge --public-ip-sku Standard --zone 1
 ```
 
-`B2ats_v4` (2 vCPU / 1 GB) is roughly Render's 512 MB plus headroom and is the cheapest defensible
-choice for the *demo* role. For the primary role — persistent Chromium, batches of 40 recordings —
-budget `Standard_D2as_v5` (2 vCPU / 8 GB, ~$100/mo **[verify]**). Running a browser farm on 1 GB is
-optimistic; if you must, keep `TF_BATCH_MAX_RSS_MB` at 420 and accept that large batches will relaunch
-the browser often.
+`B2ats_v4` (2 vCPU / 1 GB) is the cheapest defensible size for a proof-of-concept, and the free
+account's 750 h/month covers exactly one of them (§2). For the primary role — persistent Chromium,
+batches of 40 recordings — budget `Standard_D2as_v5` (2 vCPU / 8 GB, ~$100/mo **[verify]**). Running
+a browser farm on 1 GB is optimistic; if you must, keep `TF_BATCH_MAX_RSS_MB` at 420 and accept that
+large batches will relaunch the browser often.
 
 Attach a managed data disk for artifacts so a redeploy or OS-disk swap never takes recordings with it:
 
@@ -615,14 +626,14 @@ services:
     restart: unless-stopped
     # §0.2 — one process. Do not add workers, do not add replicas.
     command: ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000", "--workers", "1"]
-    # Bind to loopback: nginx is the only public surface (§0.1, §6.2).
+    # Bind to loopback: Caddy below is the only public surface (§0.1, §6.2).
     ports: []
     expose: ["8000"]
     networks: [tf]
     environment:
       TF_ARTIFACTS: /app/artifacts
       TF_BROWSER_MODE: bundled
-      # The container has no .git, so publishing stays in 'api' mode like Render (§0.5).
+      # The image has no .git, so publishing stays in 'api' mode (§0.5).
       TF_GITHUB_REPO: Raheelatta1984/testforge
       TF_GITHUB_BRANCH: main
       # Both /api/health (main.py:266) and /api/diagnostics (main.py:386) report
@@ -632,10 +643,10 @@ services:
       # --env-file, NOT from an env_file: entry). Without it, health says "local".
       RENDER_GIT_COMMIT: ${RENDER_GIT_COMMIT:-unknown}
       TF_MAX_BROWSERS: "1"
-      TF_VIEWPORT_WIDTH: "1280"        # more headroom than Render's 1024
+      TF_VIEWPORT_WIDTH: "1280"        # image default is 1024; a VM can afford more
       TF_VIEWPORT_HEIGHT: "720"
       TF_JPEG_QUALITY: "40"
-      TF_BATCH_MAX_RSS_MB: "900"       # only valid on a >=4GB VM; leave 420 on 1GB
+      TF_BATCH_MAX_RSS_MB: "900"       # only valid on a >=4GB VM; leave 420 on a 1GB VM
     env_file:
       - /etc/testforge/.env             # DATABASE_URL, TF_GITHUB_TOKEN — never in git (see .gitignore)
     volumes:
@@ -726,9 +737,9 @@ docker compose --env-file /etc/testforge/.env -f docker-compose.prod.yml up -d -
 docker image prune -f          # else the 64GB disk fills with each deploy (~700MB/image)
 ```
 
-Because a deploy restarts the service, `boot_hygiene()` will cancel in-flight runs. The app already
-accounts for this (`TF_QUEUE_ORPHAN_GRACE`, `TF_QUEUE_STALE_MINUTES` in `render.yaml`) — but the
-operator does not know that unless you say it. Put a drain step in the pipeline:
+Because a deploy restarts the service, `boot_hygiene()` will cancel in-flight runs. The image already
+sets the sane bounds for this (`TF_QUEUE_ORPHAN_GRACE`, `TF_QUEUE_STALE_MINUTES` in the `Dockerfile`
+ENV block) — but the operator does not know that unless you say it. Put a drain step in the pipeline:
 `POST /api/runs/queue/clear` then poll `/api/runs/queue/status` until `pending == 0`, or accept that
 "deploys cancel queued runs" appears in the changelog.
 
@@ -738,16 +749,18 @@ operator does not know that unless you say it. Put a drain step in the pipeline:
 
 ### 7.1 Exactly one environment may hold `TF_GITHUB_TOKEN`
 
-If Render and Azure both publish `library/` to `main` with the same token, they will race: both
-compute a tree from their own disk state, both create commits, one gets a `409` conflict, and — per
+If two environments publish `library/` to `main` with the same token, they will race: both compute a
+tree from their own disk state, both create commits, one gets a `409` conflict, and — per
 `readme.md` — that is reported as *"did not complete and will be retried in 60s"*, so it retries
 forever while quietly alternating winners.
 
-* **Azure = publisher.** Holds `TF_GITHUB_TOKEN`, `TF_LIBRARY_PUBLISH` unset or `1`.
-* **Render = reader.** `TF_GITHUB_REPO` present for log coordinates, `TF_GITHUB_TOKEN` **absent**.
-  `publish_mode()` → `disabled`, and the code deliberately reports *why* rather than guessing
-  (`publish_disabled_reason()`), so the demo's GitHub tab states "publishing is disabled" instead of
-  pretending. This is the correct, already-implemented behaviour — do not "improve" it.
+* **The primary Azure runtime is the publisher.** It holds `TF_GITHUB_TOKEN`, with
+  `TF_LIBRARY_PUBLISH` unset or `1`.
+* **Every other environment is a reader.** `TF_GITHUB_REPO` present for log coordinates,
+  `TF_GITHUB_TOKEN` **absent**. `publish_mode()` → `disabled`, and the code deliberately reports *why*
+  rather than guessing (`publish_disabled_reason()`), so a non-publishing environment's GitHub tab
+  states "publishing is disabled" instead of pretending. This is correct, already-implemented
+  behaviour — do not "improve" it.
 
 ### 7.2 The pipeline must not also push to `main`
 
@@ -767,34 +780,12 @@ Legitimate reason: you want the VM's library to be a real git working tree so th
 * accept that the VM can now force-adjacent things with git that the API client is bounded against
   (the API path caps file count, per-file size and push size; the git path does not)
 
-Recommendation: stay on `api` mode (§6.4). One code path across both environments, bounded publishes,
-no credentials in a working tree.
+Recommendation: stay on `api` mode (§6.4). One code path, bounded publishes, no credentials in a
+working tree.
 
 ---
 
-## 8. Keeping the Render demo alive in parallel
-
-`render.yaml` already exists and is correct — `plan: free`, `region: singapore`, `runtime: docker`,
-`autoDeployTrigger: commit`, `healthCheckPath: /api/health`. **Change nothing in it except removing
-the misleading `API_Key` entry** (§0.1). Leave it on its own branch trigger; it will keep deploying on
-every push to `main`, including the pushes the Azure pipeline makes, so the demo stays in sync for free.
-
-What to expect and document, rather than fight:
-
-| Behaviour | Cause | Accept / mitigate |
-| --- | --- | --- |
-| 30–60 s first request after idle | free tier spins down after ~15 min **[verify]** | Accept. It is a demo. Say so on the landing page. |
-| ~750 h/month **per workspace** | free allowance is shared, not per-service **[verify]** | Do not add a keep-alive pinger — a 5-minute pinger keeps the service warm *and* consumes the whole monthly allowance, risking overage. Sleep is how the free tier stays free. |
-| Runs/recordings vanish on redeploy | ephemeral filesystem, no disk | Accept (§5.4). Durable record is `library/` on GitHub. |
-| Chromium OOM | 512 MB, 0.1 CPU | Already handled: `TF_MAX_BROWSERS=1`, `TF_BATCH_MAX_RSS_MB=420`, `TF_BROWSER_SINGLE_PROCESS=1`. Do not raise any of these for Render. |
-| `region: singapore` | chosen for the region, not for you | Leave it; latency to Australia is ~10–25 ms, and moving it does not help the free tier. |
-
-Add a one-line note to `render.yaml` and the Guide tab stating the demo is read-only and disposable,
-so nobody spends an hour "debugging" lost data that was never designed to persist.
-
----
-
-## 9. Verification gate — put this in the pipeline, not in a wiki
+## 8. Verification gate — put this in the pipeline, not in a wiki
 
 `deploy/azure/smoke.sh`. Every assertion below is derived from what `/api/health` and
 `/api/diagnostics` actually return, so it fails loudly on a real regression instead of checking a
@@ -815,8 +806,9 @@ done
 
 jq -e '.status=="ok" and .database=="ok"' /tmp/h.json >/dev/null || fail "database not ok"
 jq -e '.recorder and .executor and .batch_executor' /tmp/h.json >/dev/null || fail "subsystems missing"
-# publish_enabled must be TRUE on Azure and FALSE on Render — the opposite of expectation is the
-# single most likely misconfiguration after §7.1, so assert it per environment.
+# publish mode is the single most likely misconfiguration after §7.1: a deployment that must
+# publish reporting 'disabled' means the token never reached the container, and one reporting
+# 'checkout' means someone ran the checkout instead of the image. Assert it per environment.
 jq -e '.library_publish_mode=="api"' /tmp/h.json >/dev/null || fail "publish mode is not api"
 jq -e '.guardrails' /tmp/h.json >/dev/null || fail "guardrails absent"
 
@@ -849,14 +841,14 @@ Then two manual checks that no automated test here will catch, because they need
    publish path at once. The QA doc calls for it explicitly (`docs/qa-automation-acceptance.md`).
 2. **Confirm the publish actually reached GitHub.** The GitHub tab verifies the remote SHA;
    `GET /api/library` returns `last_api_push` and `publish_mode`. A save that says "Published to
-   owner/name@branch" is the only acceptable result for the Azure environment (§7.1).
+   owner/name@branch" is the only acceptable result for the publishing environment (§7.1).
 
 Also assert the **negative**: from a machine outside the allow-list, `curl https://vm-ip:8000` must
 fail. If it answers, your NSG or bind is wrong and §6.2 has not been applied.
 
 ---
 
-## 10. Rollback
+## 9. Rollback
 
 1. `az vm run-command ... deploy/azure/apply.sh $ACR testforge <previous-sha>` — you can only do this
    because §4.1 tags by commit and never overwrites a digest.
@@ -870,27 +862,28 @@ fail. If it answers, your NSG or bind is wrong and §6.2 has not been applied.
 
 ---
 
-## 11. Degraded mode (the "pipeline or VM unavailable" requirement)
+## 10. Degraded mode (the "pipeline or VM unavailable" requirement)
 
 | Failure | Impact | Operator action |
 | --- | --- | --- |
-| Azure DevOps down | No new builds/deploys. **GitHub Actions + Render unaffected** (mirror is one-way, so GitHub never waits on Azure). | Nothing. Record on Render or commit as usual; deploy later. |
+| Azure DevOps down | No new builds/deploys. The running VM, the database and GitHub are unaffected (the mirror is one-way, so GitHub never waits on Azure). | Nothing. Keep recording and keep committing to GitHub; deploy when the service is back. |
 | ACR / `AcrPull` broken | Deploy fails; running container unaffected (image is local). | `docker compose up` on the already-pulled digest. |
-| VM down | Primary UI unreachable, but `library/` on GitHub is intact; Render demo still serves everything except the last unpushed saves. | Recover VM, or temporarily point DNS at Render. |
+| VM down | Primary UI unreachable, but `library/` on GitHub is intact and the artifacts disk holds every recording that was saved. | Recover the VM (`az vm start`, or redeploy onto a new VM from the same managed disk and ACR digest); the data is not on the OS disk. |
 | Postgres down | `/api/health` returns **503** "Database is unavailable" — which is exactly why `healthCheckPath: /api/health` exists instead of `/`. Containers restart-loop; the app does not serve stale DB rows. | Restore server. Do not "work around" by letting the app fall back to SQLite while a broken `DATABASE_URL` is set — it will, because `config.py` only uses SQLite when the variable is **unset**; a bad URL fails loudly, which is right. |
 | GitHub API outage | Pushes fail; per the runbook a failed push keeps the local library and retries at 60 s. Saves must not be lost. | Wait; verify `last_api_push` after recovery. |
 
 Document it as: **the pipeline is a convenience, the runtime is the product, GitHub is the archive.**
-That is what "still works with the GitHub repository" means in practice.
+That is what "still works with the GitHub repository" means in practice. The corollary for the operator:
+a deploy is a *service* event (runs are cancelled, §6.5) and never a *data* event.
 
 ---
 
-## 12. AI prompt library
+## 11. AI prompt library
 
 The value of these is that the constraints are already inside them. A prompt that says "deploy this
 FastAPI app to Azure" gets you a blog post; one that says "the app has no authentication, one worker
 is a correctness requirement, and the schema self-heals at boot" gets you working config. Paste one,
-then paste the repo's `Dockerfile`, `render.yaml` and the output of `grep -n "TF_" app/config.py`.
+then paste the repo's `Dockerfile`, `azure-pipelines.yml` and the output of `grep -n "TF_" app/config.py`.
 
 **P1 — Provisioning**
 > Produce an idempotent Azure CLI (or Bicep) script for: resource group `rg-testforge-eas` in
@@ -922,10 +915,10 @@ then paste the repo's `Dockerfile`, `render.yaml` and the output of `grep -n "TF
 > VM by digest through `az vm run-command` executing `deploy/azure/apply.sh`; a post-deploy gate runs
 > `deploy/azure/smoke.sh` asserting `status=ok`, `database=ok`, `library_publish_mode=api` and
 > `schema.ready=true`; `environment: azure-primary` carries the approval. Also set
-> `RENDER_GIT_COMMIT` — it is the *only* variable the app reads for its revision (both `/api/health`
-> and `/api/diagnostics`), and nothing supplies it outside Render, so an Azure deployment that skips it
-> permanently reports `revision: local`. Use Microsoft-hosted agents; do not put a self-hosted agent on
-> the 1 GB app VM.
+> `RENDER_GIT_COMMIT` to the commit being deployed — it is the *only* variable the app reads for its
+> revision (both `/api/health` and `/api/diagnostics`), nothing else supplies it in a container built
+> from this `Dockerfile`, and a deployment that skips it permanently reports `revision: local`. Use
+> Microsoft-hosted agents; do not put a self-hosted agent on the 1 GB app VM.
 
 **P4 — Repository mirror**
 > Give me a one-way GitHub→Azure Repos mirror that cannot loop: a bare clone, `git push --mirror`
@@ -936,8 +929,8 @@ then paste the repo's `Dockerfile`, `render.yaml` and the output of `grep -n "TF
 > needed on each side and why read-only fails.
 
 **P5 — Auth at the proxy (the real gap)**
-> This application has **no authentication of any kind**: there is an `API_Key` env var in
-> `render.yaml` that no code reads, and every endpoint including `POST /api/runs`,
+> This application has **no authentication of any kind**: the `API_Key` env var in its deployment
+> config is read by no code at all, and every endpoint including `POST /api/runs`,
 > `POST /api/library/publish` and `GET /api/diagnostics` is open. It can launch Chromium on its host
 > and push to a GitHub repo. Without modifying the app, design Entra ID Application Proxy (or an
 > OAuth2-proxy sidecar in front of Caddy) so that: only allow-listed principals reach it; the three
@@ -948,9 +941,9 @@ then paste the repo's `Dockerfile`, `render.yaml` and the output of `grep -n "TF
 
 **P6 — Debug the unglamorous failures**
 > Write a triage runbook for this Azure deployment covering, with commands and the exact signal to
-> look for: (1) the service is fine on Render and the VM's Chromium dies on launch (missing shared
-> libraries vs. OOM kill — how to tell from `dmesg` and `/api/diagnostics` RSS vs. cgroup limit);
-> (2) the recorder shows a live frame on Render but a frozen one on the VM (proxy buffering
+> look for: (1) the container is healthy but Chromium dies on launch (missing shared libraries vs.
+> OOM kill — how to tell from `dmesg` and `/api/diagnostics` RSS vs. the cgroup limit);
+> (2) the recorder's canvas is frozen while the run itself keeps progressing (a proxy buffering
 > WebSocket frames — `flush_interval`); (3) a save reports *"did not complete and will be retried in
 > 60s"* forever (token read-only → 403 on `git/blobs`, or two environments racing on `main`);
 > (4) `/api/health` returns 503 while the app is up (`Database is unavailable`, `SELECT 1`);
@@ -975,38 +968,39 @@ then paste the repo's `Dockerfile`, `render.yaml` and the output of `grep -n "TF
 
 ---
 
-## 13. Common failures
+## 12. Common failures
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `docker: unauthorized` on the VM | `AcrPull` on the wrong identity, or admin user assumed on | §6.3; `az vm run-command` `docker login` via `--expose-token` |
 | Pipeline can't read a Key Vault variable | Linked secrets are not usable in YAML expressions | map into `env:` on the task |
 | `FATAL: password authentication failed` with a valid password | unencoded `%`/`~` in the DSN (§5.3) | URL-encode |
-| Health `revision: local` on Azure | nothing injects `RENDER_GIT_COMMIT` outside Render, or compose interpolated it without `--env-file` | §6.4 / §6.5 |
-| `/api/diagnostics` returns 200 with `"status":"ok"` while the schema is broken | that field is a hard-coded literal; the real signal is `schema.ready` | assert `schema.ready`, never HTTP status (§9) |
+| Health `revision: local` | `apply.sh` was not given the revision argument, or compose interpolated `${RENDER_GIT_COMMIT}` without `--env-file` | §6.4 / §6.5 |
+| `/api/diagnostics` returns 200 with `"status":"ok"` while the schema is broken | that field is a hard-coded literal; the real signal is `schema.ready` | assert `schema.ready`, never HTTP status (§8) |
 | First request after deploy fails once, then fine | container restart + Chromium cold boot, or `start_period` too short | raise `start_period`; keep `/api/health` as the probe |
 | Recorder canvas frozen but clicks register | proxy buffering WebSocket frames | `flush_interval -1` (§6.4) |
 | Runs vanish after a deploy | `boot_hygiene()` reaping orphans — correct behaviour | drain before deploy (§6.5); never share a DB (§0.3) |
-| `library/` oscillates between two histories | both environments pushing to `main` | §7.1 |
+| `library/` oscillates between two histories | two environments hold the same token and both push to `main` | §7.1 |
 | VM billed despite "free" tier | 2+ B-series VMs, disk > 64 GB, or Standard SSD/Premium chosen | one VM, ≤64 GB, `Standard_LRS` |
 | `GET /api/diagnostics` shows a schema repair on a fresh DB | image older than the database it points at | redeploy the digest the pipeline built; do not hand-patch the schema |
 
 ---
 
-## 14. Definition of done
+## 13. Definition of done
 
-* [ ] GitHub is unchanged for humans: they push there and Actions still builds Render.
-* [ ] Azure Repos holds a complete mirror (all branches/tags), with a policy that keeps it read-only
-      for people and writable by the mirror identity.
+* [ ] GitHub is unchanged for humans: they still push there, and the one-way mirror keeps Azure Repos
+      complete (all branches and tags) and read-only for people, writable only by the mirror identity.
 * [ ] One pipeline run: tests inside the image → ACR digest → VM → `smoke.sh` green, including
       `library_publish_mode=api` and `schema.ready=true`.
 * [ ] The VM listens only on loopback; port 8000 unreachable from outside (verified negatively);
       22 reachable only via Bastion/JIT; TLS valid with HSTS.
 * [ ] Human auth exists at the proxy, and a request from outside the allow-list gets 403 on both HTTP
       and a WebSocket upgrade attempt.
-* [ ] Azure holds the only runtime `TF_GITHUB_TOKEN`; Render reports publishing disabled, by design.
-* [ ] Each environment has its own database and its own artifacts volume.
-* [ ] A recorded project survives an Azure VM reboot and appears on GitHub; a Render demo save does not
-      survive a redeploy and says so.
+* [ ] The Azure runtime holds the only `TF_GITHUB_TOKEN`; any other environment reports publishing
+      disabled, on purpose, and the pipeline holds no runtime token at all.
+* [ ] Every environment has its own database and its own artifacts volume, and neither lives on the
+      container filesystem.
+* [ ] A recorded project survives an Azure VM reboot and appears on GitHub.
 * [ ] Rollback executed once against the previous digest, with the DB left forward-compatible.
-* [ ] The Guide tab in the app links this file and the three runbooks, with P1–P8 copy-pasteable.
+* [ ] The Azure tab in the app displays this guide as ordered, tickable steps from
+      `GET /api/docs/azure-guide`, and P1–P8 are copy-pasteable with no further context needed.
