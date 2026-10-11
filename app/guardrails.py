@@ -62,7 +62,7 @@ MAX_RUN_LIST_LIMIT = _int("TF_RUN_LIST_MAX", 100)
 # claim, how much of it is kept in memory, and how many batches may exist at once.
 MAX_BATCH_RECORDINGS = _int("TF_BATCH_MAX_RECORDINGS", 40)
 MAX_CONCURRENT_BATCHES = _int("TF_MAX_BATCHES", 1)
-BATCH_LOG_ENTRIES = _int("TF_BATCH_LOG_ENTRIES", 200)
+BATCH_LOG_ENTRIES = _int("TF_BATCH_LOG_ENTRIES", 2000)
 MAX_BATCH_REPORTS = _int("TF_BATCH_REPORTS", 40)
 BATCH_LIST_LIMIT = _int("TF_BATCH_LIST_LIMIT", 20)
 
@@ -78,7 +78,7 @@ def _flag(name: str, default: bool) -> bool:
 # avoids a context per recording. Turn it off for strict isolation.
 BATCH_SHARE_SESSION = _flag("TF_BATCH_SHARE_SESSION", True)
 # One escalated retry for a timeout or a network error, never for a missing selector.
-BATCH_RETRY_TRANSIENT = _flag("TF_BATCH_RETRY_TRANSIENT", True)
+BATCH_RETRY_TRANSIENT = _flag("TF_BATCH_RETRY_TRANSIENT", False)
 
 # --- Local log reader -------------------------------------------------------
 # Used only when a deployment has no git checkout to read committed logs from.

@@ -3,9 +3,9 @@
 <head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
 <title>TestForge Titan ERP - Optimized</title>
-<script src="https://cdn.tailwindcss.com"></script>
-<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<link rel="stylesheet" href="/vendor/tailwind.css"/>
+<script crossorigin src="/vendor/react.production.min.js"></script>
+<script crossorigin src="/vendor/react-dom.production.min.js"></script>
 <style>
   body { background: #020617; color: #f8fafc; font-family: system-ui; overflow: hidden; height: 100vh; width: 100vw; }
   .nav-btn { flex: 1; padding: 12px; font-size: 11px; font-weight: bold; color: #64748b; border-top: 2px solid transparent; }
@@ -29,6 +29,8 @@
 </head>
 <body>
 <div id="root"></div>
+<script src="/import-components.js"></script>
+<script src="/scenario-components.js"></script>
 <script>
 const { useState, useEffect, useRef } = React;
 const e = React.createElement;
@@ -46,6 +48,7 @@ async function apiRequest(url, options = {}) {
 const API = {
   get: u => apiRequest(u),
   post: (u, b) => apiRequest(u, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
+  put: (u, b) => apiRequest(u, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
   patch: (u, b) => apiRequest(u, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
   del: u => apiRequest(u, {method:'DELETE'})
 };
@@ -53,7 +56,10 @@ const API = {
 function AiInput({ value, onChange, placeholder, isArea }) {
   const [mic, setMic] = useState(false);
   const startMic = () => {
-    const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) { window.alert("Speech input is not supported in this browser. Please type instead."); return; }
+    const rec = new Recognition();
+    rec.onerror = () => { setMic(false); window.alert("Speech input failed. Check microphone permission or type instead."); };
     rec.onstart = () => setMic(true); rec.onend = () => setMic(false);
     rec.onresult = (ev) => onChange({ target: { value: (value || "") + " " + ev.results[0][0].transcript } });
     rec.start();
@@ -67,13 +73,13 @@ function AiInput({ value, onChange, placeholder, isArea }) {
   );
 }
 
-function App() {
+function App({ access }) {
   const [tab, setTab] = useState("projects");
   const [activeProject, setActiveProject] = useState(() => JSON.parse(localStorage.getItem("tf_project") || 'null'));
   const [activeRunId, setActiveRunId] = useState(null);
   // Live browser window for execution. Off means the replay runs without the
   // screencast, which is the cheapest way to run a suite.
-  const [liveWindow, setLiveWindow] = useState(() => localStorage.getItem("tf_live_window") !== "0");
+  const [liveWindow, setLiveWindow] = useState(() => localStorage.getItem("tf_live_window") === "1");
   const toggleLiveWindow = (next) => {
     setLiveWindow(next);
     localStorage.setItem("tf_live_window", next ? "1" : "0");
@@ -86,6 +92,8 @@ function App() {
         e('span', { className: "font-bold text-indigo-400 tracking-tighter" }, "⚡ TITAN ROG ERP"),
         e('span', { className: "fast-badge" }, "FAST ⚡")
       ),
+      access && !access.configured && e('span', {className:"text-[9px] text-amber-300", title:"Set TF_ACCESS_TOKEN before exposing this instance"}, "ACCESS TOKEN NOT CONFIGURED"),
+      access && access.configured && e('button', {className:"key-btn", onClick:async()=>{await API.post('/api/auth/logout',{});location.reload();}}, "SIGN OUT"),
       activeProject && e('span', { className: "text-[10px] bg-indigo-900 px-2 py-1 rounded" }, activeProject.name)
     ),
     e('div', { className: "content-area" },
@@ -159,6 +167,7 @@ function Recorder({ project }) {
     let stop = false;
     const tick = async () => {
       if (stop) return;
+      if (document.hidden) { setTimeout(tick, 500); return; }
       try {
         const session = await API.get("/api/recordings/" + recId + "/session");
         if (session.error) { setError(session.error); setStatus("Browser error"); }
@@ -290,6 +299,7 @@ function Recorder({ project }) {
           : e("div", { className: "browser-wait" }, error || status || "Starting the remote browser FAST…")
       )
     ),
+    e(ActionComposer, {label:"EXECUTE & RECORD ACTION", onSave: async step => { const res = await API.post(`/api/recordings/${recId}/input`, {type:"action", step}); if (res.step) setSteps(prev => [res.step, ...prev.filter(s => s.id !== res.step.id)]); }}),
     varsList.length > 0 && e("div", { className: "flex gap-1 flex-wrap px-1" },
       e("span", { className: "text-[10px] text-slate-500" }, "Variables:"),
       varsList.map(v => e("button", { key: v.id, onClick: () => insertVariable(v.name), className: "var-chip" }, `{{${v.name}}}`))
@@ -391,6 +401,7 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
     setActiveLog([]); setPercent(0); setRunStatus("queued"); setRunError(""); setFrame(null);
     setWindowOff(false); windowOffRef.current = false;
     let stop = false;
+    let finished = false;
     const ws = new WebSocket((location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + "/ws/runs/" + runId);
     ws.onmessage = (ev) => {
       const message = JSON.parse(ev.data);
@@ -401,7 +412,10 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
       if (message.type === "done") {
         setRunStatus(message.status || "done");
         if (message.error) setRunError(message.error);
-        load();
+        if (message.status === "passed") setPercent(100);
+        if (message.log) setActiveLog(message.log);
+        finished = true;
+        load(); loadQueue();
       } else if (message.status && (message.order !== undefined || message.type === "status")) {
         if (message.type === "status") {
           setRunStatus(message.status);
@@ -412,7 +426,8 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
       }
     };
     const poll = async () => {
-      if (stop) return;
+      if (stop || finished) return;
+      if (document.hidden) { setTimeout(poll, 1000); return; }
       try {
         const run = await API.get("/api/runs/" + runId);
         if (run.progress_pct != null) setPercent(run.progress_pct);
@@ -420,6 +435,7 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
         if (run.status) setRunStatus(run.status);
         if (run.rog_monitor_log && run.status && run.status !== "running" && run.status !== "queued") setRunError(run.rog_monitor_log);
         if (run.display_window === false) { setWindowOff(true); windowOffRef.current = true; }
+        if (["passed", "failed", "error", "cancelled"].includes(run.status)) { finished = true; load(); loadQueue(); return; }
         // No point polling for a picture the run was told not to produce.
         if (!windowOffRef.current) {
         const img = await fetch("/api/runs/" + runId + "/live.jpg?t=" + Date.now());
@@ -507,6 +523,10 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
             "⚡ BATCH " + r.batch_id.slice(0, 8))),
         e("span", { className: "text-[10px] uppercase font-bold text-slate-500" }, r.status + (r.progress_pct ? " " + r.progress_pct + "%" : ""))
       ),
+      e("div", {className:"flex gap-3 text-xs mt-2"},
+        e(ReportLinks, {kind:"run",id:r.id}),
+        e("a", {href:`/api/runs/${r.id}/report.html`, onClick:ev=>ev.stopPropagation(), className:"text-indigo-300 underline"}, "HTML REPORT"),
+        e("a", {href:`/api/runs/${r.id}/report.json`, onClick:ev=>ev.stopPropagation(), className:"text-indigo-300 underline"}, "JSON REPORT")),
       // Queue hygiene cancels runs it can never finish; say so on the row.
       r.cancel_reason && e("div", { className: "text-[9px] bg-amber-950/20 p-2 mt-2 rounded border border-amber-900/30 text-amber-200" },
         "🧹 " + r.cancel_reason),
@@ -574,9 +594,12 @@ function BatchPanel({ onOpenRun, liveWindow }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [note, setNote] = useState("");
-  const [screenshots, setScreenshots] = useState("failure");
+  const [screenshots, setScreenshots] = useState("all");
   const [share, setShare] = useState(true);
-  const [retry, setRetry] = useState(true);
+  const [retry, setRetry] = useState(false);
+  const [includeTags, setIncludeTags] = useState("");
+  const [excludeTags, setExcludeTags] = useState("");
+  const tagOptions = () => ({include_tags: includeTags.split(/[\s,]+/).filter(Boolean), exclude_tags: excludeTags.split(/[\s,]+/).filter(Boolean)});
 
   const loadRecs = () => API.get("/api/library/recordings").then(rows => setRecs(rows || [])).catch(() => {});
   const loadBatches = () => API.get("/api/runs/batches").then(rows => setBatches(rows || [])).catch(() => {});
@@ -601,7 +624,7 @@ function BatchPanel({ onOpenRun, liveWindow }) {
     setBusy(true); setError(""); setNote("");
     try {
       const created = await API.post("/api/runs/batch", {
-        recording_ids: selected.map(r => r.id),
+        recording_ids: selected.map(r => r.id), ...tagOptions(),
         name: "Batch " + new Date().toLocaleTimeString(),
         display_window: !!liveWindow,
         screenshots: screenshots,
@@ -619,7 +642,7 @@ function BatchPanel({ onOpenRun, liveWindow }) {
     setBusy(true); setError(""); setNote("");
     try {
       const created = await API.post("/api/runs/batch", {
-        all: true, display_window: !!liveWindow, screenshots: screenshots,
+        all: true, ...tagOptions(), display_window: !!liveWindow, screenshots: screenshots,
         share_session: share, retry_transient: retry,
       });
       setBatch({ id: created.batch_id, status: created.status, total: created.total, progress_pct: 0,
@@ -640,12 +663,12 @@ function BatchPanel({ onOpenRun, liveWindow }) {
   const running = batch && ["queued", "running"].includes(batch.status);
   return e("div", { className: "bg-slate-900 p-4 rounded-2xl border border-slate-800 space-y-3" },
     e("div", { className: "flex justify-between items-center" },
-      e("h3", { className: "font-bold text-sm text-indigo-300" }, "AI batch execution ⚡"),
+      e("h3", { className: "font-bold text-sm text-indigo-300" }, "Sequential batch execution ⚡"),
       e("span", { className: "fast-badge" }, "ONE BROWSER")
     ),
     e("p", { className: "text-[10px] text-slate-400" },
       "Replays the selected recordings in one batch: a single Chromium for all of them, same-origin recordings share a warm session, " +
-      "step timeouts are learned from previous runs, and screenshots are taken only where they are worth the CPU."),
+      "step timeouts are learned from previous runs. One low-quality JPEG per step is reused in logs and PDFs."),
     e("div", { className: "max-h-40 overflow-y-auto space-y-1" },
       Object.keys(byProject).length === 0 && e("p", { className: "text-[10px] text-slate-500" }, "No recordings in the library yet."),
       Object.entries(byProject).map(([projectName, rows]) => e("div", { key: projectName },
@@ -658,11 +681,14 @@ function BatchPanel({ onOpenRun, liveWindow }) {
         ))
       ))
     ),
+    e("div", {className:"flex flex-wrap gap-2"},
+      e("input", {value:includeTags, onChange:ev=>setIncludeTags(ev.target.value), placeholder:"Require all tags (comma-separated)", "aria-label":"Include batch tags", className:"bg-slate-950 p-2 rounded text-xs"}),
+      e("input", {value:excludeTags, onChange:ev=>setExcludeTags(ev.target.value), placeholder:"Exclude any tags", "aria-label":"Exclude batch tags", className:"bg-slate-950 p-2 rounded text-xs"})),
     e("div", { className: "flex flex-wrap gap-2 items-center text-[10px]" },
       e("label", { className: "text-slate-400" }, "Screenshots ",
         e("select", { value: screenshots, disabled: running, onChange: ev => setScreenshots(ev.target.value),
           className: "bg-slate-950 border border-slate-800 rounded px-1 py-0.5 text-slate-200" },
-          ["none", "failure", "changes", "all"].map(mode => e("option", { key: mode, value: mode }, mode)))),
+          ["all"].map(mode => e("option", { key: mode, value: mode }, mode)))),
       e("label", { className: "text-slate-400 flex items-center gap-1" },
         e("input", { type: "checkbox", checked: share, disabled: running, onChange: () => setShare(!share) }), "share session"),
       e("label", { className: "text-slate-400 flex items-center gap-1" },
@@ -681,6 +707,7 @@ function BatchPanel({ onOpenRun, liveWindow }) {
     error && e("p", { role: "alert", className: "text-[11px] text-red-300" }, error),
     note && e("p", { role: "status", className: "text-[11px] text-emerald-300" }, note),
     batch && e("div", { className: "bg-slate-950 rounded-xl border border-slate-800 p-3 space-y-2" },
+      !running && e(ReportLinks, {kind:"batch",id:batch.id}),
       e("div", { className: "flex justify-between text-[11px] font-bold" },
         e("span", {}, `BATCH ${(batch.id || "").slice(0, 8)} · ${batch.total || 0} recordings`),
         e("span", { className: batch.status === "passed" ? "text-emerald-400" : batch.status === "running" ? "text-indigo-300" : "text-amber-300" },
@@ -726,6 +753,8 @@ function Library({ project, liveWindow, onRun }) {
   const [editing, setEditing] = useState(null);
   const [detail, setDetail] = useState(null);
   const [draft, setDraft] = useState(null);
+  const [tagFilter, setTagFilter] = useState("");
+  const [inputRecording, setInputRecording] = useState(null);
   useEffect(() => {
     if (!project) return;
     const start = Date.now();
@@ -755,10 +784,10 @@ function Library({ project, liveWindow, onRun }) {
       }
     } catch (err) { setError(err.message); }
   };
-  const run = async (recording) => {
+  const run = async (recording, variables = {}) => {
     setRunning(recording.id); setError("");
     try {
-      const res = await API.post("/api/runs", { target_id: recording.id, display_window: liveWindow !== false });
+      const res = await API.post("/api/runs", { target_id: recording.id, display_window: liveWindow !== false, variables });
       onRun(res.run_id);
     } catch (err) {
       setError(err.message);
@@ -766,28 +795,36 @@ function Library({ project, liveWindow, onRun }) {
     }
   };
   return e("div", { className: "space-y-4" },
+    e(ScenarioPlans, {project}),
+    inputRecording && e(ExecutionInputs, {recording:inputRecording,onClose:()=>setInputRecording(null),onRun:run}),
+    e(ImportScripts, {project, onSaved: rec => setRecs(prev => [rec, ...prev.filter(r => r.id !== rec.id)]), onRun: run}),
+    e("input", {value:tagFilter, onChange:ev=>setTagFilter(ev.target.value), placeholder:"Filter recordings by tag", "aria-label":"Filter recordings by tag", className:"w-full bg-slate-800 p-2 rounded text-xs"}),
     e("div", { className: "flex justify-between items-center" },
-      e("p", { className: "text-xs text-slate-500" }, "Recordings loaded super fast from GitHub branch branch"),
+      e("p", { className: "text-xs text-slate-500" }, "Repository library · sequential execution · one low-quality JPEG per step"),
       loadTime && e("span", { className: "fast-badge" }, loadTime)
     ),
     error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),
     recs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No recordings in repository yet. Open record tab and capture a session. Saves push to the active branch immediately."),
-    recs.map(r => e("div", { key: r.id, className: "p-5 bg-slate-900 rounded-2xl border border-slate-800 flex justify-between shadow-xl gap-3" },
+    orderedRecordingTree(recs).filter(r => !tagFilter.trim() || (r.tags || "").toLowerCase().split(/[\s,]+/).includes(tagFilter.trim().toLowerCase())).map(r => e("div", { key: r.id, className: "p-5 bg-slate-900 rounded-2xl border border-slate-800 flex justify-between shadow-xl gap-3" },
       e("div", { className: "min-w-0" },
-        e("div", { className: "font-bold text-indigo-300 flex items-center gap-2" }, r.name, e("span", { className: "text-[8px] bg-emerald-900 px-1 rounded" }, "BRANCH")),
+        e("div", { className: "font-bold text-indigo-300 flex items-center gap-2" }, (r.tree_depth ? "↳ ".repeat(r.tree_depth) : "") + r.name, e("span", { className: "text-[8px] bg-emerald-900 px-1 rounded" }, "BRANCH")),
         e("div", { className: "text-[10px] text-slate-500 font-mono truncate" }, (r.step_count || 0) + " steps · " + (r.start_url || "")),
+        e("div", {className:"text-xs text-slate-400"}, r.tags || "Untagged"),
+        e("a", {href:`/api/recordings/${r.id}/resources.zip`, className:"text-xs text-indigo-300 underline"}, "DOWNLOAD RUNNABLE PROJECT ZIP"),
         r.resources && r.resources.length > 0 && e("div", { className: "text-[10px] flex flex-wrap gap-2 mt-2" },
           r.resources.filter(name => !name.startsWith("step-")).map(name => e("a", { key: name, href: `/api/recordings/${r.id}/resources/${encodeURIComponent(name)}`, className: "text-indigo-300 underline" }, name)))
       ),
       e("div", { className: "flex gap-2 items-start" },
         e("a", { href: "/api/recordings/" + r.id + "/jenkins", className: "bg-slate-800 p-2 rounded text-[10px]" }, "J"),
         e("button", { onClick: () => openEditor(r.id), className: "bg-slate-700 px-3 py-2 rounded-xl text-xs" }, "EDIT"),
-        e("button", { onClick: () => run(r), disabled: running === r.id, className: "bg-emerald-600 px-6 py-2 rounded-xl font-bold text-xs disabled:opacity-60" }, running === r.id ? "…⚡" : "RUN ⚡")
+        e("button", { onClick: () => setInputRecording(r), disabled: running === r.id, className: "bg-emerald-600 px-6 py-2 rounded-xl font-bold text-xs disabled:opacity-60" }, running === r.id ? "…⚡" : "RUN ⚡")
       )
     )),
     editing && detail && e("div", { className: "fixed inset-0 z-[110] overflow-y-auto bg-slate-950 p-4 space-y-3" },
       e("div", { className: "flex justify-between" }, e("h2", {}, `Edit ${detail.name} · steps in execution order`),
         e("button", { onClick: () => setEditing(null), className: "key-btn" }, "CLOSE")),
+      e(RecordingMetadata, {recording:detail, recordings:recs, onSaved: rec => { setDetail(rec); setRecs(prev=>prev.map(r=>r.id===rec.id?rec:r)); }}),
+      e(ActionComposer, {onSave: async step => { const res = await API.post(`/api/recordings/${editing}/steps`, step); await openEditor(editing); if (res.publish_message) setError(res.publish_message); }}),
       (detail.steps || []).slice().sort((a, b) => a.order - b.order).map(step => e("div", { key: step.id, className: "bg-slate-900 rounded-xl p-3 space-y-2" },
         e("div", { className: "text-xs" }, `#${step.order} ${step.action} · ${step.label || ""}`),
         step.screenshot && e("img", { src: `/api/recordings/${editing}/steps/${step.id}/screenshot`, alt: `Step ${step.order}`, className: "max-w-full max-h-48 rounded" }),
@@ -903,42 +940,7 @@ function Projects({ setActiveProject, activeProject }) {
   );
 }
 
-function Variables({ project }) {
-  const [vars, setVars] = useState([]);
-  const [name, setName] = useState("");
-  const [val, setVal] = useState("");
-  const [loadTime, setLoadTime] = useState("");
-  const load = () => {
-    if (!project) return;
-    const start = Date.now();
-    API.get(`/api/variables?project_id=${project.id}`).then(data => {
-      setVars(Array.isArray(data) ? data : []);
-      setLoadTime(`${Date.now() - start}ms ⚡`);
-    });
-  };
-  useEffect(() => { load(); }, [project]);
-  if (!project) return e('div', {className:"py-20 text-center text-slate-500"}, "SELECT PROJECT FIRST");
-  return e('div', { className: "space-y-4" },
-    e('div', { className: "flex justify-between items-center" },
-      e('p', { className: "text-xs text-slate-500" }, `Variables loaded from GitHub branch for ${project.name}. Reusable in projects & recordings.`),
-      loadTime && e('span', { className: "fast-badge" }, loadTime)
-    ),
-    e('div', { className: "bg-slate-900 p-4 rounded-xl border border-slate-800 shadow-lg" },
-      e(AiInput, { value: name, onChange: e => setName(e.target.value), placeholder: "Key (e.g. user, password)" }), e('div', {className:"h-2"}),
-      e(AiInput, { value: val, onChange: e => setVal(e.target.value), placeholder: "Value" }),
-      e('button', { onClick: async () => { await API.post("/api/variables", { project_id: project.id, name, value: val }); setName(""); setVal(""); load(); }, className: "w-full bg-indigo-600 mt-3 py-2 rounded-lg font-bold" }, "SAVE VARIABLE")
-    ),
-    e('div', { className: "text-xs text-slate-400 bg-slate-950 p-3 rounded-xl border border-slate-800" },
-      e('p', { className: "font-bold text-indigo-300" }, "💡 How to reuse as parameters:"),
-      e('p', { className: "text-[11px] mt-1" }, "Use {{variableName}} in recording type steps. Variables show in Projects tab and Recording tab for quick insert. They push to the active branch immediately.")
-    ),
-    vars.map(v => e('div', { key: v.id, className: "p-4 bg-slate-900 rounded-2xl border border-slate-800 space-y-2 shadow-inner" },
-      e('div', { className: "flex justify-between" }, e('code', {className:"text-indigo-400 font-bold"}, `{{${v.name}}}`), e('button', { onClick: async () => { await API.del(`/api/variables/${v.id}`); load(); }, className: "text-red-500" }, "✕")),
-      e('div', { className: "text-[10px] text-slate-500 font-bold" }, "ASSOCIATED RECORDINGS: " + (v.tags?.join(", ") || "None") + " · ACTIVE BRANCH"),
-      e('input', { className: "w-full bg-slate-950 p-2 rounded text-xs text-slate-300 border border-slate-800", value: v.value, onChange: async (evt) => { await API.patch(`/api/variables/${v.id}`, {value: evt.target.value}); load(); } })
-    ))
-  );
-}
+function Variables(props) { return e(SecureVariables, props); }
 
 function Comparison() {
   const [runs, setRuns] = useState([]);
@@ -1700,7 +1702,7 @@ function Azure() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(e(App));
+ReactDOM.createRoot(document.getElementById("root")).render(e(AccessBoundary));
 </script>
 </body>
 </html>

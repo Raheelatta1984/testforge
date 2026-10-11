@@ -1,0 +1,8 @@
+test_BR_UI_01_import_preview_save_execute_report (tests.test_dashboard_import.DashboardImport.test_BR_UI_01_import_preview_save_execute_report) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 1.835s
+
+OK
+--- TITAN ERP SYSTEM BOOTED ---
+LOGS: /tmp/tf-unit-fezk60vv/artifacts/system_logs

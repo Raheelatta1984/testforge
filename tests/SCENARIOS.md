@@ -135,7 +135,7 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-QUEUE-03 | Duplicates are reused | `duplicate_of()` finds a queued, not-yet-started run of the same recording; `POST /api/runs` returns it with `deduplicated: true`, and `force: true` queues a new run. |
 | UT-QUEUE-04 | History purge | `purge_finished(older_than_days=14)` deletes a 40-day-old finished run, keeps a recent one, and never deletes an unfinished run. |
 | UT-QUEUE-05 | Clear endpoint | The boot reaper cancels a run left behind before startup; `POST /api/runs/queue/clear` rejects a negative or non-numeric `older_than_minutes` with 422, previews with `dry_run`, and reports `by_kind` plus the operator's reason. |
-| UT-BATCH-01 | One browser per batch | Three recordings replay through a single Chromium launch, every run carries the `batch_id` and both timestamps, the batch row reports `passed` at 100%, and the report counts the launches avoided. |
+| UT-BATCH-01 | Browser reuse in normal Chromium mode | Without the single-process compatibility flag, three recordings replay through a single Chromium launch, every run carries the `batch_id` and both timestamps, the batch row reports `passed` at 100%, and the report counts the launches avoided. |
 | UT-BATCH-02 | Learned pacing | Observed 100ms clicks produce a budget below the 3s default and above the floor; a 9s step is clamped at the ceiling; an unseen step keeps the default; `escalate()` relaxes within the ceiling; failures classify as timeout, navigation, selector or recording. |
 | UT-BATCH-03 | Screenshots only on failure | The default `failure` mode captures exactly one PNG for the failed step and none for the passing recording, and the batch reports `partial`. |
 | UT-BATCH-04 | Transient retry | A scripted timeout is retried once with an escalated budget, the run passes, and the log entry is marked `retried`. |
@@ -176,7 +176,7 @@ These run against a live `uvicorn` process started by the harness.
 | LB-REC-02 | browser | Click the name field, type, press Enter, click Continue | Steps are `navigate, click, type, press, click`. Selectors are `#name` and `#go`. After SAVE the recording and its Jenkinsfile are in the repository catalog. |
 | LB-REC-03 | browser | Key press is recorded | Covered by the Enter step in LB-REC-02. A failure there fails this ID too. |
 | LB-REC-04 | api | Stop a session that was never started, twice | Both calls succeed. Status is `absent`. |
-| LB-RUN-01 | browser | Replay a literal recording | Status `passed`. The page excerpt contains `Hello, Quinn`. A live frame remains. The Jenkins script mentions `navigate`. |
+| LB-RUN-01 | browser | Replay a literal recording | Status `passed`. The page excerpt contains `Hello, Quinn`. With a websocket viewer attached during replay, a live frame remains. The Jenkinsfile invokes `python playwright_test.py` (the executable replay), rather than merely echoing action names. |
 | LB-RUN-02 | browser | Replay `{{user}}` with variable `user=Ada` | The stored step value is still `{{user}}`. After replay the page contains `Hello, Ada`. |
 | LB-LIB-01 | api | Read `GET /api/library` | Source is `repository`. `qa-sample-app` is listed with variable `user` and both committed recordings, each with a Jenkinsfile. |
 | LB-LIB-02 | browser | Run the committed recording `qa-hello-literal` | Status `passed`. The page contains `Hello, Quinn`. No new recording is created. |
@@ -193,3 +193,104 @@ These run against a live `uvicorn` process started by the harness.
 2. Document the ID, preconditions, and expected result in this file.
 3. Run `python -m tests.harness`.
 4. Commit the scenario, any `library/` change, and the new `logs/<timestamp>/` report together so the result has a date, a time, and the revision it ran against.
+
+## Import, action-authoring and resource regressions
+
+These unit/API cases live in `tests/test_imports.py` and are included by the harness.
+
+| ID | Verification |
+| --- | --- |
+| UT-IMP-01 | Canonical CSV/JSON round trip; preview never executes source. |
+| UT-IMP-02 | XLSX literal cells accepted; formulas/multiple sheets rejected. |
+| UT-IMP-03 | Static Python actions, roles and assertions. |
+| UT-IMP-04 | Uploaded Python is never executed; branches/loops/eval-like calls block save. |
+| UT-IMP-05 | Supported JS/TS and rejection of arbitrary code/multiple tests. |
+| UT-IMP-06 | Supported BDD/Cucumber phrases; unknown steps/outlines rejected. |
+| UT-IMP-07 | Restricted Jenkins reference bundle; shell/installers/missing files rejected. |
+| UT-IMP-08 | File/row/archive limits, unknown columns and unknown formats. |
+| UT-IMP-09 | Action schemas reject unsafe URLs, paths, timeouts and options. |
+| UT-IMP-10 | Preview does not publish; confirmed save exports/publishes once; full project ZIP. |
+| UT-IMP-11 | Invalid save leaves no recording; oversized/malformed requests rejected. |
+| UT-IMP-12 | Append/edit an assertion; unknown options rejected. |
+| UT-IMP-13 | Optional access gate protects HTTP/websockets; signed-cookie login/logout; short key fails closed. |
+| UT-IMP-14 | Portable HTML report escapes target content and disables active scripts. |
+| UT-IMP-15 | Autosave skips expensive exports; explicit publish always regenerates them. |
+| UT-IMP-16 | Request/fixture payloads are not duplicated into audit selectors. |
+| UT-IMP-17 | Unresolved variables fail before keyboard input. |
+| UT-IMP-18 | Zero typing delay, local UI assets, live opt-in and one-worker exported config. |
+| UT-IMP-19 | Tags persist in fast catalog, selection filters are deterministic, parent cycles rejected. |
+| UT-IMP-20 | Live recording GET sees immediate DB steps without forcing an export. |
+| UT-IMP-21 | Action schema versions fail closed; JS option text is not rewritten accidentally. |
+| UT-IMP-22 | Idle websocket sender is cancelled when the client disconnects. |
+| UT-IMP-23 | Subscriber count/event queues are bounded and retain the final result. |
+
+Opt-in **real Chromium** checks in `tests/test_browser_features.py` use a local fixture
+HTTP server. Set `TF_TEST_BROWSER=1`; the export parity case also needs
+`TF_TEST_NODE_MODULES` pointing at Node dependencies including `@playwright/test@1.49.1`.
+
+| ID | Verification |
+| --- | --- |
+| BR-NEW-01 | Controls, strict locators, state/text/value/count/URL/title assertions, capture and intentional failure. |
+| BR-NEW-02 | Iframes, popup/new-page switching/closure, prompt accept/dismiss, upload and download. |
+| BR-NEW-03 | API status/JSON checks, capture into a UI input, scoped mock and cleanup. |
+| BR-NEW-04 | Incorrect assertions fail actual single and batch runs; no assertion retry; failure-only screenshots. |
+| BR-NEW-05 | Generated Python/JS/TS projects execute correctly, and all three exit nonzero for an incorrect assertion. |
+| BR-UI-01 | Actual dashboard CSV upload → preview → isolated test → save → replay → report, then a two-row synthetic domain plan → test → save; no browser console errors. |
+
+`BR-UI-01` lives in `tests/test_dashboard_import.py` and requires an isolated server via
+`TF_TEST_APP_URL`. It refuses a publishing-enabled instance. Never target production.
+These opt-in checks are run separately from the normal harness so a missing browser
+or Node toolchain is not disguised as a passed integration check.
+
+## Sequential plans and publication gates
+
+`tests/test_plans.py` is included in the standard harness:
+
+| ID | Verification |
+| --- | --- |
+| UT-PLAN-01 | Flow expansion/cycles, fixture/data schemas, engine/device validation and work caps. |
+| UT-PLAN-02 | Dedicated secret namespace and expiring auth state; resolved values are not written to source. |
+| UT-PLAN-03 | Drafts create no library/recording rows; changed steps reject publication; receipt save is idempotent. |
+| UT-PLAN-04 | Failed tests, changed secrets and expired receipts block publishing. |
+| UT-PLAN-05 | Extra engines require opt-in; invalid IDs and draft storage inside the library are rejected. |
+| UT-PLAN-06 | JSON plan preview, database/repository round trip and companion exports; other-engine plans rejected from shared Chromium batches. |
+| UT-PLAN-07 | All five local synthetic packs validate with positive/negative datasets and teardown. |
+| UT-PLAN-08 | A second draft is refused while one runs; cancellation releases the draft. |
+| UT-PLAN-09 | Dependencies, caches, replay outputs and symlinks are excluded from GitHub API collection. |
+| UT-PLAN-10 | Reusable source plans survive saving; raw-step edits cannot silently diverge from the execution snapshot. |
+| UT-PLAN-11 | A concurrent autosave read cannot roll back a recorder's uncommitted SQLite write. |
+| UT-PLAN-12 | Import save requires a passing receipt; omitting it or passing require_test=false cannot bypass the gate. |
+
+`tests/test_plan_browser.py` adds explicit real-browser validation:
+
+| ID | Verification |
+| --- | --- |
+| BR-PLAN-01 | Draft test before save, standalone replay, mixed ordinary/plan/multi-project sequential batch, plus Python/JS/TS plan exports with positive and deliberately failing assertions. |
+| BR-PLAN-02 | Desktop/tablet/mobile viewport-touch profiles with operator-provided cookies and environment secret references; values do not appear in plan results. |
+| BR-PLAN-03 | Teardown after failure, exactly one explicit retry, and flaky recovery rejected as a clean pass. |
+| BR-PLAN-04 | All five synthetic domain packs execute both data rows correctly. |
+
+Run `python tools/quality_gate.py` with its documented prerequisites for the
+complete sequential, fail-closed gate. It does not install packages, publish,
+schedule CI, dispatch provider workflows or deploy anything. Chromium was used
+for the browser checks; Firefox/WebKit are opt-in paths, not verified claims.
+
+## Ordered scenarios, vault inputs and PDFs
+
+- `UT-SCENE-01..13`: encryption/masking/keyring and fail-closed behavior; ordered,
+  repeated links; immutable input snapshots and precedence; saved input protection
+  after a variable definition is deleted; one-session fake replay; PDF caching and
+  JPEG passthrough; oldest-first/hourly remote retention discovery; provider
+  response contracts; one upload/summary-only publication; malformed inputs; redaction before truncation.
+- `BR-SCENE-01`: real Chromium cross-project login→logout, one shared session,
+  encrypted one-off password override, masked JPEG pixel check, nine captures for
+  nine actions, single and aggregate PDFs without any additional capture; single
+  recording replay uses the same inputs/evidence path.
+- `BR-SCENE-02`: deliberately wrong order fails; following recording is cancelled.
+- `BR-SCENE-03`: frozen project defaults do not override dataset values; explicit
+  one-off plan overrides do, without changing persistent project values.
+- `BR-UI-02`: dashboard encrypted password/parameter save, ordered linked scenario,
+  per-entry one-off editing, execution and PDF download; no browser JS errors.
+
+Remote release operations use mocks. They do not verify live GitHub upload/delete
+permission, deployment secrets, real D365 authentication, billing, or production.

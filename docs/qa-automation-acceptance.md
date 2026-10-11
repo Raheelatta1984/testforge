@@ -26,8 +26,47 @@ Rephrased as a senior QA automation engineer's acceptance criteria. Publishing t
 | 19 | The execution queue must not accumulate runs that can never execute. Orphans left by a restart, entries stale behind a busy browser and duplicate runs of an already-waiting recording are reported and can be cleared, with a dry run first. | `app/run_queue.py`, the boot reaper, the periodic sweeper, `GET /api/runs/queue/status` (`hygiene`) and `POST /api/runs/queue/clear`. `UT-QUEUE-01`…`UT-QUEUE-05`, `LB-API-11`. Cancelling a running batch recording is deliberately not possible mid-replay: it stops before the next one. |
 | 20 | Batch execution replays many recordings quickly on a small instance: one browser for the batch, learned per-step budgets, screenshots only where they are worth the CPU, one retry for a transient failure and none for a broken recording, and a memory guard that relaunches the browser before the platform kills the service. | `app/batch_runner.py`, `POST /api/runs/batch`, `GET /api/runs/batch/{id}`, `POST /api/runs/batch/{id}/cancel`, `/ws/batches/{id}`. `UT-BATCH-01`…`UT-BATCH-10`, `LB-BAT-01`. Wall-clock speedup and RSS headroom must still be measured on a real deployment with Chromium. |
 
+## Additional roadmap requirements — delivery tracked separately
+
+The user-supplied Playwright roadmap is compared against the current application in
+[Playwright roadmap → TestForge requirements](playwright-roadmap-comparison.md).
+That document defines R01–R15, including assertions, richer browser interactions,
+API/network testing, authentication profiles, reusable/data-driven suites, HTML
+reports, CI, browser/device coverage and bounded parallel execution. These are
+additional development requirements, **not blanket claims of completion**. The
+[current implementation update](script-import-and-actions.md) records delivered
+actions/imports, resource changes, validation and remaining scope. Replay now rejects
+unresolved variables; missing placeholders are no longer typed literally.
+
+The original implementation/deployment audit and its validation limitations are in
+[Implementation and deployment review](implementation-deployment-review.md).
+
 ## Validation
 
 Run `.venv/bin/python -m tests.test_unit` or `python -m tests.harness`. Browser-dependent scenarios need Chromium (`playwright install chromium`) and a reachable test application. Run deployed browser tests and measure click-to-step latency, batch wall-clock time and RSS headroom before marking those performance targets verified.
 
 No test publishes to GitHub: the API publisher is exercised against an in-memory fake transport, and the harness strips every GitHub credential and repository variable from the server environment before it starts.
+
+
+### Implemented follow-up acceptance checks
+
+- Imported steps are browser-tested outside the published library before the
+  import save endpoint accepts a passing, matching draft receipt.
+- Datasets, setup/teardown, named flows, profile selection and explicit retries
+  have bounded sequential execution and generated-runner coverage.
+- Secret/auth state references are environment-backed; old committed literals
+  are not remediated automatically and must still be rotated.
+- Synthetic domain examples and the explicit local/CI gate are implemented.
+- No parallel worker, paid service, automatic CI trigger or hosting upgrade was
+  enabled. Capacity, zero charges and production deployment are **not** inferred
+  from local tests. See the implementation guide for exact limits and evidence.
+
+### Ordered execution and reporting extension
+
+The new acceptance path is **Project → High-level scenario → named plan → ordered
+recording links**, with per-recording inputs, persistent categorized variables,
+authenticated encryption at rest, shared-session sequential replay and fail-stop
+ordering. Single/batch PDFs reuse one low-quality JPEG per executed step. GitHub
+PDFs are release attachments rather than committed binaries; hourly maintenance
+expires them oldest-first after 48 hours, subject to application/provider uptime.
+See [configuration and explicit security/resource boundaries](scenarios-secrets-and-pdf-reports.md).

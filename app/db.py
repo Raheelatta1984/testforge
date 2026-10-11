@@ -4,17 +4,23 @@ from datetime import datetime
 from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, func, Column)
 from sqlalchemy import inspect, text, types as sqltypes
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
-from sqlalchemy.pool import StaticPool
+from sqlalchemy.pool import StaticPool, QueuePool
 from app.config import DATABASE_URL
 from app.errors import redact
 
-# SQLite cannot use a large QueuePool (and the default pool is not safe to share
-# with Playwright tasks on the event-loop thread). Postgres keeps a real pool.
+# StaticPool shares ONE transaction-bearing connection between unrelated
+# sessions. An autosave read/rollback can otherwise erase a recorder's flush.
+# File SQLite uses two bounded, reused connections (no overflow or new workers).
+# In-memory SQLite must retain its one connection to preserve the database.
 if DATABASE_URL.startswith("sqlite"):
+    memory = DATABASE_URL.endswith(':memory:') or DATABASE_URL in {'sqlite://', 'sqlite+pysqlite://'}
+    pool_options = {'poolclass': StaticPool} if memory else {
+        'poolclass': QueuePool, 'pool_size': 2, 'max_overflow': 0, 'pool_timeout': 10,
+    }
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False, "timeout": 30},
-        poolclass=StaticPool,
+        **pool_options,
     )
 else:
     engine = create_engine(
@@ -57,6 +63,8 @@ class Recording(Base):
     parent_id: Mapped[str] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     start_url: Mapped[str] = mapped_column(String(1000))
+    execution_plan: Mapped[dict] = mapped_column(JSON, nullable=True)
+    input_defaults: Mapped[dict] = mapped_column(JSON, nullable=True)
     tags: Mapped[str] = mapped_column(String(500), default="AI_PENDING")
     status: Mapped[str] = mapped_column(String(50), default="active")
     video_path: Mapped[str] = mapped_column(String(1000), nullable=True)
@@ -82,6 +90,10 @@ class Run(Base):
     __tablename__ = "runs"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
     recording_id: Mapped[str] = mapped_column(ForeignKey("recordings.id"))
+    variable_snapshot: Mapped[dict] = mapped_column(JSON, nullable=True)
+    input_overrides: Mapped[dict] = mapped_column(JSON, nullable=True)
+    snapshot_steps: Mapped[list] = mapped_column(JSON, nullable=True)
+    sequence: Mapped[int] = mapped_column(Integer, nullable=True)
     status: Mapped[str] = mapped_column(String(50), default="queued") # queued, running, failed, passed, investigating, cancelled
     progress_pct: Mapped[int] = mapped_column(Integer, default=0)
     execution_log: Mapped[list] = mapped_column(JSON, default=list)
@@ -280,7 +292,16 @@ VAR_REGEX = re.compile(r"\{\{\s*([\w.\-]+)\s*\}\}")
 
 def resolve_variables(db, project_id):
     vars_found = db.query(Variable).filter(Variable.project_id == project_id).all()
-    return {v.name: v.value for v in vars_found}
+    from app.plan_runtime import resolve_values
+    values = {}
+    for v in vars_found:
+        from app.secrets_store import SecretValue, PREFIX
+        value = SecretValue(v.value) if str(v.value).startswith(PREFIX) else v.value
+        if isinstance(value, str) and value.startswith('env:'):
+            from app.plan_runtime import variables
+            value = variables({v.name: {'env': value[4:]}})[v.name]
+        values[v.name] = value
+    return resolve_values(values)
 
 def apply_variables(text, var_map):
     if not text: return text

@@ -7,6 +7,7 @@ Scenario IDs match tests/SCENARIOS.md.
 import asyncio
 import os
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from tests.bootstrap import ensure_test_env
@@ -650,7 +651,7 @@ class ReplayTests(unittest.TestCase):
 
     def test_UT_REP_08_unsupported_action(self):
         with self.assertRaises(RuntimeError):
-            asyncio.run(replay_step(FakePage(), {"action": "hover"}, {}))
+            asyncio.run(replay_step(FakePage(), {"action": "unknown_action"}, {}))
 
     def test_UT_REP_09_navigate_without_url(self):
         with self.assertRaises(RuntimeError):
@@ -1192,10 +1193,10 @@ class SaveCrashTests(unittest.TestCase):
         calls = []
         closed = []
 
-        def blocking_export(recording_id, publish=False):
+        def blocking_export(recording_id, publish=False, include_exports=True):
             calls.append(recording_id)
             time.sleep(0.8)          # longer than the flush budget below
-            return original_export(recording_id, publish=publish)
+            return original_export(recording_id, publish=publish, include_exports=include_exports)
 
         async def exercise():
             library_store.export_recording = blocking_export
@@ -1227,7 +1228,7 @@ class SaveCrashTests(unittest.TestCase):
         original_export = library_store.export_recording
         closed = []
 
-        def exploding_export(recording_id, publish=False):
+        def exploding_export(recording_id, publish=False, include_exports=True):
             raise RuntimeError("disk on fire")
 
         async def exercise():
@@ -1392,8 +1393,7 @@ class ExecutorWindowTests(unittest.TestCase):
         from app.config import ARTIFACTS
         status, page, frames, events = self._drive(display_window=False, viewers=1)
         self.assertEqual(status, "passed", "the replay must still succeed headless")
-        self.assertEqual([s for s in page.shots if s == "jpeg"], [], "no screencast frames")
-        self.assertIn("png", page.shots, "step screenshots are still taken")
+        self.assertEqual(page.shots, ["jpeg", "jpeg"], "one evidence JPEG per step, no extra screencast")
         self.assertEqual(frames, [], "no frame is pushed to the dashboard")
         self.assertFalse(events[-1]["display_window"])
         # Screenshots are written detached from the replay path, so the run must
@@ -1415,8 +1415,8 @@ class ExecutorWindowTests(unittest.TestCase):
     def test_UT_RUN_07_window_on_but_nobody_watching_renders_nothing(self):
         status, page, frames, events = self._drive(display_window=True, viewers=0)
         self.assertEqual(status, "passed")
-        self.assertEqual([s for s in page.shots if s == "jpeg"], [],
-                         "an unwatched run must not pay for frames")
+        self.assertEqual(page.shots, ["jpeg", "jpeg"], "one JPEG per step only")
+        self.assertEqual(frames, [], "unwatched evidence is not broadcast")
 
     def test_UT_RUN_08_merged_repeat_executes_every_occurrence(self):
         """A step recorded as x3 performs three actions on replay."""
@@ -2553,8 +2553,13 @@ class BatchExecutionTests(unittest.TestCase):
         {"action": "click", "label": "Go", "selector": {"primary": "#go", "x": 80, "y": 200}},
     ]
 
+    @patch.dict(os.environ, {"TF_BROWSER_SINGLE_PROCESS": "0"})
     def test_UT_BATCH_01_one_browser_replays_the_whole_batch(self):
-        """Three recordings, one Chromium launch: that is the point of a batch."""
+        """Normal Chromium supports replacing isolated contexts in one launch.
+
+        Single-process mode needs sequential relaunches on context changes;
+        real mixed-project coverage lives in test_plan_browser.
+        """
         from app.batch_runner import execute_batch
         from app.db import Batch
         from tests.fakes import BatchFakePlaywright
@@ -2617,7 +2622,7 @@ class BatchExecutionTests(unittest.TestCase):
         self.assertEqual(classify_failure("element is not visible"), "selector")
 
     def test_UT_BATCH_03_screenshots_only_where_they_are_worth_it(self):
-        """The default batch mode captures a PNG on failure only."""
+        """The low-level failure policy uses one JPEG (the UI/API enforce all)."""
         from app.batch_runner import execute_batch
         from tests.fakes import BatchFakePlaywright
         good = self._make_recording("batch-shot-good", self.STEPS)[0]
@@ -2629,7 +2634,7 @@ class BatchExecutionTests(unittest.TestCase):
         fake = BatchFakePlaywright(known=["#go"])
         report = asyncio.run(execute_batch(batch_id, None, playwright_factory=lambda: fake,
                                            pacer=AdaptivePacerForTest()))
-        shots = [shot for page in fake.pages for shot in page.shots if shot == "png"]
+        shots = [shot for page in fake.pages for shot in page.shots if shot == "jpeg"]
         self.assertEqual(report["screenshots"]["mode"], "failure")
         self.assertEqual(report["screenshots"]["taken"], 1, "only the failed step is captured")
         self.assertEqual(len(shots), 1)
@@ -2732,8 +2737,8 @@ class BatchExecutionTests(unittest.TestCase):
         # The same recording twice is one entry, and recording_ids wins over project_id.
         self.assertEqual(payload["total"], 1)
         self.assertEqual(len(payload["run_ids"]), 1)
-        self.assertEqual(payload["options"]["screenshots"], "none")
-        self.assertEqual(started["kwargs"]["screenshots"], "none")
+        self.assertEqual(payload["options"]["screenshots"], "all", "API enforces one JPEG per step")
+        self.assertEqual(started["kwargs"]["screenshots"], "all")
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(missing.status_code, 404)
 

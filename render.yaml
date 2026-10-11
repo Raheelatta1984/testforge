@@ -15,6 +15,12 @@ projects:
       dockerContext: .
       dockerfilePath: ./Dockerfile
       autoDeployTrigger: commit
+      # Test-data publication must not rebuild the service for every SAVE.
+      # This takes effect only after this blueprint is applied to Render.
+      buildFilter:
+        ignoredPaths:
+        - library/**
+        - logs/**
       # One instance. The in-process guardrails (browser budget, frame and
       # buffer caps) only hold for a single process; a second replica would each
       # run their own Chromium against the same 512MB plan.
@@ -82,9 +88,9 @@ projects:
       - key: TF_RUN_RETENTION_DAYS
         value: "14"
       # --- batch execution --------------------------------------------------
-      # One browser for the whole batch; screenshots only when a step fails.
+      # One browser at a time; each step captures one reusable low-quality JPEG.
       - key: TF_BATCH_SCREENSHOTS
-        value: failure
+        value: all
       - key: TF_BATCH_MAX_RECORDINGS
         value: "40"
       - key: TF_MAX_BATCHES
@@ -101,3 +107,10 @@ projects:
         value: "262144"
       - key: TF_MAX_LOG_INDEX_ROWS
         value: "40"
+
+      # Stable encryption keyring: provision outside Git; never generate on each boot.
+      - key: TF_VARIABLE_ENCRYPTION_KEYS
+        sync: false
+      # Enable only after checking repository privacy, token permissions and quotas.
+      - key: TF_REPORTS_GITHUB
+        value: "0"

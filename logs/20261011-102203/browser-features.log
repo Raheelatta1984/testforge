@@ -1,0 +1,16 @@
+test_BR_NEW_01_controls_assertions_and_failure (tests.test_browser_features.BrowserFeatures.test_BR_NEW_01_controls_assertions_and_failure) ... ok
+test_BR_NEW_02_frames_popups_dialog_files (tests.test_browser_features.BrowserFeatures.test_BR_NEW_02_frames_popups_dialog_files) ... ok
+test_BR_NEW_03_api_capture_and_scoped_network_mock (tests.test_browser_features.BrowserFeatures.test_BR_NEW_03_api_capture_and_scoped_network_mock) ... ok
+test_BR_NEW_04_single_and_batch_assertion_failures (tests.test_browser_features.BrowserFeatures.test_BR_NEW_04_single_and_batch_assertion_failures) ... INFO:ROG_TITAN:RUN START 48587beb-1b15-4bf0-b59e-3d3f4191a0ae steps=2 (expanded from 2) window=False
+INFO:ROG_TITAN:RUN DONE 48587beb-1b15-4bf0-b59e-3d3f4191a0ae status=failed elapsed=0.8s
+INFO:ROG_TITAN:BATCH DONE 706b9ee9-6c8d-482b-bf36-d6ef70c3a681 status=failed total=1 passed=0 failed=1 elapsed=0.79s
+ok
+test_BR_NEW_05_exported_python_javascript_typescript (tests.test_browser_features.BrowserFeatures.test_BR_NEW_05_exported_python_javascript_typescript) ... ok
+
+----------------------------------------------------------------------
+Ran 5 tests in 15.680s
+
+OK
+--- TITAN ERP SYSTEM BOOTED ---
+LOGS: /tmp/tf-unit-62sco01s/artifacts/system_logs
+ROG DATABASE INITIALIZED

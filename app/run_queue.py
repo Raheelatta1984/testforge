@@ -351,6 +351,8 @@ async def _sweep_loop() -> None:
         await asyncio.sleep(SWEEP_SECONDS)
         try:
             await asyncio.to_thread(reap_orphans)
+            from app.pdf_reports import sweep
+            await asyncio.to_thread(sweep)
         except Exception as exc:
             logger.warning("QUEUE SWEEP FAILED: %s", exc)
 

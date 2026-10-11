@@ -92,6 +92,10 @@ class ScenarioRunner:
                 "error": str(exc),
             }
 
+        finally:
+            for watcher in ctx.get("_watchers", []):
+                watcher.close()
+
     def _dispatch(self, step, ctx):
         action = step["action"]
         handler = getattr(self, "do_" + action, None)
@@ -382,6 +386,10 @@ class ScenarioRunner:
     def do_queue_run(self, step, ctx):
         _, payload = self.client.ok("POST", "/api/runs", {"target_id": step["recording"]})
         ctx[step["save"]] = payload["run_id"]
+        if step.get("watch"):
+            from websockets.sync.client import connect
+            base = self.client.base.replace("http://", "ws://", 1).replace("https://", "wss://", 1)
+            ctx.setdefault("_watchers", []).append(connect(base + "/ws/runs/" + payload["run_id"], max_queue=128))
 
     def do_wait_run(self, step, ctx):
         deadline = time.time() + step.get("timeout", 60)

@@ -102,7 +102,7 @@ def run_unit_tests(log, unit_log_path):
     ensure_test_env()
     stream = io.StringIO()
     loader = unittest.TestLoader()
-    suite = loader.loadTestsFromName("tests.test_unit")
+    suite = loader.loadTestsFromNames(["tests.test_unit", "tests.test_imports", "tests.test_plans", "tests.test_scenarios"])
     # The runner drops each test from the suite after it runs, so snapshot first.
     cases = [(test, test.id()) for test in _walk(suite)]
     result = unittest.TextTestRunner(stream=stream, verbosity=2).run(suite)

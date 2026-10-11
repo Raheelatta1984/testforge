@@ -1,0 +1,200 @@
+test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world (tests.test_unit.ArtifactExportTests.test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world) ... ok
+test_UT_MEM_08_artifact_export_streams_within_the_cap (tests.test_unit.ArtifactExportTests.test_UT_MEM_08_artifact_export_streams_within_the_cap) ... ok
+test_AZ_01_the_guide_is_served_as_markdown (tests.test_unit.AzureGuideTests.test_AZ_01_the_guide_is_served_as_markdown) ... ok
+test_AZ_02_repeated_reads_are_cached (tests.test_unit.AzureGuideTests.test_AZ_02_repeated_reads_are_cached) ... ok
+test_AZ_03_a_deployment_without_the_guide_says_where_to_read_it (tests.test_unit.AzureGuideTests.test_AZ_03_a_deployment_without_the_guide_says_where_to_read_it) ... ok
+test_AZ_04_the_guide_is_azure_only (tests.test_unit.AzureGuideTests.test_AZ_04_the_guide_is_azure_only)
+Nothing in the Azure tab may describe a different hosting platform. ... ok
+test_UT_BATCH_01_one_browser_replays_the_whole_batch (tests.test_unit.BatchExecutionTests.test_UT_BATCH_01_one_browser_replays_the_whole_batch)
+Normal Chromium supports replacing isolated contexts in one launch. ... ok
+test_UT_BATCH_02_pacing_learns_clamps_and_classifies (tests.test_unit.BatchExecutionTests.test_UT_BATCH_02_pacing_learns_clamps_and_classifies)
+Learned budgets stay between a floor and the single-run ceiling. ... ok
+test_UT_BATCH_03_screenshots_only_where_they_are_worth_it (tests.test_unit.BatchExecutionTests.test_UT_BATCH_03_screenshots_only_where_they_are_worth_it)
+The default batch mode captures a PNG on failure only. ... ok
+test_UT_BATCH_04_transient_failure_is_retried_once (tests.test_unit.BatchExecutionTests.test_UT_BATCH_04_transient_failure_is_retried_once)
+A timeout is retried with a relaxed budget; the recording still passes. ... ok
+test_UT_BATCH_05_no_retry_for_a_real_recording_defect (tests.test_unit.BatchExecutionTests.test_UT_BATCH_05_no_retry_for_a_real_recording_defect)
+A missing selector is not transient: retrying it only costs time. ... ok
+test_UT_BATCH_06_plan_groups_origins_shortest_first (tests.test_unit.BatchExecutionTests.test_UT_BATCH_06_plan_groups_origins_shortest_first) ... ok
+test_UT_BATCH_07_batch_endpoints_validate_and_report (tests.test_unit.BatchExecutionTests.test_UT_BATCH_07_batch_endpoints_validate_and_report) ... ok
+test_UT_BATCH_08_cancel_stops_the_rest_of_the_batch (tests.test_unit.BatchExecutionTests.test_UT_BATCH_08_cancel_stops_the_rest_of_the_batch) ... ok
+test_UT_BATCH_09_a_second_batch_is_refused_while_one_runs (tests.test_unit.BatchExecutionTests.test_UT_BATCH_09_a_second_batch_is_refused_while_one_runs)
+One browser means one batch: the second is refused, not queued behind it. ... ok
+test_UT_BATCH_10_a_batch_cannot_open_a_second_browser (tests.test_unit.BatchExecutionTests.test_UT_BATCH_10_a_batch_cannot_open_a_second_browser)
+The batch holds the shared budget, so a recording cannot start Chromium too. ... ok
+test_UT_BOOT_01_modules_import (tests.test_unit.BootTests.test_UT_BOOT_01_modules_import) ... ok
+test_UT_BOOT_02_config_contract (tests.test_unit.BootTests.test_UT_BOOT_02_config_contract) ... ok
+test_UT_BOOT_03_run_columns_match_the_model (tests.test_unit.BootTests.test_UT_BOOT_03_run_columns_match_the_model) ... ok
+test_UT_BRW_01_libs_do_not_leak (tests.test_unit.BrowserLaunchTests.test_UT_BRW_01_libs_do_not_leak) ... ok
+test_UT_BRW_02_missing_binary_raises (tests.test_unit.BrowserLaunchTests.test_UT_BRW_02_missing_binary_raises) ... ok
+test_UT_BRW_03_install_hint (tests.test_unit.BrowserLaunchTests.test_UT_BRW_03_install_hint) ... ok
+test_UT_BRW_04_video_disabled_for_override (tests.test_unit.BrowserLaunchTests.test_UT_BRW_04_video_disabled_for_override) ... ok
+test_UT_DOC_01_catalog_ids_match (tests.test_unit.CatalogTests.test_UT_DOC_01_catalog_ids_match) ... ok
+test_UT_IMG_01_copy_sources_survive_dockerignore (tests.test_unit.DockerfileTests.test_UT_IMG_01_copy_sources_survive_dockerignore)
+No .dockerignore entry strips a local COPY source. ... ok
+test_UT_RUN_05_window_off_replays_without_rendering_a_frame (tests.test_unit.ExecutorWindowTests.test_UT_RUN_05_window_off_replays_without_rendering_a_frame) ... ok
+test_UT_RUN_06_window_on_with_a_viewer_streams_frames (tests.test_unit.ExecutorWindowTests.test_UT_RUN_06_window_on_with_a_viewer_streams_frames) ... ok
+test_UT_RUN_07_window_on_but_nobody_watching_renders_nothing (tests.test_unit.ExecutorWindowTests.test_UT_RUN_07_window_on_but_nobody_watching_renders_nothing) ... ok
+test_UT_RUN_08_merged_repeat_executes_every_occurrence (tests.test_unit.ExecutorWindowTests.test_UT_RUN_08_merged_repeat_executes_every_occurrence)
+A step recorded as x3 performs three actions on replay. ... ok
+test_UT_MEM_01_browser_budget_serialises_and_counts (tests.test_unit.GuardrailTests.test_UT_MEM_01_browser_budget_serialises_and_counts) ... ok
+test_UT_MEM_02_cancelled_waiter_does_not_leak_a_permit (tests.test_unit.GuardrailTests.test_UT_MEM_02_cancelled_waiter_does_not_leak_a_permit) ... ok
+test_UT_MEM_03_live_frames_are_bounded_and_expire (tests.test_unit.GuardrailTests.test_UT_MEM_03_live_frames_are_bounded_and_expire) ... ok
+test_UT_MEM_04_run_buffers_are_bounded (tests.test_unit.GuardrailTests.test_UT_MEM_04_run_buffers_are_bounded) ... ok
+test_UT_MEM_05_recorder_and_executor_share_one_budget (tests.test_unit.GuardrailTests.test_UT_MEM_05_recorder_and_executor_share_one_budget)
+A recording session and a run must not each hold a Chromium. ... ok
+test_UT_MEM_06_two_runs_never_hold_a_browser_at_once (tests.test_unit.GuardrailTests.test_UT_MEM_06_two_runs_never_hold_a_browser_at_once) ... ok
+test_UT_GIT_01_status_explains_a_missing_git_checkout (tests.test_unit.LibraryDiagnosticsTests.test_UT_GIT_01_status_explains_a_missing_git_checkout)
+A deployment with no checkout must say so, not show bare dashes. ... ok
+test_UT_GIT_02_status_reports_what_is_on_disk (tests.test_unit.LibraryDiagnosticsTests.test_UT_GIT_02_status_reports_what_is_on_disk) ... ok
+test_UT_LIB_01_project_is_written_to_the_repository_tree (tests.test_unit.LibraryStoreTests.test_UT_LIB_01_project_is_written_to_the_repository_tree) ... ok
+test_UT_LIB_02_database_only_projects_are_hidden (tests.test_unit.LibraryStoreTests.test_UT_LIB_02_database_only_projects_are_hidden) ... ok
+test_UT_LIB_03_recording_writes_its_jenkins_resource (tests.test_unit.LibraryStoreTests.test_UT_LIB_03_recording_writes_its_jenkins_resource) ... ok
+test_UT_LIB_04_variables_roundtrip_in_the_repository (tests.test_unit.LibraryStoreTests.test_UT_LIB_04_variables_roundtrip_in_the_repository) ... ok
+test_UT_LIB_05_rejects_a_path_escape (tests.test_unit.LibraryStoreTests.test_UT_LIB_05_rejects_a_path_escape) ... ok
+test_UT_LIB_06_publish_pushes_only_library_files (tests.test_unit.LibraryStoreTests.test_UT_LIB_06_publish_pushes_only_library_files) ... ok
+test_UT_LIB_07_failed_push_keeps_local_project_for_retry (tests.test_unit.LibraryStoreTests.test_UT_LIB_07_failed_push_keeps_local_project_for_retry) ... ok
+test_UT_LIB_08_materialize_loads_a_file_only_recording (tests.test_unit.LibraryStoreTests.test_UT_LIB_08_materialize_loads_a_file_only_recording) ... ok
+test_UT_LOG_04_local_index_and_file_are_served (tests.test_unit.LocalLogTests.test_UT_LOG_04_local_index_and_file_are_served) ... ok
+test_UT_LOG_05_local_reader_refuses_to_escape_and_caps_the_tail (tests.test_unit.LocalLogTests.test_UT_LOG_05_local_reader_refuses_to_escape_and_caps_the_tail) ... ok
+test_UT_LOG_06_source_falls_back_to_local_and_explains_itself (tests.test_unit.LocalLogTests.test_UT_LOG_06_source_falls_back_to_local_and_explains_itself)
+`/api/logs/source` must offer the local reader instead of a dead end. ... ok
+test_UT_LOG_07_repo_coordinates_come_from_configuration (tests.test_unit.LocalLogTests.test_UT_LOG_07_repo_coordinates_come_from_configuration)
+No checkout is needed to read committed logs: TF_GITHUB_REPO is enough. ... ok
+test_UT_LOG_01_logs_are_pointed_at_github_not_this_server (tests.test_unit.LogsSourceTests.test_UT_LOG_01_logs_are_pointed_at_github_not_this_server) ... ok
+test_UT_LOG_02_logs_source_rejects_a_bad_branch (tests.test_unit.LogsSourceTests.test_UT_LOG_02_logs_source_rejects_a_bad_branch) ... ok
+test_UT_LOG_03_logs_source_explains_a_missing_checkout (tests.test_unit.LogsSourceTests.test_UT_LOG_03_logs_source_explains_a_missing_checkout) ... ok
+test_UT_RUN_03_no_frame_is_rendered_without_a_viewer (tests.test_unit.PreviewCostTests.test_UT_RUN_03_no_frame_is_rendered_without_a_viewer)
+The live window must not burn CPU for a run nobody is watching. ... ok
+test_UT_RUN_04_run_records_the_live_window_choice (tests.test_unit.PreviewCostTests.test_UT_RUN_04_run_records_the_live_window_choice)
+The Runs tab toggle reaches the queue and the run record. ... ok
+test_UT_PUB_01_disabled_publishing_promises_no_retry (tests.test_unit.PublishModeTests.test_UT_PUB_01_disabled_publishing_promises_no_retry)
+With publishing off, the message must not say a retry is coming. ... ok
+test_UT_PUB_02_failed_push_states_the_retry_interval (tests.test_unit.PublishModeTests.test_UT_PUB_02_failed_push_states_the_retry_interval)
+A real push failure keeps the retry promise, with the configured wait. ... ok
+test_UT_PUB_03_api_publisher_commits_and_verifies (tests.test_unit.PublishModeTests.test_UT_PUB_03_api_publisher_commits_and_verifies)
+With no checkout, the REST publisher commits blobs, a tree, a commit and a ref. ... ok
+test_UT_PUB_04_api_publisher_is_a_no_op_when_synced (tests.test_unit.PublishModeTests.test_UT_PUB_04_api_publisher_is_a_no_op_when_synced)
+A second publish with nothing changed must not create a commit. ... ok
+test_UT_PUB_05_api_publisher_bounds_the_push_and_hides_the_token (tests.test_unit.PublishModeTests.test_UT_PUB_05_api_publisher_bounds_the_push_and_hides_the_token)
+Oversized files are skipped with a reason, and the token never appears. ... ok
+test_UT_PUB_06_status_reports_api_publishing_instead_of_dashes (tests.test_unit.PublishModeTests.test_UT_PUB_06_status_reports_api_publishing_instead_of_dashes)
+The GitHub tab shows a branch and a mode when the API can publish. ... ok
+test_UT_PUB_07_a_stray_token_does_not_enable_publishing (tests.test_unit.PublishModeTests.test_UT_PUB_07_a_stray_token_does_not_enable_publishing)
+CI runners have a GITHUB_TOKEN; that alone must not push anywhere. ... ok
+test_UT_PUB_08_a_refused_write_says_so_and_promises_no_retry (tests.test_unit.PublishModeTests.test_UT_PUB_08_a_refused_write_says_so_and_promises_no_retry)
+The reported bug: a 403 was reported as "will be retried in 60s". ... ok
+test_UT_PUB_09_a_rate_limit_is_still_worth_retrying (tests.test_unit.PublishModeTests.test_UT_PUB_09_a_rate_limit_is_still_worth_retrying)
+A 403 that means "slow down" must keep the retry promise. ... ok
+test_UT_PUB_10_access_report_names_the_missing_permission (tests.test_unit.PublishModeTests.test_UT_PUB_10_access_report_names_the_missing_permission)
+The GitHub tab can ask what the token may do, without pushing anything. ... ok
+test_UT_PUB_11_the_diagnosis_endpoint_never_leaks_the_token (tests.test_unit.PublishModeTests.test_UT_PUB_11_the_diagnosis_endpoint_never_leaks_the_token)
+`GET /api/github/access` reports the refusal without echoing the secret. ... ok
+test_UT_PUB_12_a_refused_git_push_is_not_retried_either (tests.test_unit.PublishModeTests.test_UT_PUB_12_a_refused_git_push_is_not_retried_either)
+A checkout gets git's prose, not a status code — it must be recognised too. ... ok
+test_UT_QUEUE_01_orphans_are_cancelled_and_live_runs_are_not (tests.test_unit.QueueHygieneTests.test_UT_QUEUE_01_orphans_are_cancelled_and_live_runs_are_not) ... ok
+test_UT_QUEUE_02_clear_honours_age_and_dry_run (tests.test_unit.QueueHygieneTests.test_UT_QUEUE_02_clear_honours_age_and_dry_run) ... ok
+test_UT_QUEUE_03_duplicate_queued_runs_are_reused_not_stacked (tests.test_unit.QueueHygieneTests.test_UT_QUEUE_03_duplicate_queued_runs_are_reused_not_stacked) ... ok
+test_UT_QUEUE_04_finished_history_can_be_purged (tests.test_unit.QueueHygieneTests.test_UT_QUEUE_04_finished_history_can_be_purged) ... ok
+test_UT_QUEUE_05_clear_endpoint_validates_and_reports (tests.test_unit.QueueHygieneTests.test_UT_QUEUE_05_clear_endpoint_validates_and_reports) ... ok
+test_UT_REP_01_navigate_interpolates (tests.test_unit.ReplayTests.test_UT_REP_01_navigate_interpolates) ... ok
+test_UT_REP_02_click_selector (tests.test_unit.ReplayTests.test_UT_REP_02_click_selector) ... ok
+test_UT_REP_03_click_coordinate_fallback (tests.test_unit.ReplayTests.test_UT_REP_03_click_coordinate_fallback) ... ok
+test_UT_REP_04_click_without_target (tests.test_unit.ReplayTests.test_UT_REP_04_click_without_target) ... ok
+test_UT_REP_05_type_interpolates (tests.test_unit.ReplayTests.test_UT_REP_05_type_interpolates) ... ok
+test_UT_REP_06_fill_replaces (tests.test_unit.ReplayTests.test_UT_REP_06_fill_replaces) ... ok
+test_UT_REP_07_press_key (tests.test_unit.ReplayTests.test_UT_REP_07_press_key) ... ok
+test_UT_REP_08_unsupported_action (tests.test_unit.ReplayTests.test_UT_REP_08_unsupported_action) ... ok
+test_UT_REP_09_navigate_without_url (tests.test_unit.ReplayTests.test_UT_REP_09_navigate_without_url) ... ok
+test_UT_REP_10_relative_navigate_uses_this_server (tests.test_unit.ReplayTests.test_UT_REP_10_relative_navigate_uses_this_server) ... ok
+test_UT_API_01_run_list_is_bounded_and_light_by_default (tests.test_unit.RunListGuardrailTests.test_UT_API_01_run_list_is_bounded_and_light_by_default) ... ok
+test_UT_RUN_01_no_steps_fails_closed (tests.test_unit.RunTests.test_UT_RUN_01_no_steps_fails_closed) ... ok
+test_UT_RUN_02_missing_recording (tests.test_unit.RunTests.test_UT_RUN_02_missing_recording) ... ok
+test_UT_SAVE_01_stop_survives_a_slow_export (tests.test_unit.SaveCrashTests.test_UT_SAVE_01_stop_survives_a_slow_export)
+SAVE must not die with 'NoneType' object has no attribute 'cancel'. ... ok
+test_UT_SAVE_02_stop_closes_the_browser_even_if_the_export_raises (tests.test_unit.SaveCrashTests.test_UT_SAVE_02_stop_closes_the_browser_even_if_the_export_raises) ... ok
+test_UT_SEC_01_redact_password (tests.test_unit.SecurityTests.test_UT_SEC_01_redact_password) ... ok
+test_UT_SEC_02_configuration_surfaces_never_carry_the_token (tests.test_unit.SecurityTests.test_UT_SEC_02_configuration_surfaces_never_carry_the_token)
+Attack: scrape every configuration surface for the credential. ... ok
+test_UT_SEC_03_hostile_github_errors_are_scrubbed_at_the_transport (tests.test_unit.SecurityTests.test_UT_SEC_03_hostile_github_errors_are_scrubbed_at_the_transport)
+Attack: a GitHub or proxy error body quotes credentials back at us. ... ok
+test_UT_SEC_04_the_bearer_token_travels_only_to_the_configured_api_host (tests.test_unit.SecurityTests.test_UT_SEC_04_the_bearer_token_travels_only_to_the_configured_api_host)
+Attack: exfiltrate the token by redirecting where the client sends it. ... ok
+test_UT_SEC_05_publishing_needs_a_named_repository_and_a_token (tests.test_unit.SecurityTests.test_UT_SEC_05_publishing_needs_a_named_repository_and_a_token)
+Attack: let a CI runner's stray GITHUB_TOKEN push to a guessed repo. ... ok
+test_UT_SEC_06_a_publish_commits_only_the_library_prefix (tests.test_unit.SecurityTests.test_UT_SEC_06_a_publish_commits_only_the_library_prefix)
+Attack: smuggle a file outside library/ into the repository tree. ... ok
+test_UT_SEC_07_a_dry_run_with_pending_changes_writes_nothing (tests.test_unit.SecurityTests.test_UT_SEC_07_a_dry_run_with_pending_changes_writes_nothing)
+Attack: probe the publish endpoint and cause an unexpected push. ... ok
+test_UT_SEC_08_a_branch_that_would_alter_the_request_path_is_refused (tests.test_unit.SecurityTests.test_UT_SEC_08_a_branch_that_would_alter_the_request_path_is_refused)
+Attack: put path traversal or query syntax in TF_GITHUB_BRANCH. ... ok
+test_UT_SEC_09_the_harness_strips_publishing_credentials_before_boot (tests.test_unit.SecurityTests.test_UT_SEC_09_the_harness_strips_publishing_credentials_before_boot)
+Regression: a developer shell must never publish from a test run. ... ok
+test_UT_SEC_10_the_http_surface_never_echoes_the_token (tests.test_unit.SecurityTests.test_UT_SEC_10_the_http_surface_never_echoes_the_token)
+Attack: scrape the live HTTP surface while GitHub answers hostilely. ... ok
+test_UT_SEC_11_a_failed_push_error_is_scrubbed_before_the_banner (tests.test_unit.SecurityTests.test_UT_SEC_11_a_failed_push_error_is_scrubbed_before_the_banner)
+Attack: leak the token through the save banner's error detail. ... ok
+test_UT_URL_01_blank_sample_app (tests.test_unit.UrlTests.test_UT_URL_01_blank_sample_app) ... ok
+test_UT_URL_02_relative_loopback (tests.test_unit.UrlTests.test_UT_URL_02_relative_loopback) ... ok
+test_UT_URL_03_scheme_less_https (tests.test_unit.UrlTests.test_UT_URL_03_scheme_less_https) ... ok
+test_UT_URL_04_external_unchanged (tests.test_unit.UrlTests.test_UT_URL_04_external_unchanged) ... ok
+test_UT_URL_05_file_scheme_rejected (tests.test_unit.UrlTests.test_UT_URL_05_file_scheme_rejected) ... ok
+test_UT_URL_06_preview_host_rewritten (tests.test_unit.UrlTests.test_UT_URL_06_preview_host_rewritten) ... ok
+test_UT_URL_07_other_local_port_preserved (tests.test_unit.UrlTests.test_UT_URL_07_other_local_port_preserved) ... ok
+test_UT_URL_08_query_preserved (tests.test_unit.UrlTests.test_UT_URL_08_query_preserved) ... ok
+test_UT_VAR_01_known_keys (tests.test_unit.VariableTests.test_UT_VAR_01_known_keys) ... ok
+test_UT_VAR_02_unknown_key_kept (tests.test_unit.VariableTests.test_UT_VAR_02_unknown_key_kept) ... ok
+test_UT_VAR_03_empty_text (tests.test_unit.VariableTests.test_UT_VAR_03_empty_text) ... ok
+test_UT_VAR_04_inner_whitespace (tests.test_unit.VariableTests.test_UT_VAR_04_inner_whitespace) ... ok
+test_UT_FLOW_01_repeated_action_merges_distinct_actions_keep_order (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_01_repeated_action_merges_distinct_actions_keep_order)
+Consecutive identical actions become one step carrying a repeat count. ... ok
+test_UT_FLOW_02_stop_without_session_and_edit_with_screenshot (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_02_stop_without_session_and_edit_with_screenshot) ... ok
+test_UT_FLOW_03_export_templates_and_formula_safety (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_03_export_templates_and_formula_safety) ... ok
+test_UT_FLOW_04_variable_capture_and_replay_value (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_04_variable_capture_and_replay_value) ... ok
+test_UT_FLOW_05_capture_new_and_existing_variable (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_05_capture_new_and_existing_variable) ... ok
+test_UT_FLOW_06_compact_png_preserves_format_and_never_grows (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_06_compact_png_preserves_format_and_never_grows) ... ok
+test_UT_FLOW_07_merged_repeat_replays_every_occurrence (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_07_merged_repeat_replays_every_occurrence)
+A merged step must still perform the action as many times as recorded. ... ok
+test_UT_FLOW_08_save_variable_is_never_merged (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_08_save_variable_is_never_merged)
+Two captures of the same field hold different values, so both stay. ... ok
+test_UT_FLOW_09_compress_existing_recording (tests.test_unit.WorkflowRegressionTests.test_UT_FLOW_09_compress_existing_recording)
+A recording saved before merging can be collapsed on demand. ... ok
+test_UT_IMP_01_csv_json_roundtrip (tests.test_imports.ImportTests.test_UT_IMP_01_csv_json_roundtrip) ... ok
+test_UT_IMP_02_excel_and_formula_rejection (tests.test_imports.ImportTests.test_UT_IMP_02_excel_and_formula_rejection) ... ok
+test_UT_IMP_03_python_static_subset (tests.test_imports.ImportTests.test_UT_IMP_03_python_static_subset) ... ok
+test_UT_IMP_04_no_python_execution_or_silent_branches (tests.test_imports.ImportTests.test_UT_IMP_04_no_python_execution_or_silent_branches) ... ok
+test_UT_IMP_05_javascript_typescript_subset (tests.test_imports.ImportTests.test_UT_IMP_05_javascript_typescript_subset) ... ok
+test_UT_IMP_06_bdd_cucumber_unknown_phrases (tests.test_imports.ImportTests.test_UT_IMP_06_bdd_cucumber_unknown_phrases) ... ok
+test_UT_IMP_07_jenkins_reference_bundle (tests.test_imports.ImportTests.test_UT_IMP_07_jenkins_reference_bundle) ... ok
+test_UT_IMP_08_limits_and_unknown_formats (tests.test_imports.ImportTests.test_UT_IMP_08_limits_and_unknown_formats) ... ok
+test_UT_IMP_09_schema_fail_closed (tests.test_imports.ImportTests.test_UT_IMP_09_schema_fail_closed) ... ok
+test_UT_IMP_10_preview_no_publication_and_save_once (tests.test_imports.ImportTests.test_UT_IMP_10_preview_no_publication_and_save_once) ... ok
+test_UT_IMP_11_invalid_save_is_atomic_and_oversize_is_rejected (tests.test_imports.ImportTests.test_UT_IMP_11_invalid_save_is_atomic_and_oversize_is_rejected) ... ok
+test_UT_IMP_12_add_and_edit_assertion (tests.test_imports.ImportTests.test_UT_IMP_12_add_and_edit_assertion) ... ok
+test_UT_IMP_13_access_gate_http_and_websocket (tests.test_imports.ImportTests.test_UT_IMP_13_access_gate_http_and_websocket) ... ok
+test_UT_IMP_14_portable_reports_escape_target_content (tests.test_imports.ImportTests.test_UT_IMP_14_portable_reports_escape_target_content) ... ok
+test_UT_IMP_15_recording_autosave_skips_expensive_exports (tests.test_imports.ImportTests.test_UT_IMP_15_recording_autosave_skips_expensive_exports) ... ok
+test_UT_IMP_16_sensitive_options_not_duplicated_in_audit (tests.test_imports.ImportTests.test_UT_IMP_16_sensitive_options_not_duplicated_in_audit) ... ok
+test_UT_IMP_17_missing_variable_fails_before_typing (tests.test_imports.ImportTests.test_UT_IMP_17_missing_variable_fails_before_typing) ... ok
+test_UT_IMP_18_resource_policy_defaults (tests.test_imports.ImportTests.test_UT_IMP_18_resource_policy_defaults) ... ok
+test_UT_IMP_19_tags_parent_tree_and_filters (tests.test_imports.ImportTests.test_UT_IMP_19_tags_parent_tree_and_filters) ... ok
+test_UT_IMP_20_live_recording_reads_current_steps_without_export (tests.test_imports.ImportTests.test_UT_IMP_20_live_recording_reads_current_steps_without_export) ... ok
+test_UT_IMP_21_schema_version_and_literal_js_option (tests.test_imports.ImportTests.test_UT_IMP_21_schema_version_and_literal_js_option) ... ok
+test_UT_IMP_22_websocket_disconnect_releases_idle_sender (tests.test_imports.ImportTests.test_UT_IMP_22_websocket_disconnect_releases_idle_sender) ... ok
+test_UT_IMP_23_subscriber_queues_and_counts_are_bounded (tests.test_imports.ImportTests.test_UT_IMP_23_subscriber_queues_and_counts_are_bounded) ... ok
+test_UT_PLAN_01_flows_fixtures_datasets_and_bounds (tests.test_plans.PlanTests.test_UT_PLAN_01_flows_fixtures_datasets_and_bounds) ... ok
+test_UT_PLAN_02_secret_and_auth_references_fail_closed (tests.test_plans.PlanTests.test_UT_PLAN_02_secret_and_auth_references_fail_closed) ... ok
+test_UT_PLAN_03_draft_isolation_binding_and_idempotent_save (tests.test_plans.PlanTests.test_UT_PLAN_03_draft_isolation_binding_and_idempotent_save) ... ok
+test_UT_PLAN_04_failed_draft_and_changed_secret_block_publication (tests.test_plans.PlanTests.test_UT_PLAN_04_failed_draft_and_changed_secret_block_publication) ... ok
+test_UT_PLAN_05_opt_in_engines_and_safe_paths (tests.test_plans.PlanTests.test_UT_PLAN_05_opt_in_engines_and_safe_paths) ... ok
+test_UT_PLAN_06_json_plan_and_round_trip (tests.test_plans.PlanTests.test_UT_PLAN_06_json_plan_and_round_trip) ... ok
+test_UT_PLAN_07_domain_packs_are_synthetic_bounded_plans (tests.test_plans.PlanTests.test_UT_PLAN_07_domain_packs_are_synthetic_bounded_plans) ... ok
+test_UT_PLAN_08_concurrent_draft_is_refused_and_cancellable (tests.test_plans.PlanTests.test_UT_PLAN_08_concurrent_draft_is_refused_and_cancellable) ... ok
+test_UT_PLAN_09_generated_outputs_and_symlinks_never_publish (tests.test_plans.PlanTests.test_UT_PLAN_09_generated_outputs_and_symlinks_never_publish) ... ok
+test_UT_PLAN_10_plan_source_is_preserved_and_step_edits_blocked (tests.test_plans.PlanTests.test_UT_PLAN_10_plan_source_is_preserved_and_step_edits_blocked) ... ok
+test_UT_PLAN_11_autosave_read_cannot_rollback_recorder_write (tests.test_plans.PlanTests.test_UT_PLAN_11_autosave_read_cannot_rollback_recorder_write) ... ok
+
+----------------------------------------------------------------------
+Ran 152 tests in 14.484s
+
+OK

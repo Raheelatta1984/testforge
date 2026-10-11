@@ -26,6 +26,7 @@ RUN playwright install --with-deps chromium \
     && rm -rf /var/lib/apt/lists/*
 
 COPY app ./app
+COPY LICENSE ./LICENSE
 # The library tree is the dashboard's data store. Without it the container boots
 # with an empty library/ and the GitHub tab reports "No projects in the branch".
 COPY library ./library
@@ -64,11 +65,11 @@ ENV TF_ARTIFACTS=/app/artifacts \
     TF_QUEUE_SWEEP_SECONDS=300 \
     TF_RUN_RETENTION_DAYS=14 \
     # --- batch execution: many recordings, one browser ---
-    TF_BATCH_SCREENSHOTS=failure \
+    TF_BATCH_SCREENSHOTS=all \
     TF_BATCH_MAX_RECORDINGS=40 \
     TF_MAX_BATCHES=1 \
     TF_BATCH_MAX_RSS_MB=420 \
-    TF_BATCH_LOG_ENTRIES=200 \
+    TF_BATCH_LOG_ENTRIES=2000 \
     TF_BATCH_REPORTS=40 \
     # --- local log reader (the fallback when GitHub coordinates are unknown) ---
     TF_MAX_LOG_FILE_BYTES=262144 \

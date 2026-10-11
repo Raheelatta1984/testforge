@@ -10,3 +10,16 @@ __pycache__/
 .env.*
 *.pem
 *.key
+
+# Local frontend tooling dependencies
+node_modules/
+
+# Generated replay output is not test source.
+library/**/resources/run-artifacts/
+library/**/resources/test-results/
+library/**/resources/playwright-report/
+library/**/resources/plan-result.json
+
+# Ephemeral PDF binaries and runtime data must never enter Git history.
+artifacts/
+**/pdf-reports/

@@ -1,0 +1,174 @@
+INFO:     Started server process [6323]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:45781 (Press CTRL+C to quit)
+--- TITAN ERP SYSTEM BOOTED ---
+LOGS: /tmp/tf-library-y7ja4y_u/artifacts/system_logs
+ROG DATABASE INITIALIZED
+INFO:     127.0.0.1:50212 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50224 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50232 - "POST /api/projects HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:50246 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50254 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50264 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50280 - "POST /api/variables HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50282 - "PATCH /api/variables/1d1cea53-8b99-4556-86e2-093b0f6f7cfb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50298 - "DELETE /api/variables/1d1cea53-8b99-4556-86e2-093b0f6f7cfb HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50314 - "POST /api/ai/rephrase HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50318 - "GET /api/runs/screenshot/not-a-run/../../etc/passwd HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50322 - "GET /api/runs/screenshot/missing-run/step-1.jpg HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50334 - "POST /api/runs HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:50338 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50352 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50364 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50374 - "GET /api/runs/24217ef1-f7c9-43b2-8561-9179169526a3 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50376 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50380 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50394 - "GET /api/recordings/518d125c-e135-4cb9-a53a-392ab9528f55 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50410 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50416 - "GET /api/diagnostics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50422 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50430 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50434 - "POST /api/recordings/0d452a8f-98cd-42d2-8e52-9bea888b88ad/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50442 - "POST /api/recordings/0d452a8f-98cd-42d2-8e52-9bea888b88ad/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50458 - "GET /api/recordings/0d452a8f-98cd-42d2-8e52-9bea888b88ad/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50470 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50476 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50478 - "POST /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50494 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50508 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/frame?t=1791714139.1927578 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50524 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50530 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/frame?t=1791714139.496733 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50546 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50556 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50572 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/frame?t=1791714139.8117485 HTTP/1.1" 204 No Content
+INFO:ROG_TITAN:RECORDER LIVE 63c270ad-819a-44ae-99d4-b5d8730bfa8a http://127.0.0.1:45781/demo.html viewport=1024x640
+INFO:     127.0.0.1:50578 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50582 - "GET /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/frame?t=1791714140.117281 HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER EXPORT OK 63c270ad-819a-44ae-99d4-b5d8730bfa8a seq=1
+INFO:ROG_TITAN:RECORDER STOPPING 63c270ad-819a-44ae-99d4-b5d8730bfa8a seq=1 logs=[]
+INFO:     127.0.0.1:50586 - "POST /api/recordings/63c270ad-819a-44ae-99d4-b5d8730bfa8a/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50592 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50608 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50612 - "POST /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50616 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50626 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/frame?t=1791714140.5921628 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50636 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50638 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/frame?t=1791714140.8966491 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50644 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER LIVE 440d6646-92f5-4309-ade1-6079826fa3bf http://127.0.0.1:45781/demo.html viewport=1024x640
+INFO:     127.0.0.1:50652 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50666 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/frame?t=1791714141.201263 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50672 - "POST /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50682 - "POST /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/input HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER EXPORT OK 440d6646-92f5-4309-ade1-6079826fa3bf seq=4
+INFO:     127.0.0.1:50686 - "POST /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50696 - "POST /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50702 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER EXPORT OK 440d6646-92f5-4309-ade1-6079826fa3bf seq=5
+INFO:ROG_TITAN:RECORDER STOPPING 440d6646-92f5-4309-ade1-6079826fa3bf seq=5 logs=[]
+INFO:     127.0.0.1:50706 - "POST /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50712 - "GET /api/recordings/440d6646-92f5-4309-ade1-6079826fa3bf HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50724 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50732 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50736 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50738 - "POST /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50748 - "GET /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50754 - "GET /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/frame?t=1791714142.4466279 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50758 - "GET /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50772 - "GET /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/frame?t=1791714142.7520578 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50774 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER LIVE 46c5ede6-d9fa-45c5-9244-e690d6a90ebc http://127.0.0.1:45781/demo.html viewport=1024x640
+INFO:     127.0.0.1:50780 - "GET /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50796 - "GET /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/frame?t=1791714143.0565083 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50800 - "POST /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50808 - "POST /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/input HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER EXPORT OK 46c5ede6-d9fa-45c5-9244-e690d6a90ebc seq=4
+INFO:     127.0.0.1:50822 - "POST /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/input HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER EXPORT OK 46c5ede6-d9fa-45c5-9244-e690d6a90ebc seq=4
+INFO:ROG_TITAN:RECORDER STOPPING 46c5ede6-d9fa-45c5-9244-e690d6a90ebc seq=4 logs=[]
+INFO:     127.0.0.1:50830 - "POST /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50834 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:ROG_TITAN:RUN START 79a5bccf-c251-483f-bfa5-d10c8bea5f9d steps=4 (expanded from 4) window=True
+INFO:     ('127.0.0.1', 50848) - "WebSocket /ws/runs/79a5bccf-c251-483f-bfa5-d10c8bea5f9d" [accepted]
+INFO:     connection open
+INFO:     127.0.0.1:50850 - "GET /api/runs/79a5bccf-c251-483f-bfa5-d10c8bea5f9d HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50862 - "GET /api/runs/79a5bccf-c251-483f-bfa5-d10c8bea5f9d HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50872 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50882 - "GET /api/runs/79a5bccf-c251-483f-bfa5-d10c8bea5f9d HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RUN DONE 79a5bccf-c251-483f-bfa5-d10c8bea5f9d status=passed elapsed=1.0s
+INFO:     127.0.0.1:50896 - "GET /api/runs/79a5bccf-c251-483f-bfa5-d10c8bea5f9d HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50900 - "GET /api/runs/79a5bccf-c251-483f-bfa5-d10c8bea5f9d/live.jpg HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50914 - "GET /api/recordings/46c5ede6-d9fa-45c5-9244-e690d6a90ebc/jenkins HTTP/1.1" 200 OK
+INFO:     connection closed
+INFO:     127.0.0.1:50918 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50924 - "POST /api/variables HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50934 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:50950 - "POST /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50962 - "GET /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50974 - "GET /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/frame?t=1791714145.6657867 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50980 - "GET /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50984 - "GET /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/frame?t=1791714145.9714732 HTTP/1.1" 204 No Content
+INFO:     127.0.0.1:50994 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER LIVE 5e450424-658b-485f-8aa4-06df912daeda http://127.0.0.1:45781/demo.html viewport=1024x640
+INFO:     127.0.0.1:59548 - "GET /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59550 - "GET /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/frame?t=1791714146.2810955 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59554 - "POST /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/input HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59570 - "POST /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/input HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER EXPORT OK 5e450424-658b-485f-8aa4-06df912daeda seq=4
+INFO:     127.0.0.1:59586 - "POST /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/input HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RECORDER EXPORT OK 5e450424-658b-485f-8aa4-06df912daeda seq=4
+INFO:ROG_TITAN:RECORDER STOPPING 5e450424-658b-485f-8aa4-06df912daeda seq=4 logs=[]
+INFO:     127.0.0.1:59592 - "POST /api/recordings/5e450424-658b-485f-8aa4-06df912daeda/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59604 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:ROG_TITAN:RUN START 953255ba-f538-4c8e-a731-5c8fd32ccbb4 steps=4 (expanded from 4) window=True
+INFO:     127.0.0.1:59610 - "GET /api/runs/953255ba-f538-4c8e-a731-5c8fd32ccbb4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59624 - "GET /api/runs/953255ba-f538-4c8e-a731-5c8fd32ccbb4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59632 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59640 - "GET /api/runs/953255ba-f538-4c8e-a731-5c8fd32ccbb4 HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RUN DONE 953255ba-f538-4c8e-a731-5c8fd32ccbb4 status=passed elapsed=1.2s
+INFO:     127.0.0.1:59656 - "GET /api/runs/953255ba-f538-4c8e-a731-5c8fd32ccbb4 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59664 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59674 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59682 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:ROG_TITAN:RUN START be0ff768-f7de-4354-8109-d2bc20e03c81 steps=4 (expanded from 4) window=True
+INFO:     127.0.0.1:59692 - "GET /api/runs/be0ff768-f7de-4354-8109-d2bc20e03c81 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59702 - "GET /api/runs/be0ff768-f7de-4354-8109-d2bc20e03c81 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59714 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59716 - "GET /api/runs/be0ff768-f7de-4354-8109-d2bc20e03c81 HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RUN DONE be0ff768-f7de-4354-8109-d2bc20e03c81 status=passed elapsed=1.0s
+INFO:     127.0.0.1:59722 - "GET /api/runs/be0ff768-f7de-4354-8109-d2bc20e03c81 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59738 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:ROG_TITAN:RUN START 3ce74521-412f-49f1-ab81-f5bf1311b8f8 steps=4 (expanded from 4) window=True
+INFO:     127.0.0.1:59754 - "GET /api/runs/3ce74521-412f-49f1-ab81-f5bf1311b8f8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59758 - "GET /api/runs/3ce74521-412f-49f1-ab81-f5bf1311b8f8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59762 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59766 - "GET /api/runs/3ce74521-412f-49f1-ab81-f5bf1311b8f8 HTTP/1.1" 200 OK
+INFO:ROG_TITAN:RUN DONE 3ce74521-412f-49f1-ab81-f5bf1311b8f8 status=passed elapsed=1.0s
+INFO:     127.0.0.1:59768 - "GET /api/runs/3ce74521-412f-49f1-ab81-f5bf1311b8f8 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59780 - "GET /api/runs/queue/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59792 - "POST /api/runs/queue/clear HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59808 - "GET /api/runs/queue/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59814 - "POST /api/runs/batch HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:59826 - "POST /api/runs/batch HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59828 - "GET /api/runs/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59844 - "GET /api/runs/batch/not-a-batch HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59854 - "GET /api/diagnostics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59860 - "GET /api/logs/source HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59874 - "GET /api/logs/local/index HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59882 - "GET /api/logs/local/20261010-125245/results.md HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59896 - "GET /api/logs/local/../../etc/passwd HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:59906 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59912 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59918 - "POST /api/sync/github HTTP/1.1" 503 Service Unavailable
+INFO:     127.0.0.1:59928 - "POST /api/runs/batch HTTP/1.1" 201 Created
+INFO:     127.0.0.1:59940 - "GET /api/runs/batch/882258ca-36c7-4b79-94e6-93855c0db151 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59948 - "GET /api/runs/batch/882258ca-36c7-4b79-94e6-93855c0db151 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59960 - "GET /demo.html HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59964 - "GET /api/runs/batch/882258ca-36c7-4b79-94e6-93855c0db151 HTTP/1.1" 200 OK
+INFO:ROG_TITAN:BATCH DONE 882258ca-36c7-4b79-94e6-93855c0db151 status=passed total=2 passed=2 failed=0 elapsed=1.28s
+INFO:     127.0.0.1:59976 - "GET /api/runs/batch/882258ca-36c7-4b79-94e6-93855c0db151 HTTP/1.1" 200 OK
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [6323]

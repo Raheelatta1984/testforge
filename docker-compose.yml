@@ -6,6 +6,11 @@ services:
       - "8000:8000"
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # Optional single-operator access gate. Set a random 32+ character token
+      # before exposing the app; leave empty only behind an authenticated gateway.
+      TF_ACCESS_TOKEN: ${TF_ACCESS_TOKEN:-}
+      TF_VARIABLE_ENCRYPTION_KEYS: ${TF_VARIABLE_ENCRYPTION_KEYS:-}
+      TF_REPORTS_GITHUB: ${TF_REPORTS_GITHUB:-0}
       TF_ARTIFACTS: /app/artifacts
       TF_MCP_ARGS: '-y @playwright/mcp@latest --headless --isolated --caps=vision'
       # Publishing without a git checkout: name the repository and supply a token.

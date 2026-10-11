@@ -2,14 +2,43 @@
 - **Database:** Permanently stored in Neon PostgreSQL / SQLite (Configured in config.py).
 - **Architecture:** 10-tab Persistent Dashboard (Optimized for Android 12).
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
-- **AI Features:** Voice-to-Text input, AI Step Rephrase, Recording-Variable association tagging.
+- **Local helpers (no paid AI calls):** Browser-dependent voice input, deterministic text cleanup, and recording-variable association tagging. Autonomous AI execution is not connected.
 - **Tree Hierarchy:** Parent Group -> Sub-recording chunk organization.
 - **Repeated steps:** Consecutive identical actions are recorded as one step carrying a repeat count, and replay expands it back into N actions.
-- **Execution:** Live screencast in the 'Runs' tab, behind a toggle, with completion % and visual diff potential. Frames are rendered only while somebody is watching.
-- **Batch execution:** One browser replays many recordings, with step timeouts learned from previous runs and screenshots only where they are worth the CPU (`POST /api/runs/batch`).
+- **Execution:** Optional step-by-step live view in the Runs tab, reusing the evidence JPEG without a second screencast loop.
+- **Batch execution:** One browser at a time replays recordings, with learned timeouts and one reusable low-quality screenshot per step (`POST /api/runs/batch`).
 - **Queue hygiene:** Orphaned, stale and duplicate queue entries are reported and can be cleared; a restart no longer leaves runs pending forever.
 - **Publishing:** `library/` is committed to one branch, by `git push` from a checkout or through the GitHub REST API when the deployment has none.
 - **Maintenance:** Check `/api/library` for the publish mode, live remote verification and retry status. Failed pushes remain local and are retried; do not reset a branch to fix sync issues.
+
+## Script upload, assertions and lower-overhead execution
+
+See [Script import and sequential automation additions](docs/script-import-and-actions.md)
+for the implemented workflow, supported format subsets, action schema, resource limits,
+access-token setup, and the roadmap items still outstanding.
+
+- **Library → UPLOAD TEST SCRIPTS:** preview CSV/TSV, XLSX, canonical JSON, supported
+  Playwright Python/JS/TS, BDD/Cucumber phrases, or a restricted Jenkins + script bundle.
+  Uploaded source is never executed; unsupported statements block saving.
+  Use **TEST BEFORE PUBLISHING** to run a private draft; the dashboard enables
+  publication only after a passing test of the reviewed execution inputs.
+- **Advanced plans:** bounded datasets, setup/teardown, reusable named flows,
+  environment-backed secret/auth references, sequential responsive profiles,
+  explicit retries/flaky detection, and five local synthetic domain packs.
+  Chromium is default; other engines require operator installation/validation.
+- **Assertions & advanced actions:** author state checks, controls, frame/page targets,
+  dialogs, synthetic file fixtures, API checks and network mocks in the recorder/editor.
+- **Sequential, no paid AI:** new dashboard users start with live preview off; API-started
+  single and batch runs capture one low-quality JPEG per step. Successful actions have no artificial typing
+  delay. Necessary actionability/assertion waits remain.
+- **Reports and exports:** cached single/batch PDF and downloadable HTML/JSON reports, plus complete runnable
+  Python/JavaScript/TypeScript project ZIPs; generated TypeScript uses one worker.
+- **Access:** configure a random 32+ character `TF_ACCESS_TOKEN` before public use.
+  Empty means legacy unprotected access; this gate is not multi-user RBAC or secret storage.
+- **CI-ready:** `python tools/quality_gate.py` runs the full local gate explicitly
+  and sequentially; prerequisites are documented in the implementation guide.
+- No paid service, extra worker process, automatic CI workflow or production deployment was added.
+  Hosting bills and instantaneous performance cannot be guaranteed by application code.
 
 ## Recording, repeats and the live window
 Consecutive identical actions (the same click, the same key, the same text into the same field) are stored as a single step with `repeat_count = N`. The record tab shows the count as `×N 🔁`, exports carry it, and replay performs the action N times. `save_variable` is deliberately excluded: two captures of one input normally hold different values, so each keeps its own row. Set `TF_MERGE_REPEAT_STEPS=0` to store one row per action instead. Recordings saved before this rule can be collapsed with `POST /api/recordings/{id}/steps/compress`.
@@ -66,7 +95,7 @@ What makes it faster and lighter than running the recordings one at a time:
 
 | Choice | Effect |
 | --- | --- |
-| One Chromium for the whole batch | A launch is ~1-2s and ~120MB. A batch pays it once; `report.savings.browser_launches_avoided` counts what it did not pay. |
+| One active Chromium, reused where compatible | Same-project/origin shared sessions avoid launches. Single-process context isolation requires closing before sequential relaunch; reports count actual launches and savings. |
 | Origin grouping, shortest first | Same-host recordings run back to back and share a warm context (and a login). Shortest-first gives feedback early. |
 | Learned step budgets | `AdaptivePacer` keeps an EMA of how long each kind of step actually took and derives the next timeout from it, clamped between a floor and the single-run ceiling. A click that always lands in 120ms is not given three seconds to fail in. The profile persists in `artifacts/batches/pacing.json` and can be seeded from run history. |
 | `screenshots: failure` (default) | A PNG only when a step fails. `changes` captures only when the page moved, `none` never, `all` behaves like a single run. Step screenshots are the largest per-step CPU and disk cost of a replay. |
@@ -197,4 +226,20 @@ Then redeploy with the new value of `TF_GITHUB_TOKEN` and use **CHECK TOKEN PERM
 `app/db.py` runs an idempotent schema check at startup. It creates missing tables, adds columns that the models declare but an older table lacks (backfilling existing rows), and relaxes `NOT NULL` on legacy columns the models no longer write. `create_all()` alone only creates missing tables, so a database created by an older revision keeps its original columns and every write to it fails until this migration runs.
 
 ## QA acceptance criteria and exports
-See [docs/qa-automation-acceptance.md](docs/qa-automation-acceptance.md) for the ten testable recording, execution and GitHub acceptance criteria and implementation limitations. The Library editor can modify saved steps. Recording resources include Playwright Python, Jenkins, Gherkin and Azure/Jira/TestComplete CSV/XLSX templates; proprietary vendor imports require mapping. PNG screenshots are saved alongside steps; preview JPEGs are transient and optional video is WebM.
+See [docs/qa-automation-acceptance.md](docs/qa-automation-acceptance.md) for the ten testable recording, execution and GitHub acceptance criteria and implementation limitations. The Library editor can modify saved steps. Recording resources include Playwright Python, Jenkins, Gherkin and Azure/Jira/TestComplete CSV/XLSX templates; proprietary vendor imports require mapping. Recorder PNGs remain alongside recorded steps; execution evidence is a reusable low-quality JPEG per step and optional video is WebM.
+
+## Ordered scenarios, encrypted inputs and PDF reports
+
+Select a project → **Library → High-level scenarios → Execution plans** to link
+existing recordings (for example, login then logout) in exact order and one shared
+session. Review per-recording inputs before execution; project variables and
+parameters remain persistent. Password fields support authenticated encryption at
+rest with an operator-provisioned key. Completed single and batch runs offer cached
+PDFs from the same low-quality JPEG captured once per step.
+
+PDFs can be uploaded as GitHub release assets with 48-hour retention and oldest-first
+hourly maintenance; only summaries/links enter Git. Remote publication is opt-in,
+requires host configuration, and cannot clean up while the application is asleep or
+offline. No paid worker/CI scheduler was added; screenshot/PDF work is not zero-cost.
+
+See [setup, security limits, input precedence and retention operations](docs/scenarios-secrets-and-pdf-reports.md).

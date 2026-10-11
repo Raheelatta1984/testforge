@@ -18,6 +18,7 @@ from app.db import (
 )
 from app.library_store import LibraryError, NotFound, PublishError
 from app import library_store
+from app.step_runtime import ACTIONS, BASIC, normalize_step
 
 # Browser-dependent features are optional at boot so the dashboard and its API
 # remain usable if the browser runtime is unavailable.
@@ -53,6 +54,9 @@ except Exception as exc:
     print(f"BATCH EXECUTOR UNAVAILABLE: {BATCH_ERROR}")
 
 app = FastAPI(title="TestForge Titan ERP - Optimized")
+from app.access_control import AccessGate, router as access_router
+app.add_middleware(AccessGate)
+app.include_router(access_router)
 init_db()
 try:
     # Both branches of the old fast path called materialize_all(), so the branch
@@ -174,6 +178,7 @@ def _recording_dict(recording: Recording, with_steps: bool = False) -> dict:
         "id": recording.id,
         "project_id": recording.project_id,
         "parent_id": recording.parent_id,
+        "tags": recording.tags or "",
         "name": recording.name,
         "start_url": recording.start_url,
         "status": recording.status,
@@ -225,8 +230,11 @@ async def broadcast_run(run_id, payload):
     for queue in list(RUN_STREAMS.get(run_id, [])):
         try:
             queue.put_nowait(payload)
-        except Exception:
-            pass
+        except asyncio.QueueFull:
+            # Retain the newest event (especially done) rather than accumulating
+            # frames for a slow/disconnected browser. HTTP provides full history.
+            queue.get_nowait()
+            queue.put_nowait(payload)
 
 
 @app.on_event("startup")
@@ -492,6 +500,10 @@ def get_project_vars(project_id: str):
 
 @app.post("/api/variables", status_code=201)
 def create_var(body: dict):
+    if "is_secret" in body and not isinstance(body["is_secret"], bool):
+        raise HTTPException(422, "is_secret must be a boolean")
+    if not isinstance(body.get("name", ""), str):
+        raise HTTPException(422, "Variable name must be text")
     name = (body.get("name") or "").strip()
     if not name:
         raise HTTPException(status_code=422, detail="Variable name is required")
@@ -499,19 +511,25 @@ def create_var(body: dict):
     if not project_id:
         raise HTTPException(status_code=422, detail="Project is required")
     try:
-        return library_store.create_variable(project_id, name, "" if body.get("value") is None else str(body.get("value")))
+        return library_store.create_variable(project_id, name, "" if body.get("value") is None else str(body.get("value")), is_secret=body.get("is_secret") is True, category=body.get("category", "General"))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except LibraryError as exc:
         raise _library_http(exc) from exc
 
 
 @app.patch("/api/variables/{vid}")
 def patch_var(vid: str, body: dict):
+    if "is_secret" in body and not isinstance(body["is_secret"], bool):
+        raise HTTPException(422, "is_secret must be a boolean")
     try:
         value = None
         if "value" in body:
             value = "" if body.get("value") is None else str(body.get("value"))
         name = body["name"].strip() if isinstance(body.get("name"), str) and body["name"].strip() else None
-        return library_store.update_variable(vid, name=name, value=value)
+        return library_store.update_variable(vid, name=name, value=value, is_secret=body.get("is_secret"), category=body.get("category"))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except LibraryError as exc:
         raise _library_http(exc) from exc
 
@@ -565,7 +583,9 @@ def list_recordings(project_id: str, fast: bool = True):
                                 "id": rec.get("id"),
                                 "project_id": project_id,
                                 "name": rec.get("name") or "",
-                                "start_url": "",
+                                "start_url": rec.get("start_url") or "",
+                                "tags": rec.get("tags") or "",
+                                "parent_id": rec.get("parent_id"),
                                 "status": "active",
                                 "created_at": rec.get("created_at") or "",
                                 "step_count": rec.get("step_count") or 0,
@@ -600,6 +620,14 @@ def list_all_recordings_fast():
 
 @app.get("/api/recordings/{rid}")
 def get_recording(rid: str):
+    # Live inputs are committed to the DB immediately; their debounced file
+    # snapshot may intentionally lag. Never show a truncated recording during
+    # capture just to force an expensive export on every input.
+    if get_session(rid) is not None:
+        with SessionLocal() as db:
+            row = db.get(Recording, rid)
+            if row is not None:
+                return {**_recording_dict(row, with_steps=True), "source": "live", "exports_pending": True}
     try:
         # Fast check without full materialize
         recording = library_store.get_recording(rid)
@@ -616,6 +644,10 @@ def get_recording(rid: str):
 
 @app.post("/api/recordings/{rid}/session")
 async def start_recording_session(rid: str, request: Request):
+    with SessionLocal() as db:
+        row = db.get(Recording, rid)
+        if row and row.execution_plan:
+            raise HTTPException(422, 'Execution plans are immutable snapshots; record a separate flow and re-import the plan')
     if open_session is None:
         raise HTTPException(status_code=503, detail=f"Recorder is unavailable: {RECORDER_ERROR}")
     # Fast path for recording existence
@@ -649,6 +681,7 @@ def recording_frame(rid: str):
     session = get_session(rid)
     if session is None:
         return Response(status_code=204)
+    session._last_viewed_at = time.monotonic()
     if session.latest_jpeg:
         return Response(
             content=session.latest_jpeg,
@@ -669,8 +702,8 @@ async def recording_input(rid: str, body: dict):
         step = await session.handle_input(body)
     except KeyError as exc:
         raise HTTPException(status_code=422, detail=f"Missing {exc}") from exc
-    except (ValueError, RuntimeError) as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ValueError, RuntimeError, AssertionError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc).splitlines()[0][:500]) from exc
     return {"ok": True, "step": step, "optimized": True, "dedup": False}
 
 
@@ -790,11 +823,22 @@ def recording_step_screenshot(rid: str, step_id: str):
 
 @app.patch("/api/recordings/{rid}/steps/{step_id}")
 async def edit_recording_step(rid: str, step_id: str, body: dict):
-    allowed = {"navigate", "click", "type", "fill", "press", "save_variable"}
+    allowed = ACTIONS
     with SessionLocal() as db:
         step = db.get(RecordingStep, step_id)
         if not step or step.recording_id != rid:
             raise HTTPException(status_code=404, detail="Step not found")
+        if db.get(Recording, rid).execution_plan:
+            raise HTTPException(422, 'Plan steps are a tested snapshot; re-import and test the edited execution plan')
+        candidate = {**_step_dict(step), **body}
+        if candidate.get("selector") is not None and not isinstance(candidate["selector"], dict):
+            raise HTTPException(status_code=422, detail="Selector must be an object")
+        if candidate.get("action") not in BASIC or (candidate.get("selector") or {}).get("strict"):
+            try:
+                checked = normalize_step(candidate, step.order)
+                body = {**body, "selector": checked["selector"]}
+            except (ValueError, TypeError) as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
         if "action" in body:
             if body["action"] not in allowed:
                 raise HTTPException(status_code=422, detail="Unsupported action")
@@ -821,6 +865,10 @@ async def edit_recording_step(rid: str, step_id: str, body: dict):
 
 @app.post("/api/recordings/{rid}/steps/compress")
 async def compress_recording_steps(rid: str):
+    with SessionLocal() as db:
+        row = db.get(Recording, rid)
+        if row and row.execution_plan:
+            raise HTTPException(422, 'Execution plans are already expanded snapshots; re-import to change them')
     """Collapse repeated steps of an existing recording into one step per action.
 
     New recordings already merge as they are recorded; this covers recordings
@@ -864,6 +912,11 @@ def get_jenkins(rid: str):
 async def queue_run(body: dict):
     if execute_run_task is None:
         raise HTTPException(status_code=503, detail=f"Run executor is unavailable: {EXECUTOR_ERROR}")
+    if body.get("screenshots", "all") not in {"none", "failure", "changes", "all"}:
+        raise HTTPException(422, "Invalid screenshots policy")
+    screenshots = "all"
+    if screenshots not in {"none", "failure", "all"}:
+        raise HTTPException(status_code=422, detail="screenshots must be none, failure or all")
     target_id = body.get("target_id") or body.get("recording_id")
     if not target_id:
         raise HTTPException(status_code=422, detail="Recording id is required")
@@ -877,7 +930,7 @@ async def queue_run(body: dict):
             raise HTTPException(status_code=404, detail="Recording not found")
     # Queue hygiene: with one browser a second queued run of the same recording
     # only waits behind the first. Reuse it unless the caller insists.
-    if not body.get("force"):
+    if not body.get("force") and not body.get("variables"):
         existing = await asyncio.to_thread(run_queue.duplicate_of, target_id)
         if existing:
             _remember_run_window(existing["run_id"], display_window)
@@ -896,7 +949,13 @@ async def queue_run(body: dict):
         recording = db.get(Recording, target_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="Recording not found")
-        run = Run(recording_id=recording.id, status="queued")
+        from app.secrets_store import protect_overrides, protected, freeze_inputs, plan_secret_names
+        try:
+            overrides = protect_overrides([recording.project_id], body.get('variables', {}), set(k for k,v in (recording.input_defaults or {}).items() if protected(v)) | plan_secret_names(recording.execution_plan))
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        base, overrides = freeze_inputs([recording.project_id], recording.input_defaults, overrides)
+        run = Run(recording_id=recording.id, status="queued", variable_snapshot=base, input_overrides=overrides)
         db.add(run)
         db.commit()
         db.refresh(run)
@@ -919,7 +978,7 @@ async def queue_run(body: dict):
         try:
             await execute_run_task(
                 rid, on_event, on_frame=on_frame,
-                display_window=display_window, viewer_count=viewer_count,
+                display_window=display_window, viewer_count=viewer_count, screenshots=screenshots,
             )
         except Exception as exc:
             from datetime import datetime
@@ -927,10 +986,13 @@ async def queue_run(body: dict):
                 row = db.get(Run, rid)
                 if row:
                     row.status = "error"
-                    row.rog_monitor_log = redact(exc)
+                    row.rog_monitor_log = type(exc).__name__
                     row.finished_at = datetime.utcnow()
                     db.commit()
-            await broadcast_run(rid, {"type": "done", "status": "error", "error": redact(exc)})
+            await broadcast_run(rid, {"type": "done", "status": "error", "error": type(exc).__name__})
+        finally:
+            from app.pdf_reports import finalize
+            await asyncio.to_thread(finalize, 'run', rid)
 
     task = asyncio.create_task(task_wrapper())
     # The queue reaper only cancels runs that nobody owns, so ownership has to be
@@ -1018,6 +1080,21 @@ def _select_batch_recordings(body: dict) -> tuple[list[dict], list[str]]:
                 "step_count": recording.get("step_count") or 0,
             })
 
+    def requested_tags(key):
+        value = body.get(key, [])
+        if not isinstance(value, list) or len(value) > 20 or any(not isinstance(v, str) or not re.fullmatch(r"[\w.-]{1,50}", v) for v in value):
+            raise HTTPException(status_code=422, detail=key + " must be a list of at most 20 simple tags")
+        return {v.lower() for v in value}
+    include, exclude = requested_tags("include_tags"), requested_tags("exclude_tags")
+    if include or exclude:
+        filtered = []
+        for item in selected:
+            recording = library_store.get_recording(item["id"]) or {}
+            tags = set(re.split(r"[\s,]+", (recording.get("tags") or "").lower()))
+            if include.issubset(tags) and not exclude.intersection(tags):
+                filtered.append(item)
+        selected = filtered
+
     # Same recording twice in one batch is a mistake, not a feature.
     seen: set[str] = set()
     unique = []
@@ -1068,17 +1145,51 @@ async def start_batch(body: dict | None = None):
     body = body or {}
     if not isinstance(body, dict):
         raise HTTPException(status_code=422, detail="Body must be an object")
-    if not (body.get("recording_ids") or body.get("project_id") or body.get("all")):
+    if not (body.get("recording_ids") or body.get("project_id") or body.get("all") or body.get("scenario_id")):
         raise HTTPException(
             status_code=422,
             detail="Select recordings for the batch: recording_ids, project_id or all=true",
         )
-    selected, unknown = await asyncio.to_thread(_select_batch_recordings, body)
+    scenario_meta = None
+    if body.get('scenario_id'):
+        from app.scenario_routes import prepare
+        try:
+            selected, scenario_meta = await asyncio.to_thread(prepare, body.get('scenario_project_id'), body['scenario_id'], body.get('plan_id'), body.get('entry_overrides', {}))
+            unknown = []
+        except (ValueError, TypeError, LibraryError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        body = {**body, 'share_session': True, 'retry_transient': False, 'screenshots': 'all'}
+    else:
+        selected, unknown = await asyncio.to_thread(_select_batch_recordings, body)
     if not selected:
         detail = "No recordings matched."
         if unknown:
             detail = f"No recordings matched. Unknown recording id(s): {', '.join(unknown[:10])}"
         raise HTTPException(status_code=404, detail=detail)
+    # Bound the aggregate report and freeze ordinary steps before queueing.
+    if not scenario_meta:
+        from app.executor import _expand_steps_with_repeat
+        from app.plan_runtime import normalize_plan
+        total_steps = 0
+        try:
+            for item in selected:
+                source = library_store.get_recording(item['id']) or {}
+                if source.get('execution_plan'):
+                    spec = normalize_plan(source['execution_plan'])
+                    count = sum(s['repeat_count'] for stage in ('setup', 'steps', 'teardown') for s in spec[stage])
+                    total_steps += count * len(spec['dataset']) * len(spec['matrix']) * (spec['retries'] + 1)
+                else:
+                    item['snapshot_steps'] = source.get('steps', [])
+                    total_steps += len(await _expand_steps_with_repeat(item['snapshot_steps']))
+                if total_steps > 2000:
+                    raise ValueError('Batch exceeds 2,000 expanded evidence steps; split the selection')
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+    # Do not silently flatten datasets/fixtures/matrices into a legacy shared-session batch.
+    with SessionLocal() as db:
+        plans = db.query(Recording).filter(Recording.id.in_([item['id'] for item in selected]), Recording.execution_plan.isnot(None)).all()
+        if any(p.get('browser', 'chromium') != 'chromium' for row in plans for p in (row.execution_plan or {}).get('matrix', [])):
+            raise HTTPException(422, 'Shared batches use one Chromium. Run other-engine matrix plans individually; they still execute sequentially.')
     cap = guardrails.MAX_BATCH_RECORDINGS
     if len(selected) > cap:
         raise HTTPException(
@@ -1088,6 +1199,8 @@ async def start_batch(body: dict | None = None):
                 "Split the batch or raise TF_BATCH_MAX_RECORDINGS."
             ),
         )
+    if body.get("screenshots", "all") not in {"none", "failure", "changes", "all"}:
+        raise HTTPException(422, "Invalid screenshots policy")
     if not guardrails.batch_budget.acquire():
         raise HTTPException(
             status_code=409,
@@ -1097,7 +1210,7 @@ async def start_batch(body: dict | None = None):
             ),
         )
 
-    screenshots = str(body.get("screenshots") or batch_runner.DEFAULT_SCREENSHOTS).lower()
+    screenshots = "all"
     if screenshots not in batch_runner.SCREENSHOT_MODES:
         guardrails.batch_budget.release()
         raise HTTPException(
@@ -1112,21 +1225,25 @@ async def start_batch(body: dict | None = None):
     name = body.get("name")
     name = str(name).strip()[:200] if isinstance(name, str) and name.strip() else None
 
-    plan = batch_runner.plan_order(selected)
+    plan = selected if scenario_meta else batch_runner.plan_order(selected)
     started_batch = False
     try:
         with SessionLocal() as db:
             batch = Batch(name=name, status="queued", total=len(plan),
                           options={"screenshots": screenshots, "share_session": share_session,
                                    "retry_transient": retry_transient, "display_window": display_window,
-                                   "selected": len(selected), "unknown": unknown[:20]})
+                                   "selected": len(selected), "unknown": unknown[:20], "scenario": scenario_meta, "ordered": bool(scenario_meta)})
             db.add(batch)
             db.commit()
             db.refresh(batch)
             batch_id = batch.id
             run_ids = []
-            for item in plan:
-                run = Run(recording_id=item["id"], status="queued", batch_id=batch_id)
+            from app.secrets_store import freeze_inputs
+            for sequence, item in enumerate(plan):
+                if not scenario_meta:
+                    source = db.get(Recording, item['id'])
+                    item['variable_snapshot'], item['input_overrides'] = freeze_inputs([item['project_id']], source.input_defaults if source else {})
+                run = Run(recording_id=item["id"], status="queued", batch_id=batch_id, sequence=sequence, variable_snapshot=item.get("variable_snapshot"), input_overrides=item.get("input_overrides"), snapshot_steps=item.get("snapshot_steps"))
                 db.add(run)
                 db.commit()
                 db.refresh(run)
@@ -1159,15 +1276,17 @@ async def start_batch(body: dict | None = None):
                     row = db.get(Batch, batch_id)
                     if row is not None and row.status not in ("passed", "partial", "failed", "cancelled"):
                         row.status = "error"
-                        row.error = redact(exc)[:800]
+                        row.error = type(exc).__name__
                         row.finished_at = datetime.utcnow()
                         db.commit()
                 await broadcast_run(stream_key, {"type": "batch", "batch_id": batch_id,
-                                                 "status": "error", "error": redact(exc)})
+                                                 "status": "error", "error": type(exc).__name__})
             finally:
                 for run_id in run_ids:
                     run_queue.unregister(run_id)
                 guardrails.batch_budget.release()
+                from app.pdf_reports import finalize
+                await asyncio.to_thread(finalize, 'batch', batch_id)
 
         task = asyncio.create_task(batch_wrapper())
         handle = _BatchHandle(task, batch_id)
@@ -1672,21 +1791,51 @@ async def ws_rec(ws: WebSocket, rid: str):
                 print(f"WS SAVE FAILED {rid} {redact(e)}")
 
 
+async def _forward_events(ws, queue):
+    """Listen for disconnect even when no new run event arrives (no polling)."""
+    async def sender():
+        while True:
+            await ws.send_json(await queue.get())
+
+    async def receiver():
+        while True:
+            if (await ws.receive())["type"] == "websocket.disconnect":
+                return
+
+    tasks = [asyncio.create_task(sender()), asyncio.create_task(receiver())]
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def _subscribe_events(key):
+    if len(RUN_STREAMS.get(key, [])) >= 4 or sum(map(len, RUN_STREAMS.values())) >= 16:
+        return None
+    queue = asyncio.Queue(maxsize=min(8, guardrails.MAX_RUN_BUFFER_EVENTS))
+    RUN_STREAMS.setdefault(key, []).append(queue)
+    for event in guardrails.run_buffers.get(key)[-queue.maxsize:]:
+        queue.put_nowait(event)
+    return queue
+
+
 @app.websocket("/ws/batches/{batch_id}")
 async def ws_batch(ws: WebSocket, batch_id: str):
     """Live batch progress. Same bounded replay buffer as a single run."""
     await ws.accept()
     key = f"batch:{batch_id}"
-    queue = asyncio.Queue()
-    RUN_STREAMS.setdefault(key, []).append(queue)
-    for event in guardrails.run_buffers.get(key):
-        queue.put_nowait(event)
+    queue = _subscribe_events(key)
+    if queue is None:
+        await ws.close(code=1013)
+        return
     try:
         await ws.send_json({"type": "batch", "batch_id": batch_id, "status": "connected",
                             "message": "Watching batch progress"})
-        while True:
-            event = await queue.get()
-            await ws.send_json(event)
+        await _forward_events(ws, queue)
     except Exception:
         pass
     finally:
@@ -1703,10 +1852,10 @@ async def ws_batch(ws: WebSocket, batch_id: str):
 @app.websocket("/ws/runs/{run_id}")
 async def ws_run(ws: WebSocket, run_id: str):
     await ws.accept()
-    queue = asyncio.Queue()
-    RUN_STREAMS.setdefault(run_id, []).append(queue)
-    for event in guardrails.run_buffers.get(run_id):
-        queue.put_nowait(event)
+    queue = _subscribe_events(run_id)
+    if queue is None:
+        await ws.close(code=1013)
+        return
     # Immediately send queued status so window displays (requirement 8)
     try:
         await ws.send_json({
@@ -1717,9 +1866,7 @@ async def ws_run(ws: WebSocket, run_id: str):
     except:
         pass
     try:
-        while True:
-            event = await queue.get()
-            await ws.send_json(event)
+        await _forward_events(ws, queue)
     except Exception:
         pass
     finally:
@@ -1890,6 +2037,13 @@ def azure_deployment_guide():
     _GUIDE_CACHE["size"] = stat.st_size
     return payload
 
+
+from app.import_routes import router as import_router
+app.include_router(import_router)
+from app.scenario_routes import router as scenario_router
+app.include_router(scenario_router)
+from app.report_routes import router as report_router
+app.include_router(report_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

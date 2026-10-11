@@ -1,5 +1,11 @@
 # TestForge Deployment Guide
 
+> **Current security/reporting update:** sections describing the older plaintext-variable
+> baseline and proposed prompts below are historical findings. Encrypted flagged inputs,
+> masking, ordered scenarios and temporary PDFs are now implemented; legacy plaintext
+> and history still need remediation. Follow [the current operating guide](scenarios-secrets-and-pdf-reports.md)
+> for key provisioning, optional access control and release-asset retention.
+
 For senior DevOps engineers deploying this application and its database from scratch, with a
 library of **Claude Code** prompts in [§13](#13-claude-code-prompt-library).
 
@@ -30,7 +36,7 @@ uvicorn (1 worker, :8000)
 | Browser | Chromium only, bundled in the image | `playwright install --with-deps chromium` |
 | DB | SQLite unless `DATABASE_URL` is set | `app/config.py` |
 | Schema | created/repaired **at import time** | `init_db()` called at `app/main.py:56` |
-| Auth | **none** | §2 |
+| Auth | Optional single-operator `TF_ACCESS_TOKEN` gate; unset means **none** | §2 |
 | Port | 8000, and the image CMD ignores `$PORT` | §7.3 ⚠ |
 | Python | 3.11-slim-bookworm | `Dockerfile` |
 
@@ -41,17 +47,19 @@ processes will OOM the instance. Scale up a VM, or split the queue consumer out 
 
 ---
 
-## 2. Before you expose it to anything: there is no authentication
+## 2. Before you expose it: configure access control and protect secrets
 
-`render.yaml` passes `API_Key` to the service. **No line of application code reads it.** The only
-`Authorization` header in the package is the one the app sends *out* to GitHub.
+The application now supports an optional **single-operator access gate** through
+`TF_ACCESS_TOKEN` (random, at least 32 characters). It protects application APIs and
+websockets using bearer tokens or a signed HttpOnly cookie. `/api/health` and the
+login/status endpoints remain public. See [setup and limitations](script-import-and-actions.md#access-control-and-release-prerequisites).
 
-```bash
-grep -rn "API_Key" app/ || echo "API_Key: never read — decorative"
-grep -rn "HTTPBearer\|api_key_header\|Depends(.*auth" app/main.py || echo "no inbound auth"
-```
+**If `TF_ACCESS_TOKEN` is unset, there is still no application access control.** A
+configured but too-short token fails closed. This is not user roles, tenant isolation,
+secure project-secret storage, or a replacement for network restrictions and TLS.
+The older `API_Key` setting is still not read; configure the new variable explicitly.
 
-So every endpoint is open to whoever can reach the port, including:
+Without the gate or an authenticated reverse proxy, the following endpoints remain open to whoever can reach the port:
 
 | Endpoint | What a stranger can do |
 | --- | --- |
@@ -100,7 +108,7 @@ the repo does not un-leak it. Then:
 Prompts **P8** (auth) and **P11** (secret handling) in §13 exist for exactly this. Until they land, do
 not enable `TF_GITHUB_TOKEN` on any deployment that stores credentials as variables.
 
-**Required posture until the app gains real auth:**
+**Required deployment posture (the token gate does not remove these precautions):**
 
 1. Bind the container to loopback: `--host 127.0.0.1` (the image CMD uses `0.0.0.0` — override it).
 2. Terminate TLS at a reverse proxy and put the access control there (Entra ID application proxy,
@@ -124,6 +132,12 @@ Prompt **P8** in §13 is the one that fixes it properly in-app.
 | Chromium deps | already handled by the image; on a bare host, `playwright install-deps chromium` |
 | PostgreSQL 14+ | only if you are not accepting SQLite |
 | Fine-grained PAT | **Contents: Read and write**, scoped to this one repo, only if publishing is used |
+
+These sizing figures are original planning assumptions, **not an instruction to
+upgrade or incur charges for this change**. Existing hosting plans and browser
+limits have not been raised. Validate the intended workload within the current
+free capacity and provider quotas before public deployment; application code
+cannot guarantee a zero bill.
 
 No GPU, no admin rights on the target app, no inbound ports other than 443.
 
@@ -228,7 +242,7 @@ Pool settings differ by dialect (`app/db.py`):
 
 | Dialect | Pool | Note |
 | --- | --- | --- |
-| SQLite | `StaticPool`, `check_same_thread=False`, `timeout=30` | one shared connection; correct only for a single process |
+| SQLite file database | Bounded `QueuePool`, size 2, no overflow, `check_same_thread=False`, `timeout=30` | separate transactions prevent autosave rollback from erasing a recorded step; no extra worker |
 | Postgres | `pool_size=20`, `max_overflow=10`, `pool_pre_ping=True`, `pool_recycle=3600` | **up to 30 connections, one process** |
 
 With one worker, 30 is fine on a small server. Do not multiply by worker count. `pool_recycle=3600`
@@ -586,7 +600,7 @@ grep -rhoE '"TF_[A-Z0-9_]+"' app/*.py | tr -d '"' | sort -u | wc -l    # 62
 | `TF_BATCH_MAX_RECORDINGS` | `40` | per batch |
 | `TF_BATCH_MAX_RSS_MB` | `420` | browser relaunch threshold — leave at 420 on 512 MB |
 | `TF_BATCH_SCREENSHOTS` | `failure` | `all` / `failure` / `off` |
-| `TF_BATCH_SHARE_SESSION` | `1` | same-origin recordings share a context (keeps a login warm) |
+| `TF_BATCH_SHARE_SESSION` | `1` | Same-project, same-origin ordinary recordings may share a context. Plans isolate each case. Single-process context changes require sequential browser relaunches. |
 | `TF_BATCH_RETRY_TRANSIENT` | `1` | retry transient step failures |
 | `TF_BATCH_LOG_ENTRIES` / `TF_BATCH_REPORTS` | `200` / `40` | report bounds |
 | `TF_MAX_ZIP_BYTES` | `67108864` | export refuses beyond this |
@@ -1262,3 +1276,12 @@ constraints instead of rediscovering them (this is the highest-value single arti
       served.
 * [ ] §12's inert settings are either removed or documented to their users as no-ops.
 * [ ] Recorded → saved → replayed end to end in the browser, on the deployed instance, not locally.
+
+### Scenario inputs and temporary PDF reports
+
+After installing the current requirements, provision `TF_VARIABLE_ENCRYPTION_KEYS`
+as a stable host secret, not a committed value. Keep `TF_ARTIFACTS` outside the
+repository library. Set `TF_REPORTS_GITHUB=1` only after checking repository privacy,
+release-write permissions and quotas. Leave it `0` for isolated previews/tests.
+The existing sweeper must remain enabled to expire attachments; no separate CI job
+was introduced. See [the complete operating guide](scenarios-secrets-and-pdf-reports.md).

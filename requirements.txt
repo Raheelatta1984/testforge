@@ -19,3 +19,9 @@ Pillow==11.0.0
 # Their only consumer was app/agent.py, which is not imported anywhere and fails
 # on import (`cannot import name 'Scenario' from 'app.db'`). Re-add both if that
 # module is ever repaired and wired back in.
+
+# Harden XML parsing in user-uploaded Excel workbooks.
+defusedxml==0.7.1
+# Authenticated encryption and local PDF generation; no hosted services.
+cryptography==46.0.3
+reportlab==4.4.4
