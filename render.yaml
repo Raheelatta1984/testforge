@@ -108,9 +108,20 @@ projects:
       - key: TF_MAX_LOG_INDEX_ROWS
         value: "40"
 
-      # Stable encryption keyring: provision outside Git; never generate on each boot.
+      # Optional. Leave unset and the application generates its own keyring on
+      # first use and keeps it in the database, so encryption works with no setup
+      # and survives redeploys (the free tier has no persistent disk, so a key
+      # held in memory or on disk would strand every value it had sealed).
+      # Set this to keep the key outside the database: it takes precedence for new
+      # writes, and application-generated keys stay available for decryption.
       - key: TF_VARIABLE_ENCRYPTION_KEYS
         sync: false
-      # Enable only after checking repository privacy, token permissions and quotas.
+      # Execution reports are committed to library/reports/ on every run with no
+      # extra configuration. This flag only additionally uploads the PDF itself as
+      # a release asset; enable it after checking repository privacy, token
+      # permissions and quotas.
       - key: TF_REPORTS_GITHUB
         value: "0"
+      # How many committed reports to keep before the oldest are pruned.
+      - key: TF_MAX_REPO_REPORTS
+        value: "200"

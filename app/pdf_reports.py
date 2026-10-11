@@ -62,8 +62,9 @@ def snapshot(kind, identity):
             recording = db.get(Recording, run.recording_id)
             runs.append({'id': run.id, 'name': recording.name if recording else run.recording_id,
                          'status': run.status, 'steps': run.execution_log or []})
+        started = (owner.started_at or owner.created_at or when).replace(tzinfo=timezone.utc).timestamp()
         return {'kind': kind, 'id': identity, 'status': owner.status, 'completed_at': completed,
-                'expires_at': completed + TTL, 'runs': runs,
+                'started_at': started, 'expires_at': completed + TTL, 'runs': runs,
                 'scenario': ((owner.options or {}).get('scenario') or {}) if kind == 'batch' else {}}
 
 
@@ -186,33 +187,115 @@ class ReleaseStore:
         self.client.request('DELETE', self.base + '/releases/assets/' + str(int(asset_id)))
 
 
-def summary(meta):
-    # No step payloads, screenshots, variable values or binaries go into Git.
-    return {k: meta[k] for k in ('kind', 'id', 'status', 'completed_at', 'expires_at', 'steps', 'url', 'asset_id', 'remote_status') if k in meta}
-
-
-def write_summary(meta):
-    with library_store.LOCK:
-        library_store._dump(library_store.library_dir() / 'reports' / (stem(meta['kind'], meta['id']) + '.json'), summary(meta))
-        return library_store._finish('Update temporary execution report summary ' + meta['id'])
-
-
-def publish(meta, path):
-    if not remote_enabled():
-        return
-    if meta.get('remote_status') == 'published':
-        if not meta.get('summary_published'):
-            meta['summary_published'] = write_summary(meta)
-        return
+# How many execution reports the repository keeps. One file per execution would
+# otherwise grow the repo without bound on a free plan; the oldest are dropped.
+def retained():
     try:
-        name = f"tf-{int(meta['completed_at'])}-{stem(meta['kind'], meta['id'])}.pdf"
-        asset = ReleaseStore().upload(path, name)
-        meta.update(asset_id=asset['id'], url=asset['browser_download_url'], remote_status='published')
-        meta.pop('publish_error', None)
-        meta['summary_published'] = write_summary(meta)
-    except Exception as exc:
-        # Exceptions from network transports may include credentials or URLs.
-        meta.update(remote_status='pending', publish_error=type(exc).__name__)
+        return max(1, int(os.environ.get('TF_MAX_REPO_REPORTS', '200')))
+    except ValueError:
+        return 200
+
+
+def repository_dir():
+    return library_store.library_dir() / 'reports'
+
+
+def repository_path(kind, identity):
+    return f"{github_api.library_prefix()}/reports/{stem(kind, identity)}.json"
+
+
+def summary(meta):
+    # Outcomes and counts only. No step payloads, selectors, input values,
+    # screenshots or PDF binaries are ever committed; `recordings` carries names
+    # that are already in the library tree plus per-recording tallies.
+    keys = ('kind', 'id', 'status', 'completed_at', 'expires_at', 'steps', 'duration_seconds',
+            'recordings', 'scenario', 'url', 'asset_id', 'remote_status')
+    return {k: meta[k] for k in keys if k in meta}
+
+
+def _iso(epoch):
+    return time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(epoch))
+
+
+def _prune(directory):
+    """Keep the newest reports only, so the repository stays bounded."""
+    entries = []
+    for path in directory.glob('*.json'):
+        try:
+            entries.append((json.loads(path.read_text()).get('completed_at') or 0, path))
+        except (ValueError, OSError):
+            path.unlink(missing_ok=True)
+    for _when, path in sorted(entries, reverse=True)[retained():]:
+        path.unlink(missing_ok=True)
+
+
+def _write_index(directory):
+    """A readable run history for anyone browsing the repository on GitHub."""
+    rows = []
+    for path in directory.glob('*.json'):
+        try:
+            rows.append(json.loads(path.read_text()))
+        except (ValueError, OSError):
+            continue
+    rows.sort(key=lambda row: row.get('completed_at') or 0, reverse=True)
+    lines = [
+        '# Execution reports', '',
+        'Written by TestForge when an execution finishes, and committed with the rest of the',
+        'library. Outcomes and counts only: no step payloads, selectors, input values,',
+        'screenshots or PDF binaries are committed. The PDF is generated on demand by the',
+        'instance and expires 48 hours after the execution; `TF_REPORTS_GITHUB=1` additionally',
+        'uploads it as a release asset.', '',
+        f'Newest first, newest {retained()} retained.', '',
+        '| Finished (UTC) | Kind | Id | Outcome | Steps | Recordings | PDF asset |',
+        '| --- | --- | --- | --- | --- | --- | --- |',
+    ]
+    for row in rows:
+        names = ', '.join(str(r.get('name', '')).replace('|', '\\|') for r in (row.get('recordings') or [])) or '—'
+        asset = f"[download]({row['url']})" if row.get('url') else (
+            'not uploaded' if row.get('remote_status') == 'disabled' else str(row.get('remote_status') or '—'))
+        lines.append(f"| {_iso(row.get('completed_at') or 0)} | {row.get('kind', '')} | "
+                     f"{row.get('id', '')} | {row.get('status', '')} | {row.get('steps', 0)} | "
+                     f"{names[:120]} | {asset} |")
+    (directory / 'index.md').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+
+
+def write_summary(meta, commit=True):
+    """Write the report into the library tree; optionally push it right away.
+
+    `commit=False` is for the runs inside a batch: their files are written now
+    and the batch's own publication pushes all of them in one commit, instead of
+    one commit and one push per recording.
+    """
+    with library_store.LOCK:
+        directory = repository_dir()
+        library_store._dump(directory / (stem(meta['kind'], meta['id']) + '.json'), summary(meta))
+        _prune(directory)
+        _write_index(directory)
+        if not commit:
+            return False
+        return library_store._finish(
+            f"Publish execution report {stem(meta['kind'], meta['id'])} ({meta.get('status', 'complete')})")
+
+
+def publish(meta, path, commit=True):
+    """Two separate publications, deliberately kept apart.
+
+    The report itself is part of the library and is always committed to the
+    repository - that needs no extra configuration beyond the publishing this
+    deployment already does. Uploading the PDF *binary* as a release asset is a
+    different decision (repository visibility, storage quota) and stays behind
+    TF_REPORTS_GITHUB.
+    """
+    if remote_enabled() and meta.get('remote_status') != 'published':
+        try:
+            name = f"tf-{int(meta['completed_at'])}-{stem(meta['kind'], meta['id'])}.pdf"
+            asset = ReleaseStore().upload(path, name)
+            meta.update(asset_id=asset['id'], url=asset['browser_download_url'], remote_status='published')
+            meta.pop('publish_error', None)
+        except Exception as exc:
+            # Exceptions from network transports may include credentials or URLs.
+            meta.update(remote_status='pending', publish_error=type(exc).__name__)
+    meta['summary_published'] = write_summary(meta, commit=commit)
 
 
 def generate(kind, identity):
@@ -240,24 +323,46 @@ def generate(kind, identity):
                 temporary.unlink(missing_ok=True)
             meta = {k: data[k] for k in ('kind', 'id', 'status', 'completed_at', 'expires_at')}
             meta.update(steps=steps, remote_status='pending' if remote_enabled() else 'disabled')
+            # Tallies for the committed report. Names already exist in the
+            # library tree, so this adds outcomes, not new exposure.
+            meta['recordings'] = [{
+                'id': run['id'], 'name': run['name'], 'status': run['status'],
+                'steps': len(run['steps']),
+                'failed': sum(1 for step in run['steps'] if step.get('status') == 'failed'),
+            } for run in data['runs']]
+            if data.get('scenario'):
+                meta['scenario'] = {k: data['scenario'][k] for k in ('scenario_name', 'plan_name')
+                                    if k in data['scenario']}
+            meta['duration_seconds'] = max(0, round(data['completed_at'] - data.get('started_at', data['completed_at']), 3))
         # Network work is outside the render lock and never blocks cached downloads.
         library_store._dump(root() / (key + '.json'), meta)
         return path, meta
 
 
-def finalize(kind, identity):
+def finalize(kind, identity, commit=True):
     try:
+        children = []
         if kind == 'batch':
             with SessionLocal() as db:
-                ids = [r.id for r in db.query(Run).filter_by(batch_id=identity).order_by(Run.sequence)]
-            for run_id in ids:
-                finalize('run', run_id)
+                children = [r.id for r in db.query(Run).filter_by(batch_id=identity).order_by(Run.sequence)]
+            # Write each recording's report, but do not push 40 times: the
+            # batch's own publication below carries all of them in one commit.
+            for run_id in children:
+                finalize('run', run_id, commit=False)
         path, meta = generate(kind, identity)
         with PUBLICATION_LOCK:
             meta = metadata(kind, identity) or meta
             if time.time() < meta['expires_at'] and path.is_file():
-                publish(meta, path)
+                publish(meta, path, commit=commit)
                 library_store._dump(path.with_suffix('.json'), meta)
+        if commit and children and meta.get('summary_published'):
+            # That one push carried the child reports too; record it on each so
+            # they are not reported as still pending.
+            for run_id in children:
+                child = metadata('run', run_id)
+                if child and not child.get('summary_published'):
+                    child['summary_published'] = True
+                    library_store._dump(root() / (stem('run', run_id) + '.json'), child)
     except Exception as exc:
         logger.warning('PDF NOT READY %s %s (%s)', kind, identity, type(exc).__name__)
 

@@ -117,9 +117,16 @@ def batch_pdf(batch_id: str, download: bool = False):
 
 @router.get('/api/reports/{kind}/{identity}')
 def report_status(kind: str, identity: str):
-    from app.pdf_reports import metadata
+    from app.pdf_reports import metadata, repository_path
     try:
-        return metadata(kind, identity) or {'remote_status': 'not_generated'}
+        meta = metadata(kind, identity) or {'remote_status': 'not_generated'}
+        # Where the committed report lives, so the dashboard can link to the
+        # repository copy rather than only the expiring release asset.
+        path = repository_path(kind, identity)
+        reference = library_store.repo_ref()
+        slug, branch = reference.get('slug'), reference.get('branch')
+        return {**meta, 'repository_path': path,
+                'repository_url': f'https://github.com/{slug}/blob/{branch}/{path}' if slug and branch else None}
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
 

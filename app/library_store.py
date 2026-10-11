@@ -1043,6 +1043,97 @@ def remote_library_status() -> dict:
         }
 
 
+def reseal_library() -> dict:
+    """Re-encrypt every stored value with the newest key, one value at a time.
+
+    Called after a key rotation. Each value is decrypted with whichever key in
+    the ring can still read it and sealed again immediately, so plaintext exists
+    only as a local in a single loop iteration and is never written anywhere.
+
+    A value the current ring cannot open is counted and skipped rather than
+    destroyed: that is an operator problem (a key was removed), and overwriting
+    it would turn a recoverable situation into a permanent loss.
+    """
+    from app.secrets_store import decrypt, encrypt, protected, PREFIX
+
+    def resealed(values):
+        """Returns (new_values, changed, unreadable) for one mapping."""
+        output, changed, unreadable = {}, 0, 0
+        for key, value in (values or {}).items():
+            if isinstance(value, str) and value.startswith(PREFIX):
+                try:
+                    output[key] = encrypt(decrypt(value))
+                    changed += 1
+                except ValueError:
+                    output[key] = value
+                    unreadable += 1
+            else:
+                output[key] = value
+        return output, changed, unreadable
+
+    report = {"variables": 0, "recording_defaults": 0, "scenario_entries": 0, "unreadable": 0,
+              "projects": 0}
+    with LOCK:
+        touched_projects, touched_recordings = set(), set()
+        with SessionLocal() as db:
+            for variable in db.query(Variable).all():
+                if not protected(variable.value) or not str(variable.value).startswith(PREFIX):
+                    continue
+                try:
+                    variable.value = encrypt(decrypt(variable.value))
+                    report["variables"] += 1
+                    touched_projects.add(variable.project_id)
+                except ValueError:
+                    report["unreadable"] += 1
+            for recording in db.query(Recording).all():
+                values, changed, unreadable = resealed(recording.input_defaults)
+                report["unreadable"] += unreadable
+                if changed:
+                    recording.input_defaults = values
+                    report["recording_defaults"] += changed
+                    touched_recordings.add(recording.id)
+                    touched_projects.add(recording.project_id)
+            db.commit()
+
+        # Scenario links live only as files, so they are rewritten in place.
+        for project_id in _iter_project_ids():
+            directory = _project_dir(project_id) / "scenarios"
+            if not directory.is_dir():
+                continue
+            for path in sorted(directory.glob("*.json")):
+                try:
+                    data = _load(path)
+                except (ValueError, OSError):
+                    continue
+                total = 0
+                for plan in data.get("plans") or []:
+                    for entry in plan.get("entries") or []:
+                        values, changed, unreadable = resealed(entry.get("variables"))
+                        report["unreadable"] += unreadable
+                        if changed:
+                            entry["variables"] = values
+                            total += changed
+                if total:
+                    _dump(path, data)
+                    report["scenario_entries"] += total
+                    touched_projects.add(project_id)
+
+        for recording_id in sorted(touched_recordings):
+            try:
+                _write_recording_files(recording_id, include_exports=False)
+            except NotFound:
+                continue
+        for project_id in sorted(touched_projects):
+            try:
+                _write_project_files(project_id)
+            except NotFound:
+                continue
+        report["projects"] = len(touched_projects)
+        published = _finish("Re-seal encrypted library values with the rotated key")
+    report.update(publish_outcome(published))
+    return report
+
+
 def _publish_unlocked(message: str) -> bool:
     """Publish pending library changes on the current branch."""
     return _publish_current_branch(message)

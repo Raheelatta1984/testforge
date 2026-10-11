@@ -502,6 +502,23 @@ def get_project_vars(project_id: str):
         raise _library_http(exc) from exc
 
 
+@app.get("/api/encryption")
+def encryption_status():
+    """Where the keyring comes from and whether it works. Never key material."""
+    return secrets_store.status()
+
+
+@app.post("/api/encryption/rotate")
+def encryption_rotate():
+    """Mint a new application key and re-seal every stored value with it."""
+    try:
+        return secrets_store.rotate()
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+
+
 @app.post("/api/variables", status_code=201)
 def create_var(body: dict):
     if "is_secret" in body and not isinstance(body["is_secret"], bool):

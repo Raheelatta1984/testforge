@@ -1279,9 +1279,15 @@ constraints instead of rediscovering them (this is the highest-value single arti
 
 ### Scenario inputs and temporary PDF reports
 
-After installing the current requirements, provision `TF_VARIABLE_ENCRYPTION_KEYS`
-as a stable host secret, not a committed value. Keep `TF_ARTIFACTS` outside the
-repository library. Set `TF_REPORTS_GITHUB=1` only after checking repository privacy,
-release-write permissions and quotas. Leave it `0` for isolated previews/tests.
+After installing the current requirements, encryption needs no setup: the
+application generates its own keyring and stores it in the database, so it
+survives redeploys on hosts without a persistent disk. Provision
+`TF_VARIABLE_ENCRYPTION_KEYS` as a stable host secret when you want the key kept
+out of the database; it takes precedence for new writes and the managed keys
+remain available for decryption. Keep `TF_ARTIFACTS` outside the repository
+library. Execution reports are committed to `library/reports/` on every run by the
+normal library publisher; `TF_REPORTS_GITHUB=1` additionally uploads the PDF binary
+as a release asset — set it only after checking repository privacy, release-write
+permissions and quotas, and leave it `0` for isolated previews/tests.
 The existing sweeper must remain enabled to expire attachments; no separate CI job
 was introduced. See [the complete operating guide](scenarios-secrets-and-pdf-reports.md).

@@ -282,13 +282,31 @@ for the browser checks; Firefox/WebKit are opt-in paths, not verified claims.
   after a variable definition is deleted; one-session fake replay; PDF caching and
   JPEG passthrough; oldest-first/hourly remote retention discovery; provider
   response contracts; one upload/summary-only publication; malformed inputs; redaction before truncation.
-- `UT-SCENE-14`: an unconfigured or unusable keyring is reported by `GET /api/health`
-  before a save is attempted — `configured`/`ready`/`keys` plus a `reason` that names
+- `UT-SCENE-14`: an unusable keyring — or one switched off with
+  `TF_MANAGED_ENCRYPTION_KEY=0` — is reported by `GET /api/health` before a save is
+  attempted: `configured`/`ready`/`keys` plus a `reason` that names
   `TF_VARIABLE_ENCRYPTION_KEYS` and the key-generation command, matching the 422 the
   save path returns, and never echoing a key.
 - `UT-SCENE-15`: the Demo tab is registered in the dashboard nav, its component file
   loads, every tab carries a hover/assistive name, and both fixtures (`/demo.html`,
   `/domain-demo.html`) plus all five synthetic packs resolve and are described in the tab.
+- `UT-SCENE-16`: with nothing set in the environment, encryption is still ready and
+  `GET /api/encryption` reports `source: app-managed` with a note that admits the key
+  lives in the same database; a secret variable saves, is ciphertext in the database,
+  decrypts on demand, survives a cache reset (the key is persisted, not in memory),
+  and never appears in the published project files.
+- `UT-SCENE-17`: `POST /api/encryption/rotate` mints a key and re-seals in place —
+  ciphertext changes, the value still decrypts, the superseded key stays in the ring
+  so older snapshots keep opening, and a value whose key is gone is counted as
+  `unreadable` and left byte-identical rather than overwritten. With
+  `TF_VARIABLE_ENCRYPTION_KEYS` set the endpoint refuses with 422 and names the
+  variable, and the environment key does not evict application-sealed values.
+- `UT-SCENE-18`: every finished execution commits `library/reports/<kind>-<id>.json`
+  and refreshes `index.md` without `TF_REPORTS_GITHUB` (which gates only the release
+  asset); the committed summary carries outcomes and counts but no typed values,
+  labels, selectors, error text or PDF; a batch publishes in one commit, not one per
+  recording, and still back-fills every child; `GET /api/reports/...` returns the
+  `repository_path`.
 - `BR-SCENE-01`: real Chromium cross-project login→logout, one shared session,
   encrypted one-off password override, masked JPEG pixel check, nine captures for
   nine actions, single and aggregate PDFs without any additional capture; single
