@@ -172,11 +172,403 @@ class BrowserLaunchTests(unittest.TestCase):
 
 
 class SecurityTests(unittest.TestCase):
+    """Pen-test scenarios: attack the credential surface and pin its blast radius."""
+
+    def _no_checkout(self):
+        from app import library_store
+        original = library_store.git_root
+        library_store.git_root = lambda: None
+        library_store.invalidate_repo_ref()
+        return original
+
+    def _restore(self, original):
+        from app import library_store
+        library_store.git_root = original
+        library_store.invalidate_repo_ref()
+
     def test_UT_SEC_01_redact_password(self):
         raw = "could not connect to postgresql://qa_user:s3cret@db.internal/testforge"
         cleaned = redact(raw)
         self.assertNotIn("s3cret", cleaned)
         self.assertIn("qa_user:***@", cleaned)
+
+    def test_UT_SEC_02_configuration_surfaces_never_carry_the_token(self):
+        """Attack: scrape every configuration surface for the credential.
+
+        `describe()`, `status()` and both `publish_outcome()` payloads must
+        serialize without the token even when it is configured and working.
+        """
+        import json
+        from app import github_api, library_store
+
+        token = "github_pat_" + "S" * 18
+        original = self._no_checkout()
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN=token)
+        try:
+            surfaces = {
+                "describe": github_api.describe(),
+                "status": library_store.status(),
+                "outcome_failed": library_store.publish_outcome(False, "push failed"),
+                "outcome_ok": library_store.publish_outcome(True),
+            }
+        finally:
+            _env_restore(saved)
+            self._restore(original)
+        self.assertTrue(surfaces["describe"]["available"], surfaces["describe"])
+        blob = json.dumps(surfaces)
+        self.assertNotIn(token, blob)
+
+    def test_UT_SEC_03_hostile_github_errors_are_scrubbed_at_the_transport(self):
+        """Attack: a GitHub or proxy error body quotes credentials back at us.
+
+        The live token, an unknown `github_pat_…` token and a bare
+        `Authorization:` header must all become `***` before `GitHubAPIError`
+        leaves `request()`.
+        """
+        import io
+        import json
+        import urllib.error
+        from unittest import mock
+        from app import github_api
+
+        token = "github_pat_" + "S" * 18
+        unknown = "github_pat_" + "LEAKED" + "9" * 12
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_BRANCH="main",
+                         TF_GITHUB_TOKEN=token)
+        client = github_api.GitHubClient()
+
+        def hostile(request, timeout=None):
+            body = json.dumps({"message": f"Bad credentials for Authorization: Bearer {token} and {unknown}"}).encode()
+            raise urllib.error.HTTPError(request.full_url, 401, "Bad credentials", {}, io.BytesIO(body))
+
+        def hostile_reason(request, timeout=None):
+            raise urllib.error.URLError(f"tunnel failed: Authorization: Bearer {unknown}")
+
+        try:
+            with mock.patch("urllib.request.urlopen", hostile):
+                with self.assertRaises(github_api.GitHubAPIError) as caught:
+                    client.head_sha()
+            with mock.patch("urllib.request.urlopen", hostile_reason):
+                with self.assertRaises(github_api.GitHubAPIError) as caught2:
+                    client.head_sha()
+        finally:
+            _env_restore(saved)
+        for exc in (caught.exception, caught2.exception):
+            text = str(exc)
+            self.assertNotIn(token, text)
+            self.assertNotIn(unknown, text)
+            self.assertIn("***", text)
+
+    def test_UT_SEC_04_the_bearer_token_travels_only_to_the_configured_api_host(self):
+        """Attack: exfiltrate the token by redirecting where the client sends it.
+
+        The Authorization header is attached only to requests against the
+        configured GitHub API base; an API host override moves the whole
+        conversation there and nowhere else.
+        """
+        import json
+        from unittest import mock
+        from app import github_api
+
+        token = "github_pat_" + "S" * 18
+        seen = []
+
+        class _Resp:
+            status = 200
+
+            def read(self):
+                return json.dumps({"commit": {"sha": "a" * 40}}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        def spy(request, timeout=None):
+            seen.append((request.full_url, request.get_header("Authorization")))
+            return _Resp()
+
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_BRANCH="main",
+                         TF_GITHUB_TOKEN=token)
+        try:
+            client = github_api.GitHubClient()
+            with mock.patch("urllib.request.urlopen", spy):
+                client.head_sha()
+        finally:
+            _env_restore(saved)
+        self.assertEqual(len(seen), 1, seen)
+        self.assertEqual(seen[0][0], "https://api.github.com/repos/acme/qa-library/branches/main")
+        self.assertEqual(seen[0][1], f"Bearer {token}")
+
+        seen.clear()
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_BRANCH="main",
+                         TF_GITHUB_TOKEN=token, TF_GITHUB_API="https://ghe.example.test/api/v3")
+        try:
+            client = github_api.GitHubClient()
+            with mock.patch("urllib.request.urlopen", spy):
+                client.head_sha()
+        finally:
+            _env_restore(saved)
+        self.assertEqual(len(seen), 1, seen)
+        self.assertTrue(seen[0][0].startswith("https://ghe.example.test/api/v3/"), seen)
+        self.assertEqual(seen[0][1], f"Bearer {token}")
+
+    def test_UT_SEC_05_publishing_needs_a_named_repository_and_a_token(self):
+        """Attack: let a CI runner's stray GITHUB_TOKEN push to a guessed repo.
+
+        Both gates must be shut: a named repository without a token is refused
+        with a reason naming TF_GITHUB_TOKEN, and a token without a named
+        repository is refused with a reason naming TF_GITHUB_REPO.
+        """
+        import json
+        from app import github_api, library_store
+
+        original = self._no_checkout()
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_TOKEN=None, GITHUB_TOKEN=None, GH_TOKEN=None)
+        try:
+            info = github_api.describe()
+            mode = library_store.publish_mode()
+            reason = library_store.publish_disabled_reason() or ""
+        finally:
+            _env_restore(saved)
+            self._restore(original)
+        self.assertFalse(info["available"])
+        self.assertIn("TF_GITHUB_TOKEN", info["reason"])
+        self.assertEqual(mode, "disabled")
+        self.assertIn("TF_GITHUB_TOKEN", reason)
+
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO=None, TF_GIT_REMOTE=None,
+                         TF_GITHUB_URL=None, GITHUB_TOKEN="ghs_ci_runner_token")
+        try:
+            info = github_api.describe()
+        finally:
+            _env_restore(saved)
+        self.assertFalse(info["available"])
+        self.assertIsNone(info["slug"])
+        self.assertIn("TF_GITHUB_REPO", info["reason"])
+        self.assertNotIn("ghs_ci_runner_token", json.dumps(info))
+
+    def test_UT_SEC_06_a_publish_commits_only_the_library_prefix(self):
+        """Attack: smuggle a file outside library/ into the repository tree.
+
+        Every entry the API publisher stages must start with `library/`, a
+        sibling file next to the library root must never appear, and the ref
+        update must be fast-forward only.
+        """
+        import tempfile
+        from app import github_api
+
+        root = Path(tempfile.mkdtemp(prefix="tf-pentest-"))
+        lib = root / "library"
+        (lib / "projects" / "demo").mkdir(parents=True)
+        (lib / "projects" / "demo" / "project.json").write_text('{"id": "demo"}', encoding="utf-8")
+        (lib / "catalog.json").write_text("{}", encoding="utf-8")
+        (root / "KEEP.txt").write_text("outside the library", encoding="utf-8")
+
+        class _RecordingClient(FakeGitHubClient):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.entry_paths = []
+                self.ref_force = None
+
+            def create_tree(self, base_sha, entries):
+                self.entry_paths = [entry.get("path") for entry in entries]
+                return super().create_tree(base_sha, entries)
+
+            def update_ref(self, sha, force=False):
+                self.ref_force = force
+                return super().update_ref(sha, force)
+
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_TOKEN="tok")
+        client = _RecordingClient(head="a" * 40, remote={})
+        try:
+            report = github_api.publish("Save library", lib, client=client)
+        finally:
+            _env_restore(saved)
+        self.assertTrue(report["published"], report)
+        self.assertTrue(client.entry_paths, "nothing was staged")
+        self.assertTrue(all(p.startswith("library/") for p in client.entry_paths), client.entry_paths)
+        self.assertFalse(any("KEEP" in (p or "") for p in client.entry_paths), client.entry_paths)
+        self.assertTrue(all(p.startswith("library/") for p in client.remote), client.remote)
+        self.assertFalse(client.ref_force, "a publish must never force-update the branch")
+
+    def test_UT_SEC_07_a_dry_run_with_pending_changes_writes_nothing(self):
+        """Attack: probe the publish endpoint and cause an unexpected push.
+
+        With changes pending, a dry run must perform reads only: no blob, tree,
+        commit or ref call ever reaches the transport.
+        """
+        import tempfile
+        from app import github_api
+
+        root = Path(tempfile.mkdtemp(prefix="tf-pentest-dry-"))
+        (root / "catalog.json").write_text("{}", encoding="utf-8")
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_TOKEN="tok")
+        client = FakeGitHubClient(head=None, remote={})
+        try:
+            report = github_api.publish("Save library", root, client=client, dry_run=True)
+        finally:
+            _env_restore(saved)
+        self.assertTrue(report["dry_run"])
+        self.assertEqual(report["state"], "pending")
+        self.assertEqual(client.blobs_created, 0)
+        self.assertIsNone(client.commit_sha)
+        self.assertIsNone(client.updated_ref)
+        self.assertEqual({method for method, _path in client.calls}, {"GET"}, client.calls)
+
+    def test_UT_SEC_08_a_branch_that_would_alter_the_request_path_is_refused(self):
+        """Attack: put path traversal or query syntax in TF_GITHUB_BRANCH.
+
+        The branch name is interpolated into request paths, so a hostile value
+        must leave publishing unavailable and no request may be built at all.
+        Legal names — including slashes and dots — must still work.
+        """
+        from unittest import mock
+        from app import github_api
+
+        sent = []
+
+        def spy(request, timeout=None):
+            sent.append(request.full_url)
+            raise AssertionError("no request may be built for a hostile branch")
+
+        for bad in ("main/../../repos/victim/x", "main?per_page=1", "main#frag",
+                    "main\nx", "main.lock", ".hidden", "main/../..",
+                    "a..b", "main%2e%2e"):
+            saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_TOKEN="tok",
+                             TF_GITHUB_BRANCH=bad)
+            try:
+                info = github_api.describe()
+                client = github_api.GitHubClient()
+                with mock.patch("urllib.request.urlopen", spy):
+                    with self.assertRaises(github_api.GitHubAPIError):
+                        client.head_sha()
+            finally:
+                _env_restore(saved)
+            self.assertFalse(info["available"], bad)
+            self.assertIn("branch", info["reason"].lower(), bad)
+            self.assertEqual(sent, [], bad)
+
+        # Whitespace is neutralised rather than refused: `branch()` strips it
+        # before it can reach a request path, so padding cannot smuggle anything.
+        for good in ("main", "release/2026.10", "user.feature", "  release/x  "):
+            saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_TOKEN="tok",
+                             TF_GITHUB_BRANCH=good)
+            try:
+                info = github_api.describe()
+            finally:
+                _env_restore(saved)
+            self.assertTrue(info["available"], (good, info))
+        self.assertEqual(info["branch"], "release/x")
+
+        saved = _env_set(TF_GITHUB_REPO="acme/qa-library", TF_GITHUB_TOKEN="tok",
+                         TF_GITHUB_BRANCH="main")
+        try:
+            client = github_api.GitHubClient()
+            with mock.patch("urllib.request.urlopen", spy):
+                with self.assertRaises(github_api.GitHubAPIError):
+                    client.tree("../../users/victim")
+        finally:
+            _env_restore(saved)
+        self.assertEqual(sent, [], "a hostile tree SHA must not reach the transport")
+
+    def test_UT_SEC_09_the_harness_strips_publishing_credentials_before_boot(self):
+        """Regression: a developer shell must never publish from a test run.
+
+        tests/harness.py removes every publishing credential from the server
+        environment before spawning uvicorn, and this test fails if that guard
+        is ever deleted or reordered after the spawn.
+        """
+        source = (ROOT / "tests" / "harness.py").read_text(encoding="utf-8")
+        for name in ("TF_GITHUB_TOKEN", "GITHUB_TOKEN", "GH_TOKEN",
+                     "TF_GITHUB_REPO", "TF_GIT_REMOTE"):
+            self.assertIn(f'"{name}"', source, name)
+        strip = source.find("env.pop(secret, None)")
+        boot = source.find("subprocess.Popen")
+        self.assertNotEqual(strip, -1, "the harness no longer strips publishing credentials")
+        self.assertTrue(0 < strip < boot,
+                        "credentials must be stripped before the test server starts")
+
+    def test_UT_SEC_10_the_http_surface_never_echoes_the_token(self):
+        """Attack: scrape the live HTTP surface while GitHub answers hostilely.
+
+        Every read endpoint must respond without the configured token or an
+        unknown `github_pat_…` quoted in a hostile GitHub error body, while the
+        redaction marker shows the scrub actually ran.
+        """
+        import io
+        import json
+        import urllib.error
+        from unittest import mock
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+
+        token = "github_pat_" + "S" * 18
+        unknown = "github_pat_" + "LEAKED" + "9" * 12
+        sent = []
+
+        def hostile(request, timeout=None):
+            sent.append(request.full_url)
+            body = json.dumps({"message": f"Server said Authorization: Bearer {token} and {unknown}"}).encode()
+            raise urllib.error.HTTPError(request.full_url, 502, "Bad Gateway", {}, io.BytesIO(body))
+
+        original = self._no_checkout()
+        original_pending = library_store.publish_pending
+        library_store.publish_pending = lambda: True
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN=token)
+        bodies = {}
+        try:
+            with mock.patch("urllib.request.urlopen", hostile):
+                with TestClient(app) as client:
+                    for path in ("/api/health", "/api/diagnostics", "/api/library",
+                                 "/api/library/publish/plan"):
+                        response = client.get(path)
+                        self.assertLess(response.status_code, 500, path)
+                        bodies[path] = response.text
+        finally:
+            _env_restore(saved)
+            library_store.publish_pending = original_pending
+            self._restore(original)
+        self.assertTrue(sent, "the hostile GitHub response was never exercised")
+        blob = json.dumps(bodies)
+        for needle in (token, unknown):
+            self.assertNotIn(needle, blob)
+        self.assertIn("***", blob, "redaction did not run on the HTTP surface")
+
+    def test_UT_SEC_11_a_failed_push_error_is_scrubbed_before_the_banner(self):
+        """Attack: leak the token through the save banner's error detail.
+
+        publish_outcome prints the push error verbatim, so it must come back
+        with credential-shaped text replaced by `***` while the useful message
+        survives.
+        """
+        import json
+        from app import library_store
+
+        token = "github_pat_" + "S" * 18
+        original = self._no_checkout()
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN=token)
+        try:
+            outcome = library_store.publish_outcome(
+                False,
+                f"remote rejected the push for {token} via https://qa:{token}@github.com/acme/qa/",
+            )
+            ok = library_store.publish_outcome(True)
+        finally:
+            _env_restore(saved)
+            self._restore(original)
+        blob = json.dumps([outcome, ok])
+        self.assertNotIn(token, blob)
+        self.assertIn("remote rejected the push", outcome["publish_message"])
+        self.assertIn("***", outcome["publish_message"])
+        self.assertIn("***", outcome["publish_error"])
+        self.assertTrue(outcome["retry_scheduled"])
 
 
 class ReplayTests(unittest.TestCase):

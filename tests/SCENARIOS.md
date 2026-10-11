@@ -62,6 +62,16 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-BRW-03 | Install hint | A Playwright "executable doesn't exist" error becomes the `playwright install chromium` message, without the internal path. |
 | UT-BRW-04 | Video override | A stand-in binary disables Playwright video so a video failure cannot fail the run. |
 | UT-SEC-01 | Credential redaction | `postgresql://user:password@host/db` loses the password before it can reach the UI. |
+| UT-SEC-02 | Configuration surfaces carry no token | `describe()`, `status()` and both `publish_outcome()` payloads serialize without the token even when `TF_GITHUB_TOKEN` is configured and working. |
+| UT-SEC-03 | Hostile GitHub errors are scrubbed at the transport | An HTTP error body or URL error quoting the `Authorization` header, the live token, or an unknown `github_pat_…` becomes `***` before `GitHubAPIError` leaves `request()`. |
+| UT-SEC-04 | The bearer token travels only to the configured API host | `head_sha()` sends exactly one request to `https://api.github.com/...` carrying `Authorization: Bearer <token>`; `TF_GITHUB_API` relocates the whole conversation, token included, and nothing is sent anywhere else. |
+| UT-SEC-05 | Publishing needs both gates | A named repository without a token is `disabled` with a reason naming `TF_GITHUB_TOKEN`; a `GITHUB_TOKEN` with no named repository is refused with a reason naming `TF_GITHUB_REPO`. |
+| UT-SEC-06 | A push commits only `library/` | Every tree entry staged by the API publisher starts with `library/`, a sibling file next to the library root is never staged, and the ref update is fast-forward (`force=False`). |
+| UT-SEC-07 | Dry run writes nothing | With changes pending, `publish(dry_run=True)` reports `pending` and the transport records GET reads only: no blob, tree, commit or ref call. |
+| UT-SEC-08 | Request paths cannot be altered from configuration | A branch carrying `..`, `?`, `#`, `%`, control characters or a `.lock` ending leaves `describe()` unavailable and `GitHubClient` refuses before any request is built; padded names are stripped to the real branch before use, legal names (`main`, `release/2026.10`) still work, and a tree SHA that is not a git object id is refused. |
+| UT-SEC-09 | The harness strips publishing credentials | `tests/harness.py` removes `TF_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`, `TF_GITHUB_REPO` and `TF_GIT_REMOTE` from the server environment before `subprocess.Popen`, so a developer shell cannot publish from a test run. |
+| UT-SEC-10 | The HTTP surface never echoes the token | `/api/health`, `/api/diagnostics`, `/api/library` and `/api/library/publish/plan` respond without the configured token or an unknown `github_pat_…` quoted by a hostile GitHub error body, while the redaction marker `***` proves the scrub ran. |
+| UT-SEC-11 | Failed-push errors are scrubbed before the banner | `publish_outcome(False, error)` keeps the useful push error but replaces credential-shaped text with `***` in `publish_message` and `publish_error`. |
 | UT-REP-01 | Navigate interpolation | `goto` receives the interpolated URL and waits for `domcontentloaded`. |
 | UT-REP-02 | Click by selector | A unique selector is clicked. Coordinates are not used. |
 | UT-REP-03 | Click fallback | A missing selector falls back to the recorded x,y. |
@@ -133,6 +143,8 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
 
 Publishing (`UT-PUB-*`) covers the three ways a save can end: published, saved locally with a retry that really is scheduled, and saved locally with publishing disabled and no retry promised. The API publisher is exercised against an in-memory fake transport, so no test touches GitHub.
+
+Pen-test scenarios (`UT-SEC-*`) attack the credential surface rather than the features: they try to walk the token out through API responses, GitHub error bodies, request paths, the save banner and the test harness itself, and they pin the blast radius of one push (library prefix only, fast-forward only, dry runs inert, both configuration gates required).
 
 Queue hygiene (`UT-QUEUE-*`) covers the runs that will never execute: orphans left by a restart, entries stale behind a busy browser, and duplicates of a recording that is already waiting. Batch execution (`UT-BATCH-*`) covers one browser for many recordings, learned step budgets, screenshots only where they are worth the CPU, and the retry rule that distinguishes a transient timeout from a broken recording.
 

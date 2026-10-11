@@ -52,6 +52,29 @@ TIMEOUT = float(os.environ.get("TF_GITHUB_TIMEOUT", "25") or 25)
 
 _SLUG_RE = re.compile(r"^[\w.-]+/[\w.-]+$")
 
+# A branch name is interpolated into request paths (/branches/{branch},
+# /git/refs/heads/{branch}), so it must not be able to leave its path segments.
+# This is git check-ref-format plus the URL-significant characters: git itself
+# allows '#' and '%' in ref names, but a path segment carrying them can rewrite
+# where the request goes, so this publisher refuses them.
+_BAD_REF_CHARS = set(" ~^:?*[\\#%")
+_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+
+
+def valid_branch(name: str) -> bool:
+    """True when ``name`` is safe to interpolate into a GitHub API path."""
+    if not name or name == "@" or len(name) > 255:
+        return False
+    if any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+        return False
+    if any(ch in _BAD_REF_CHARS for ch in name):
+        return False
+    if ".." in name or "@{" in name or "//" in name:
+        return False
+    if name.startswith("/") or name.endswith("/") or name.endswith(".lock"):
+        return False
+    return not any(part.startswith(".") or part.endswith(".") for part in name.split("/"))
+
 
 class GitHubAPIError(Exception):
     """Any failure of the REST publisher, with credentials already removed."""
@@ -125,6 +148,18 @@ def describe() -> dict:
                 "a git checkout."
             ),
         }
+    if not valid_branch(branch()):
+        return {
+            "available": False,
+            "mode": "api",
+            "slug": slug,
+            "branch": branch(),
+            "reason": (
+                f"TF_GITHUB_BRANCH {branch()!r} is not a valid git branch name "
+                "(see git check-ref-format), so publishing is refused rather than "
+                "sending a malformed request. Fix the branch name to enable pushing."
+            ),
+        }
     if not token:
         return {
             "available": False,
@@ -193,6 +228,13 @@ class GitHubClient:
     def request(self, method: str, path: str, payload=None, accept: str = "application/vnd.github+json"):
         if not self.slug:
             raise GitHubAPIError("No GitHub repository is configured")
+        if not _SLUG_RE.match(self.slug):
+            raise GitHubAPIError("Refusing to call GitHub for an unrecognised repository name")
+        if not valid_branch(self.branch):
+            raise GitHubAPIError(
+                f"Refusing to call GitHub with the branch name {self.branch!r}: "
+                "it is not a valid git branch name"
+            )
         if not self.token:
             raise GitHubAPIError("No GitHub API token is configured")
         url = f"{api_base()}{path}"
@@ -246,6 +288,8 @@ class GitHubClient:
 
     def tree(self, sha: str) -> dict[str, dict]:
         """Remote blobs under the library prefix, keyed by repository path."""
+        if not _SHA_RE.match(str(sha or "")):
+            raise GitHubAPIError("Refusing to read a tree for a SHA that is not a git object id")
         _, payload = self.request("GET", f"/repos/{self.slug}/git/trees/{sha}?recursive=1")
         entries = (payload or {}).get("tree") or []
         prefix = library_prefix() + "/"
