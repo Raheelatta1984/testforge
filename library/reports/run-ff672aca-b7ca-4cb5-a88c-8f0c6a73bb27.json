@@ -1,0 +1,19 @@
+{
+  "completed_at": 1791729777.473346,
+  "duration_seconds": 8.1,
+  "expires_at": 1791902577.473346,
+  "id": "ff672aca-b7ca-4cb5-a88c-8f0c6a73bb27",
+  "kind": "run",
+  "recordings": [
+    {
+      "failed": 0,
+      "id": "ff672aca-b7ca-4cb5-a88c-8f0c6a73bb27",
+      "name": "Session 11/10/2026, 14:42:14",
+      "status": "passed",
+      "steps": 4
+    }
+  ],
+  "remote_status": "disabled",
+  "status": "passed",
+  "steps": 4
+}

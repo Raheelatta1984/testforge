@@ -1,0 +1,30 @@
+{
+  "completed_at": 1791729779.861518,
+  "duration_seconds": 97.957,
+  "expires_at": 1791902579.861518,
+  "id": "a34dd55a-0136-4bbd-9944-e96dcae6c816",
+  "kind": "batch",
+  "recordings": [
+    {
+      "failed": 0,
+      "id": "5b97cc90-3a91-410a-821d-2a7c0df098a0",
+      "name": "Session 12/10/2026, 01:28:15",
+      "status": "passed",
+      "steps": 27
+    },
+    {
+      "failed": 0,
+      "id": "ff672aca-b7ca-4cb5-a88c-8f0c6a73bb27",
+      "name": "Session 11/10/2026, 14:42:14",
+      "status": "passed",
+      "steps": 4
+    }
+  ],
+  "remote_status": "disabled",
+  "scenario": {
+    "plan_name": "Execution plan - Extranet",
+    "scenario_name": "Extranet logon"
+  },
+  "status": "passed",
+  "steps": 31
+}
