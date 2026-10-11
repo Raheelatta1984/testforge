@@ -909,6 +909,58 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(missing, "IDs missing from tests/SCENARIOS.md: " + ", ".join(missing))
 
 
+class DockerfileTests(unittest.TestCase):
+    """The build context must contain every path the Dockerfile copies."""
+
+    def test_UT_IMG_01_copy_sources_survive_dockerignore(self):
+        """No .dockerignore entry strips a local COPY source.
+
+        BuildKit refuses the build with "failed to compute cache key ... not
+        found" when a COPY source is excluded from the context. That is what a
+        deploy does today if `docs` returns to .dockerignore while the Dockerfile
+        still ships docs/ for the Azure tab (GET /api/docs/azure-guide).
+        """
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        patterns = [
+            line.strip() for line in (ROOT / ".dockerignore").read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+        def excluded(path):
+            # Last match wins, as in dockerignore: `docs` then `!docs/keep` keeps
+            # docs/keep. Entries are literal names here (globs like `*.py[cod]`
+            # never name a COPY root); an entry that matches the path or a parent
+            # directory of it removes that whole tree from the context.
+            verdict = False
+            for pattern in patterns:
+                negated = pattern.startswith("!")
+                name = pattern.lstrip("!").strip().strip("/").rstrip("/")
+                if not name:
+                    continue
+                hit = path == name or path.startswith(name + "/")
+                if hit:
+                    verdict = not negated
+            return verdict
+
+        ignored = []
+        for raw in dockerfile.splitlines():
+            line = raw.strip()
+            if line.split()[:1] != ["COPY"]:
+                continue
+            words = [w for w in line.split()[1:] if not w.startswith("--")]
+            for src in words[:-1]:  # every token but the destination
+                if src.startswith(("http://", "https://")):
+                    continue
+                src = src.lstrip("./")
+                if excluded(src):
+                    ignored.append(src)
+        self.assertFalse(
+            ignored,
+            "Dockerfile COPYs paths that .dockerignore removes from the build "
+            "context (the build fails with 'failed to compute cache key ... not "
+            "found'): " + ", ".join(ignored),
+        )
+
 
 class WorkflowRegressionTests(unittest.TestCase):
     """Record/save/edit/export regressions that do not require Chromium."""

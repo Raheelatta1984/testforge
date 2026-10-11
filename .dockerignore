@@ -1,4 +1,7 @@
-# The build context only needs requirements.txt, app/, library/ and logs/.
+# The build context only needs requirements.txt, app/, library/, logs/ and
+# docs/ - every path the Dockerfile COPYs. Excluding one of those breaks the
+# build at "failed to compute cache key ... not found", which is what happened
+# while docs/ was listed here and the Azure tab needed it inside the image.
 # Keeping .git and the local virtualenv out of it makes the image build faster
 # and stops a developer's .venv (with its host-specific binaries) reaching the
 # 512MB deployment by accident.
@@ -10,7 +13,6 @@ __pycache__
 *.py[cod]
 artifacts
 tests
-docs
 Dockerfile
 docker-compose.yml
 render.yaml
