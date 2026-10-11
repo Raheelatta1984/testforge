@@ -216,9 +216,27 @@ Trust nothing until you have verified it. In order:
 3. `GET /api/library` shows the new revision under `revision`/`remote_sha`.
 4. The GitHub tab's project list now includes the saved recording under `library/`.
 
-If a push fails (network blip, rate limit), the app keeps the files locally and
-schedules a retry — the banner says so. Files are never lost; the token is never
-printed.
+If a push fails transiently (network blip, rate limit), the app keeps the files
+locally and schedules a retry — the banner says so. Files are never lost; the
+token is never printed.
+
+If GitHub **refuses** the push (`401`/`403`, or a `git push` denied), the banner
+says *refused … and no retry will run* and names the fix. A retry loop cannot
+clear a permission, so none is started — otherwise the app would poll a locked
+door once a minute and burn the rate limit while looking like an outage. Confirm
+the token with:
+
+```bash
+curl -s https://<your-service>/api/github/access?force=1 | python3 -m json.tool
+# state: "ok" | "read-only" | "no-access" | "unknown" | "unconfigured"
+# permissions.push is the field that decides whether a commit can land
+```
+
+`state: "read-only"` with a fine-grained token is the usual answer to
+`403 Resource not accessible by personal access token`: the token has
+**Contents: read-only** (or `Metadata` only) and needs **Contents: Read and
+write** on this repository. See the table in `readme.md` → *When a save says
+"the push did not complete"*.
 
 ---
 
@@ -266,6 +284,14 @@ security model rests on the token having exactly two copies: GitHub's issuer and
 your platform's encrypted store. Everything else — the push logic, the scrubbing,
 the bounds, the verification — is already built and tested (`98 unit tests`,
 including *a stray token publishes nothing* and *errors never carry the token*).
+
+**The record screen says "was refused … and no retry will run" — is something broken?**
+No, and that is the point: GitHub answered `401`/`403`, so the app stopped
+retrying and told you what to fix instead of counting down to another attempt.
+The most common cause is a fine-grained token minted with **Contents:
+read-only** — reads succeed, every blob upload is refused. Grant *Read and
+write*, redeploy the secret, then press **CHECK TOKEN PERMISSIONS** in the
+GitHub tab to confirm `can_write: true` before recording again.
 
 **Why does the record screen say "SAVE keeps the recording on this instance only"?**
 It is telling you the truth about the current state: without the token, a save

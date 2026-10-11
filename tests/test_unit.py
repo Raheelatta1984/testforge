@@ -48,6 +48,25 @@ def _env_restore(saved):
             os.environ[key] = value
 
 
+class _GitHubResponse:
+    """Stand-in for what ``urlopen`` hands back, with the headers we read."""
+
+    def __init__(self, payload=None, status=200, headers=None):
+        import json
+        self._body = json.dumps(payload if payload is not None else {}).encode()
+        self.status = status
+        self.headers = headers or {}
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
 class BootTests(unittest.TestCase):
     def test_UT_BOOT_01_modules_import(self):
         from app.executor import execute_run as runner
@@ -1862,6 +1881,246 @@ class PublishModeTests(unittest.TestCase):
         finally:
             _env_restore(saved)
             self._restore(original)
+
+    def _refused_write(self, code=403, message="Resource not accessible by personal access token"):
+        """A push whose reads work and whose writes GitHub refuses, through the real transport."""
+        import io
+        import json
+        import tempfile
+        import urllib.error
+        from unittest import mock
+        from app import github_api
+
+        root = Path(tempfile.mkdtemp(prefix="tf-refused-"))
+        (root / "catalog.json").write_text("{}", encoding="utf-8")
+
+        def transport(request, timeout=None):
+            method = (request.get_method() or "GET").upper()
+            if method not in ("GET", "HEAD", "OPTIONS"):
+                body = json.dumps({"message": message}).encode()
+                raise urllib.error.HTTPError(request.full_url, code, "Forbidden", {}, io.BytesIO(body))
+            if "/branches/" in request.full_url:
+                return _GitHubResponse({"commit": {"sha": "a" * 40}})
+            return _GitHubResponse({"tree": []})
+
+        token = "github_pat_" + "S" * 18
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN=token)
+        return root, transport, saved, token
+
+    def test_UT_PUB_08_a_refused_write_says_so_and_promises_no_retry(self):
+        """The reported bug: a 403 was reported as "will be retried in 60s".
+
+        "Resource not accessible by personal access token" is the token being
+        refused, not an outage. Waiting a minute cannot change GitHub's answer,
+        so the save must come back refused, with the fix named, and the retry
+        loop must never be started for it.
+        """
+        import urllib.request
+        from unittest import mock
+        from app import github_api, library_store
+
+        root, transport, saved, token = self._refused_write()
+        original = self._no_checkout()
+        client = github_api.GitHubClient()
+        try:
+            with mock.patch.object(urllib.request, "urlopen", transport):
+                with self.assertRaises(github_api.GitHubAPIError) as caught:
+                    github_api.publish("Save library", root, client=client)
+        finally:
+            _env_restore(saved)
+            self._restore(original)
+        exc = caught.exception
+        self.assertEqual(exc.status, 403)
+        self.assertTrue(exc.permanent, "a permissions 403 must not be treated as transient")
+        self.assertIn("Contents", exc.hint)
+        self.assertIn("fine-grained", exc.hint)
+        self.assertNotIn(token, str(exc) + (exc.hint or ""))
+
+        # ...and the dashboard sentence built from it.
+        original_write = library_store._write_catalog
+        original_publish = library_store._publish_unlocked
+        library_store._write_catalog = lambda: None
+
+        def refuse(_message):
+            error = library_store.PublishError(str(exc))
+            error.status, error.hint, error.permanent = exc.status, exc.hint, exc.permanent
+            raise error
+
+        library_store._publish_unlocked = refuse
+        original_error = dict(library_store._LAST_PUBLISH_ERROR)
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN=token)
+        try:
+            self.assertFalse(library_store._finish("Save library recording demo"))
+            outcome = library_store.publish_outcome(False)
+            blocked = library_store.publish_blocked()
+        finally:
+            _env_restore(saved)
+            library_store._write_catalog = original_write
+            library_store._publish_unlocked = original_publish
+            library_store._LAST_PUBLISH_ERROR.update(original_error)
+        self.assertTrue(blocked)
+        self.assertEqual(outcome["publish_state"], "refused")
+        self.assertFalse(outcome["retry_scheduled"])
+        self.assertIsNone(outcome["retry_in_seconds"])
+        message = outcome["publish_message"]
+        self.assertNotIn("will be retried", message)
+        self.assertIn("refused", message)
+        self.assertIn("Contents", outcome["publish_hint"] or "")
+
+    def test_UT_PUB_09_a_rate_limit_is_still_worth_retrying(self):
+        """A 403 that means "slow down" must keep the retry promise."""
+        from app import library_store
+
+        original = self._no_checkout()
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN="github_pat_" + "S" * 18)
+        error = library_store.PublishError(
+            "GitHub 403 for POST /repos/acme/qa-library/git/blobs: "
+            "API rate limit exceeded for user ID 1"
+        )
+        error.status = 403
+        error.hint = None
+        error.permanent = False
+        original_write = library_store._write_catalog
+        original_publish = library_store._publish_unlocked
+        original_error = dict(library_store._LAST_PUBLISH_ERROR)
+        library_store._write_catalog = lambda: None
+
+        def refuse(_message):
+            raise error
+
+        library_store._publish_unlocked = refuse
+        try:
+            self.assertFalse(library_store._finish("Save library recording demo"))
+            outcome = library_store.publish_outcome(False)
+        finally:
+            _env_restore(saved)
+            library_store._write_catalog = original_write
+            library_store._publish_unlocked = original_publish
+            library_store._LAST_PUBLISH_ERROR.update(original_error)
+            self._restore(original)
+        self.assertEqual(outcome["publish_state"], "retry-pending")
+        self.assertTrue(outcome["retry_scheduled"])
+        self.assertIn("retried in", outcome["publish_message"])
+
+    def test_UT_PUB_10_access_report_names_the_missing_permission(self):
+        """The GitHub tab can ask what the token may do, without pushing anything."""
+        import urllib.request
+        from unittest import mock
+        from app import github_api
+
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN="github_pat_" + "S" * 18,
+                         TF_GITHUB_API="https://api.github.com")
+        github_api._ACCESS_CACHE.update({"key": None, "ts": 0.0, "value": None})
+
+        def read_only(request, timeout=None):
+            return _GitHubResponse(
+                {"permissions": {"pull": True, "push": False, "admin": False},
+                 "private": True, "default_branch": "main"},
+                headers={"X-OAuth-Scopes": ""},
+            )
+
+        try:
+            with mock.patch.object(urllib.request, "urlopen", read_only):
+                report = github_api.access_report(force=True)
+        finally:
+            _env_restore(saved)
+        self.assertEqual(report["slug"], "acme/qa-library")
+        self.assertEqual(report["state"], "read-only")
+        self.assertFalse(report["can_write"])
+        self.assertTrue(report["permissions"]["pull"])
+        self.assertIn("Contents", report["fix"])
+        self.assertIn("fine-grained", report["fix"])
+
+        def writable(request, timeout=None):
+            return _GitHubResponse({"permissions": {"pull": True, "push": True}, "private": False},
+                                   headers={"X-OAuth-Scopes": "repo, read:org"})
+
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN="ghp_" + "S" * 30)
+        try:
+            with mock.patch.object(urllib.request, "urlopen", writable):
+                ok = github_api.access_report(force=True)
+        finally:
+            _env_restore(saved)
+        self.assertEqual(ok["state"], "ok")
+        self.assertTrue(ok["can_write"])
+        self.assertEqual(ok["scopes"], ["repo", "read:org"])
+        self.assertEqual(ok["token_kind"], "classic")
+        self.assertIsNone(ok["fix"])
+
+    def test_UT_PUB_11_the_diagnosis_endpoint_never_leaks_the_token(self):
+        """`GET /api/github/access` reports the refusal without echoing the secret."""
+        import urllib.request
+        from unittest import mock
+        from fastapi.testclient import TestClient
+        from app import github_api
+        from app.main import app
+
+        token = "github_pat_" + "S" * 18
+        original = self._no_checkout()
+        saved = _env_set(TF_LIBRARY_PUBLISH=None, TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN=token)
+        github_api._ACCESS_CACHE.update({"key": None, "ts": 0.0, "value": None})
+
+        def hostile(request, timeout=None):
+            return _GitHubResponse({"permissions": {"pull": True, "push": False}},
+                                   headers={"X-OAuth-Scopes": ""})
+
+        try:
+            with mock.patch.object(urllib.request, "urlopen", hostile):
+                with TestClient(app) as client:
+                    response = client.get("/api/github/access?force=1")
+        finally:
+            _env_restore(saved)
+            self._restore(original)
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.text
+        self.assertNotIn(token, body)
+        payload = response.json()
+        self.assertFalse(payload["can_write"])
+        self.assertIn("Contents", payload["fix"])
+
+    def test_UT_PUB_12_a_refused_git_push_is_not_retried_either(self):
+        """A checkout gets git's prose, not a status code — it must be recognised too."""
+        from app import library_store
+
+        original = library_store.git_root
+        library_store.git_root = lambda: Path("/nonexistent-checkout")
+        saved = _env_set(TF_LIBRARY_PUBLISH="1", TF_GITHUB_REPO="acme/qa-library",
+                         TF_GITHUB_BRANCH="main", TF_GITHUB_TOKEN="ghp_" + "S" * 30)
+        original_write = library_store._write_catalog
+        original_publish = library_store._publish_unlocked
+        original_error = dict(library_store._LAST_PUBLISH_ERROR)
+        library_store._write_catalog = lambda: None
+
+        def denied(_message):
+            # Exactly what git prints for a token that may not write: a 403 is
+            # reported as "Repository not found" on a repository it cannot see.
+            raise library_store.PublishError(
+                "fatal: unable to access 'https://github.com/acme/qa-library/': "
+                "The requested URL returned error: 403"
+            )
+
+        library_store._publish_unlocked = denied
+        try:
+            self.assertFalse(library_store._finish("Save library recording demo"))
+            outcome = library_store.publish_outcome(False)
+            self.assertTrue(library_store.publish_blocked())
+        finally:
+            _env_restore(saved)
+            library_store.git_root = original
+            library_store._write_catalog = original_write
+            library_store._publish_unlocked = original_publish
+            library_store._LAST_PUBLISH_ERROR.update(original_error)
+        self.assertEqual(outcome["publish_state"], "refused")
+        self.assertFalse(outcome["retry_scheduled"])
+        self.assertIn("repo", outcome["publish_hint"] or "",
+                      "a classic-token hint must name the scope it is missing")
+        self.assertNotIn("will be retried", outcome["publish_message"])
 
 
 class FakeGitHubClient:

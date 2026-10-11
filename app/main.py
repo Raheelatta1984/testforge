@@ -450,6 +450,16 @@ def _library_http(exc: Exception) -> HTTPException:
     if isinstance(exc, NotFound):
         return HTTPException(status_code=404, detail=str(exc))
     if isinstance(exc, PublishError):
+        if getattr(exc, "permanent", False):
+            # A refusal is a 403, not a 503: nothing is temporarily unavailable,
+            # the token simply may not write. Say that, and say how to fix it.
+            hint = getattr(exc, "hint", None) or ""
+            return HTTPException(
+                status_code=403,
+                detail=" ".join(part for part in (
+                    "GitHub refused this push; retrying cannot clear it.",
+                    redact(exc), hint) if part).strip(),
+            )
         return HTTPException(status_code=503, detail=f"Could not save the library to GitHub branch: {redact(exc)}")
     if isinstance(exc, LibraryError):
         return HTTPException(status_code=422, detail=str(exc))
@@ -737,17 +747,29 @@ def schedule_publish_retry():
         return
     if _publish_retry_task and not _publish_retry_task.done():
         return
+    if library_store.publish_blocked():
+        # The last push was refused (401/403): GitHub will keep refusing it until
+        # the token changes, so starting a one-a-minute loop here only burns the
+        # API rate limit and hides the real cause behind "retrying".
+        return
 
     async def retry():
+        from app.config import logger
         while True:
             await asyncio.sleep(max(5, library_store.PUBLISH_RETRY_SECONDS))
             try:
                 await asyncio.to_thread(library_store.publish_pending)
+                if library_store.publish_blocked():
+                    logger.warning("LIBRARY RETRY STOPPED: the last push was refused: %s",
+                                   redact(library_store.last_publish_error()))
+                    return
                 verified = await asyncio.to_thread(library_store.remote_library_status)
+                if verified.get("permanent"):
+                    logger.warning("LIBRARY RETRY STOPPED: %s", redact(verified.get("error")))
+                    return
                 if verified.get("synced"):
                     return
             except Exception as exc:
-                from app.config import logger
                 logger.warning("LIBRARY RETRY FAILED: %s", redact(exc))
 
     _publish_retry_task = asyncio.create_task(retry())
@@ -1457,6 +1479,25 @@ async def library_publish_plan():
             "remote_sha": verification.get("remote_sha"),
             "synced": verification.get("synced"), "state": verification.get("state"),
             "reason": verification.get("reason"), "dirty": verification.get("dirty")}
+
+
+@app.get("/api/github/access")
+async def github_access(force: bool = False):
+    """What the configured token may actually do to the repository.
+
+    One read of ``GET /repos/{owner}/{name}``, on demand, so an operator looking
+    at a 403 can confirm in a second whether the token is read-only, cannot see
+    the repository, or is rejected — instead of reading a retry countdown and
+    waiting for the next save. Cached briefly; `?force=1` re-checks after the
+    token has been rotated.
+    """
+    from app import github_api
+    try:
+        report = await asyncio.to_thread(github_api.access_report, None, bool(force))
+    except Exception as exc:  # never turn a diagnostic into a 500 the UI cannot read
+        raise HTTPException(status_code=502, detail=redact(exc)) from exc
+    report["checked_at"] = time.time()
+    return report
 
 
 @app.get("/api/library/fast")
