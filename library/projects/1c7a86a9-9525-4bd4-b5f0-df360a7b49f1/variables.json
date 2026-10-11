@@ -12,5 +12,12 @@
     "is_secret": false,
     "name": "Extranet_pass",
     "value": "3nefDtA9VuBn9XrSUr+n"
+  },
+  {
+    "category": "General",
+    "id": "c72221df-6cf4-4a70-a1cb-0c304315012c",
+    "is_secret": true,
+    "name": "HFM_Ext_pass",
+    "value": "enc:v1:gAAAAABqy5zSV4E5Sf2miFHfLAhOPjrotItq_2XRwUqw1_E-cSX7SBYsi-ujfanf-jZBJ1CPlXZs6nW3ofdJVuhYxQBcaMBp6T8VztvMhH3xGNpgTHDgAeM="
   }
 ]
