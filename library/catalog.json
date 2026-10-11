@@ -32,7 +32,28 @@
       "id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
       "name": "Harris Farm Website",
       "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/project.json",
-      "recordings": [],
+      "recordings": [
+        {
+          "id": "5c86e5ce-1c83-4894-8aa4-b77e1d2b737b",
+          "name": "Session 11/10/2026, 14:42:14",
+          "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/5c86e5ce-1c83-4894-8aa4-b77e1d2b737b/recording.json",
+          "resources": [
+            "Jenkinsfile",
+            "README.md",
+            "azure-devops.csv",
+            "azure-devops.xlsx",
+            "jira.csv",
+            "jira.xlsx",
+            "playwright_test.js",
+            "playwright_test.py",
+            "recording.feature",
+            "steps.json",
+            "testcomplete.csv",
+            "testcomplete.xlsx"
+          ],
+          "step_count": 0
+        }
+      ],
       "variables": []
     }
   ],
