@@ -1,0 +1,5 @@
+﻿Test Case,Step,Action,Input,Selector,Screenshot
+"Session 11/10/2026, 16:18:15",1,Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08,https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08,{},
+"Session 11/10/2026, 16:18:15",2,"Click 369,311",,"{""primary"": ""div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)"", ""x"": 369, ""y"": 311, ""text"": """", ""tag"": ""input""}",step-002.png
+"Session 11/10/2026, 16:18:15",3,Type: Sa,Sa,"{""primary"": ""div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)""}",step-003.png
+"Session 11/10/2026, 16:18:15",4,"Click 288,395",,"{""primary"": ""div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)"", ""x"": 288, ""y"": 395, ""text"": """", ""tag"": ""input""}",

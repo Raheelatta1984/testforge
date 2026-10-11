@@ -1,0 +1,60 @@
+{
+  "created_at": "2026-10-11T05:18:39Z",
+  "id": "84337431-35b8-42c1-8141-ab01fde2591e",
+  "name": "Session 11/10/2026, 16:18:15",
+  "parent_id": null,
+  "project_id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
+  "start_url": "https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
+  "status": "active",
+  "steps": [
+    {
+      "action": "navigate",
+      "id": "e1194874-fedd-447c-ad74-dea50efb8998",
+      "label": "Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
+      "order": 1,
+      "selector": null,
+      "value": "https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08"
+    },
+    {
+      "action": "click",
+      "id": "35cd514c-664e-4dfe-a7f6-cd0d00dd148e",
+      "label": "Click 369,311",
+      "order": 2,
+      "screenshot": "step-002.png",
+      "selector": {
+        "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)",
+        "tag": "input",
+        "text": "",
+        "x": 369,
+        "y": 311
+      },
+      "value": null
+    },
+    {
+      "action": "type",
+      "id": "d73fd711-28d2-4561-b1e7-2e8aeee1377a",
+      "label": "Type: Sa",
+      "order": 3,
+      "screenshot": "step-003.png",
+      "selector": {
+        "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)"
+      },
+      "value": "Sa"
+    },
+    {
+      "action": "click",
+      "id": "3369afad-e77d-4501-9015-ce101e2a17da",
+      "label": "Click 288,395",
+      "order": 4,
+      "selector": {
+        "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)",
+        "tag": "input",
+        "text": "",
+        "x": 288,
+        "y": 395
+      },
+      "value": null
+    }
+  ],
+  "tags": "AI_PENDING"
+}

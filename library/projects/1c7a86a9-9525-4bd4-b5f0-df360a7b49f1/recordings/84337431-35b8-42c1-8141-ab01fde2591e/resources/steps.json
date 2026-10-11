@@ -1,0 +1,50 @@
+[
+  {
+    "id": "e1194874-fedd-447c-ad74-dea50efb8998",
+    "order": 1,
+    "action": "navigate",
+    "value": "https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
+    "label": "Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
+    "selector": null
+  },
+  {
+    "id": "35cd514c-664e-4dfe-a7f6-cd0d00dd148e",
+    "order": 2,
+    "action": "click",
+    "value": null,
+    "label": "Click 369,311",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)",
+      "x": 369,
+      "y": 311,
+      "text": "",
+      "tag": "input"
+    },
+    "screenshot": "step-002.png"
+  },
+  {
+    "id": "d73fd711-28d2-4561-b1e7-2e8aeee1377a",
+    "order": 3,
+    "action": "type",
+    "value": "Sa",
+    "label": "Type: Sa",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)"
+    },
+    "screenshot": "step-003.png"
+  },
+  {
+    "id": "3369afad-e77d-4501-9015-ce101e2a17da",
+    "order": 4,
+    "action": "click",
+    "value": null,
+    "label": "Click 288,395",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)",
+      "x": 288,
+      "y": 395,
+      "text": "",
+      "tag": "input"
+    }
+  }
+]
