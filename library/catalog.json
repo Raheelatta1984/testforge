@@ -42,7 +42,8 @@
       "path": "library/projects/a8107955-5370-4125-bfc0-813060e10786/project.json",
       "recordings": [],
       "variables": [
-        "D365_Login_ID"
+        "D365_Login_ID",
+        "D365_login_Pass"
       ]
     },
     {
