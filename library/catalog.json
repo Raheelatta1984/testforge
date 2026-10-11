@@ -6,18 +6,18 @@
       "path": "library/projects/qa-sample-app/project.json",
       "recordings": [
         {
-          "id": "qa-hello-literal",
-          "name": "Hello literal",
-          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json",
+          "id": "qa-hello-variable",
+          "name": "Hello variable",
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json",
           "resources": [
             "Jenkinsfile"
           ],
           "step_count": 4
         },
         {
-          "id": "qa-hello-variable",
-          "name": "Hello variable",
-          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json",
+          "id": "qa-hello-literal",
+          "name": "Hello literal",
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json",
           "resources": [
             "Jenkinsfile"
           ],
@@ -54,7 +54,9 @@
           "step_count": 4
         }
       ],
-      "variables": []
+      "variables": [
+        "Extranet_pass"
+      ]
     }
   ],
   "source": "repository"
