@@ -5,9 +5,9 @@
     {
       "entries": [
         {
-          "id": "66384316-7860-44dd-87d0-2cd9e4a8444d",
-          "name": "Session 11/10/2026, 16:18:15",
-          "recording_id": "84337431-35b8-42c1-8141-ab01fde2591e",
+          "id": "4472cdfe-3104-4453-8067-536a50b31e2a",
+          "name": "Session 12/10/2026, 01:28:15",
+          "recording_id": "59188e01-2be0-460a-b044-f78738d1f6ef",
           "variables": {}
         },
         {
@@ -22,5 +22,5 @@
     }
   ],
   "project_id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
-  "revision": 1
+  "revision": 2
 }

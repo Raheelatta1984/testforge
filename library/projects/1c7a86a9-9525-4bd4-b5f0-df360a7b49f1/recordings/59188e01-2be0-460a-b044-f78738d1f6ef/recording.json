@@ -1,7 +1,7 @@
 {
   "created_at": "2026-10-11T14:28:30Z",
   "execution_plan": null,
-  "exports_pending": false,
+  "exports_pending": true,
   "id": "59188e01-2be0-460a-b044-f78738d1f6ef",
   "input_defaults": {},
   "name": "Session 12/10/2026, 01:28:15",
