@@ -157,6 +157,15 @@ Open a project, then the record tab. Leave the page blank to open the built-in s
 The server needs Chromium: `playwright install chromium`. Docker already does this. If the browser cannot start, the record screen shows the error instead of a blank canvas.
 
 ## Deployment and manual QA
+
+See [docs/deployment-guide.md](docs/deployment-guide.md) for the full deployment procedure:
+Docker Compose, SQLite/PostgreSQL structure and provisioning, the complete 62-variable environment
+reference, publishing modes, verification gates, and a Claude Code prompt library. Read its section 2
+before exposing a deployment to any network.
+
+For the optional Azure / Azure DevOps topology (image registry, VM runtime, repository mirror) see
+[docs/azure-devops-deployment-guide.md](docs/azure-devops-deployment-guide.md).
+
 - Open `/api/health` on the deployed service to verify the app and database are ready. On Render, the response includes the `RENDER_GIT_COMMIT` revision.
 - Open `/api/diagnostics` when something fails. It reports the database dialect, the schema repairs applied at boot, the live columns of every table, and the result of a test project insert that is rolled back.
 - Create a project from **Projects**. It is written to `library/` and a push is attempted on the checked-out Git branch. GitHub status verifies the remote SHA; a failed push is not presented as published.
