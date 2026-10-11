@@ -40,7 +40,41 @@
       "id": "a8107955-5370-4125-bfc0-813060e10786",
       "name": "D365_UAT_Store_Replen",
       "path": "library/projects/a8107955-5370-4125-bfc0-813060e10786/project.json",
-      "recordings": [],
+      "recordings": [
+        {
+          "created_at": "2026-10-11T14:50:30Z",
+          "id": "43b323d8-03c2-460d-bced-90a3b7967cd0",
+          "name": "D365_UAT_Login",
+          "parent_id": null,
+          "path": "library/projects/a8107955-5370-4125-bfc0-813060e10786/recordings/43b323d8-03c2-460d-bced-90a3b7967cd0/recording.json",
+          "resources": [
+            "Jenkinsfile",
+            "LICENSE",
+            "README.md",
+            "azure-devops.csv",
+            "azure-devops.xlsx",
+            "jira.csv",
+            "jira.xlsx",
+            "package.json",
+            "playwright.config.ts",
+            "playwright_test.js",
+            "playwright_test.py",
+            "recorded_page.js",
+            "recorded_page.py",
+            "recording.feature",
+            "recording.spec.ts",
+            "requirements.txt",
+            "steps.json",
+            "testcomplete.csv",
+            "testcomplete.xlsx",
+            "testforge_runtime.js",
+            "testforge_runtime.py"
+          ],
+          "start_url": "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
+          "step_count": 0,
+          "tags": ""
+        }
+      ],
       "variables": [
         "D365_Login_ID",
         "D365_login_Pass"

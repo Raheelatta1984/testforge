@@ -1,0 +1,10 @@
+pipeline {
+  agent any
+  stages {
+    stage('TestForge replay') {
+      steps {
+        sh 'cd library/projects/a8107955-5370-4125-bfc0-813060e10786/recordings/43b323d8-03c2-460d-bced-90a3b7967cd0/resources && python -m pip install -r requirements.txt && python -m playwright install chromium && python playwright_test.py'
+      }
+    }
+  }
+}
