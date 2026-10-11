@@ -6,56 +6,6 @@
   "project_id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
   "start_url": "https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
   "status": "active",
-  "steps": [
-    {
-      "action": "navigate",
-      "id": "bb15b6dc-b592-47f8-908b-eb5156b8b122",
-      "label": "Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
-      "order": 1,
-      "selector": null,
-      "value": "https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08"
-    },
-    {
-      "action": "click",
-      "id": "ed15d2b4-eebf-4173-9f5d-daa5dbc7b5d0",
-      "label": "Click 123,322",
-      "order": 2,
-      "screenshot": "step-002.png",
-      "selector": {
-        "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)",
-        "tag": "input",
-        "text": "",
-        "x": 123,
-        "y": 322
-      },
-      "value": null
-    },
-    {
-      "action": "type",
-      "id": "1646ff6f-e63f-4cb7-b097-9bc7b8e19431",
-      "label": "Type: Ratta",
-      "order": 3,
-      "screenshot": "step-003.png",
-      "selector": {
-        "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)"
-      },
-      "value": "Ratta"
-    },
-    {
-      "action": "click",
-      "id": "34480860-9401-4fee-a0b8-155abb94183b",
-      "label": "Click 115,416",
-      "order": 4,
-      "screenshot": "step-004.png",
-      "selector": {
-        "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)",
-        "tag": "input",
-        "text": "",
-        "x": 115,
-        "y": 416
-      },
-      "value": null
-    }
-  ],
+  "steps": [],
   "tags": "AI_PENDING"
 }
