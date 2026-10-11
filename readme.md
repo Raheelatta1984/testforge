@@ -29,7 +29,7 @@ A save writes `library/` and then publishes it. Which mechanism runs depends on 
 
 Every save response carries `publish_state`, `publish_message`, `retry_scheduled` and `retry_in_seconds`, and the dashboard prints `publish_message` verbatim. A retry is only promised when the retry loop was actually started; with publishing disabled the message says so and names the missing configuration. That wording comes from one function, `library_store.publish_outcome()`, so the record tab, the step editor and the GitHub tab cannot disagree.
 
-API publishing is opt-in on purpose. A CI runner exports `GITHUB_TOKEN` automatically, and a token alone must not be enough to start committing to a repository nobody named: without `TF_GITHUB_REPO` the mode stays `disabled`. Pushes are bounded by `TF_GITHUB_MAX_FILES`, `TF_GITHUB_MAX_FILE_BYTES` and `TF_GITHUB_MAX_PUSH_BYTES`; anything skipped is listed in the response rather than dropped silently, and credentials are scrubbed from every error message.
+API publishing is opt-in on purpose. A CI runner exports `GITHUB_TOKEN` automatically, and a token alone must not be enough to start committing to a repository nobody named: without `TF_GITHUB_REPO` the mode stays `disabled`. Pushes are bounded by `TF_GITHUB_MAX_FILES`, `TF_GITHUB_MAX_FILE_BYTES` and `TF_GITHUB_MAX_PUSH_BYTES`; anything skipped is listed in the response rather than dropped silently, and credentials are scrubbed from every error message. The pen-test scenarios (`UT-SEC-*` in `tests/SCENARIOS.md`) attack this surface: token exfiltration through responses, error bodies and request paths, and the blast radius of a single push.
 
 `GET /api/library/publish/plan` shows what the next publish would add, change and delete without publishing it.
 

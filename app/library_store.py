@@ -1048,6 +1048,12 @@ def publish_outcome(published: bool, error: str | None = None) -> dict:
     mode = publish_mode()
     enabled = mode != "disabled"
     error = error or last_publish_error()
+    if error:
+        # This string is printed verbatim in the save banner and stored in
+        # publish_error. A git or API failure can quote a credentialized remote
+        # URL or an Authorization header back at us; scrub it here so no caller
+        # has to remember to.
+        error = github_api._safe(error)
     branch = None
     if mode == "checkout":
         root = git_root()

@@ -3,3 +3,10 @@ venv/
 __pycache__/
 *.py[cod]
 .DS_Store
+
+# Secrets never belong in git. A local token file (docker-compose's ${VAR}
+# interpolation, ad-hoc scripts) must be untrackable by accident.
+.env
+.env.*
+*.pem
+*.key
