@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-10-11T21:23:05Z",
+  "execution_plan": null,
+  "exports_pending": false,
+  "id": "057e5aa5-fcd1-4642-8673-a96b499e0887",
+  "input_defaults": {},
+  "name": "Session 12/10/2026, 8:22:44 am",
+  "parent_id": null,
+  "project_id": "a8107955-5370-4125-bfc0-813060e10786",
+  "start_url": "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
+  "status": "active",
+  "steps": [],
+  "tags": ""
+}

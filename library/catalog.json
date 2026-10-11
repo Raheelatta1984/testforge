@@ -6,11 +6,11 @@
       "path": "library/projects/qa-sample-app/project.json",
       "recordings": [
         {
-          "created_at": "2026-10-10T00:00:00Z",
-          "id": "qa-hello-literal",
-          "name": "Hello literal",
+          "created_at": "2026-10-10T00:00:01Z",
+          "id": "qa-hello-variable",
+          "name": "Hello variable",
           "parent_id": null,
-          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json",
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json",
           "resources": [
             "Jenkinsfile"
           ],
@@ -19,11 +19,11 @@
           "tags": "QA"
         },
         {
-          "created_at": "2026-10-10T00:00:01Z",
-          "id": "qa-hello-variable",
-          "name": "Hello variable",
+          "created_at": "2026-10-10T00:00:00Z",
+          "id": "qa-hello-literal",
+          "name": "Hello literal",
           "parent_id": null,
-          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json",
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json",
           "resources": [
             "Jenkinsfile"
           ],
@@ -73,6 +73,39 @@
           "start_url": "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
           "step_count": 0,
           "tags": ""
+        },
+        {
+          "created_at": "2026-10-11T21:23:05Z",
+          "id": "057e5aa5-fcd1-4642-8673-a96b499e0887",
+          "name": "Session 12/10/2026, 8:22:44 am",
+          "parent_id": null,
+          "path": "library/projects/a8107955-5370-4125-bfc0-813060e10786/recordings/057e5aa5-fcd1-4642-8673-a96b499e0887/recording.json",
+          "resources": [
+            "Jenkinsfile",
+            "LICENSE",
+            "README.md",
+            "azure-devops.csv",
+            "azure-devops.xlsx",
+            "jira.csv",
+            "jira.xlsx",
+            "package.json",
+            "playwright.config.ts",
+            "playwright_test.js",
+            "playwright_test.py",
+            "recorded_page.js",
+            "recorded_page.py",
+            "recording.feature",
+            "recording.spec.ts",
+            "requirements.txt",
+            "steps.json",
+            "testcomplete.csv",
+            "testcomplete.xlsx",
+            "testforge_runtime.js",
+            "testforge_runtime.py"
+          ],
+          "start_url": "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
+          "step_count": 0,
+          "tags": ""
         }
       ],
       "variables": [
@@ -86,11 +119,11 @@
       "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/project.json",
       "recordings": [
         {
-          "created_at": "2026-10-11T05:18:39Z",
-          "id": "84337431-35b8-42c1-8141-ab01fde2591e",
-          "name": "Session 11/10/2026, 16:18:15",
+          "created_at": "2026-10-11T03:42:22Z",
+          "id": "5c86e5ce-1c83-4894-8aa4-b77e1d2b737b",
+          "name": "Session 11/10/2026, 14:42:14",
           "parent_id": null,
-          "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/84337431-35b8-42c1-8141-ab01fde2591e/recording.json",
+          "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/5c86e5ce-1c83-4894-8aa4-b77e1d2b737b/recording.json",
           "resources": [
             "Jenkinsfile",
             "README.md",
@@ -110,11 +143,11 @@
           "tags": "AI_PENDING"
         },
         {
-          "created_at": "2026-10-11T03:42:22Z",
-          "id": "5c86e5ce-1c83-4894-8aa4-b77e1d2b737b",
-          "name": "Session 11/10/2026, 14:42:14",
+          "created_at": "2026-10-11T05:18:39Z",
+          "id": "84337431-35b8-42c1-8141-ab01fde2591e",
+          "name": "Session 11/10/2026, 16:18:15",
           "parent_id": null,
-          "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/5c86e5ce-1c83-4894-8aa4-b77e1d2b737b/recording.json",
+          "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/84337431-35b8-42c1-8141-ab01fde2591e/recording.json",
           "resources": [
             "Jenkinsfile",
             "README.md",
