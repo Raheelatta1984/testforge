@@ -158,6 +158,296 @@ def variables_repo_path(project_id: str) -> str:
     return f"library/projects/{project_id}/variables.json"
 
 
+def entities_repo_path() -> str:
+    return "library/entities.json"
+
+
+# ---- Entities (companies) ------------------------------------------------
+# A project belongs to exactly one entity. The registry lives in the library
+# tree (``library/entities.json``) rather than only in the database so it is
+# committed and published to GitHub with the projects that reference it: a
+# clone of the branch must be able to say which company a project belongs to.
+DEFAULT_ENTITY_ID = "unassigned"
+DEFAULT_ENTITY_NAME = "Unassigned"
+MAX_ENTITY_NAME = 200
+
+
+def _entity_payload(data: dict, counts: dict | None = None) -> dict:
+    entity_id = data.get("id") or ""
+    payload = {
+        "id": entity_id,
+        "name": data.get("name") or entity_id,
+        "legal_name": data.get("legal_name") or "",
+        "code": data.get("code") or "",
+        "industry": data.get("industry") or "",
+        "notes": data.get("notes") or "",
+        "created_at": _iso(data.get("created_at")) if data.get("created_at") else None,
+        "system": bool(data.get("system")) or entity_id == DEFAULT_ENTITY_ID,
+        "source": "repository",
+        "repository_path": entities_repo_path(),
+    }
+    if counts is not None:
+        payload["project_count"] = len(counts.get("project_ids") or [])
+        payload["project_ids"] = list(counts.get("project_ids") or [])
+        payload["project_names"] = list(counts.get("project_names") or [])
+    return payload
+
+
+def _read_entity_rows() -> list[dict]:
+    """Raw registry rows, without the derived project counts.
+
+    Read from disk on every call -- it is one small file, and a cached
+    registry would keep showing a company after it was renamed or removed.
+    """
+    path = library_dir() / "entities.json"
+    if not path.is_file():
+        return []
+    payload = _load(path)
+    rows = payload.get("entities") if isinstance(payload, dict) else payload
+    if not isinstance(rows, list):
+        return []
+    result = []
+    seen = set()
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        entity_id = str(item.get("id") or "").strip()
+        if not entity_id or entity_id in seen or not _ID.match(entity_id):
+            continue
+        seen.add(entity_id)
+        result.append({**item, "id": entity_id})
+    return result
+
+
+def _write_entity_rows(rows: list[dict]) -> None:
+    _dump(library_dir() / "entities.json",
+          {"source": "repository", "entities": rows})
+    _write_catalog()
+
+
+def _entity_counts() -> dict:
+    """project ids per entity, read from the project files (the source of truth)."""
+    counts: dict[str, dict] = {}
+    for project in list_projects():
+        entity_id = project.get("entity_id") or DEFAULT_ENTITY_ID
+        bucket = counts.setdefault(entity_id, {"project_ids": [], "project_names": []})
+        bucket["project_ids"].append(project["id"])
+        bucket["project_names"].append(project.get("name") or project["id"])
+    return counts
+
+
+def list_entities(*, include_default: bool = True) -> list[dict]:
+    """Every entity with the projects that belong to it."""
+    rows = _read_entity_rows()
+    if include_default and not any(row["id"] == DEFAULT_ENTITY_ID for row in rows):
+        rows = [*rows, {
+            "id": DEFAULT_ENTITY_ID,
+            "name": DEFAULT_ENTITY_NAME,
+            "created_at": None,
+            "system": True,
+        }]
+    counts = _entity_counts()
+    # Every registered entity is listed, including one created a moment ago that
+    # no project points at yet: it is exactly the entity the next project is
+    # meant to be tied to.
+    result = [_entity_payload(row, counts.get(row["id"]) or {}) for row in rows]
+    # Known entities first, alphabetical, with the fallback bucket last.
+    result.sort(key=lambda item: (item["id"] == DEFAULT_ENTITY_ID, (item["name"] or "").lower()))
+    return result
+
+
+def get_entity(entity_id: str) -> dict | None:
+    require_id(entity_id, "entity id")
+    return next((row for row in list_entities() if row["id"] == entity_id), None)
+
+
+def ensure_default_entity() -> dict:
+    """The bucket every project without a chosen company is tied to.
+
+    Projects are never left with no entity at all: an existing project (or one
+    created by an API client that does not send an entity) is grouped under a
+    clearly marked fallback the dashboard nags the operator to replace.
+    """
+    with LOCK:
+        rows = _read_entity_rows()
+        if not any(row["id"] == DEFAULT_ENTITY_ID for row in rows):
+            rows.append({
+                "id": DEFAULT_ENTITY_ID,
+                "name": DEFAULT_ENTITY_NAME,
+                "code": "N/A",
+                "notes": "Projects that have not been assigned to a company or entity yet.",
+                "created_at": _iso(datetime.utcnow().replace(microsecond=0)),
+                "system": True,
+            })
+            _write_entity_rows(rows)
+    return get_entity(DEFAULT_ENTITY_ID)
+
+
+def _slug_entity_id(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")[:60]
+    if not slug:
+        slug = "entity"
+    return slug if _ID.match(slug) else "entity"
+
+
+def create_entity(name: str, *, legal_name: str = "", code: str = "",
+                  industry: str = "", notes: str = "") -> dict:
+    name = (name or "").strip()
+    if not name:
+        raise LibraryError("Entity/company name is required")
+    if len(name) > MAX_ENTITY_NAME:
+        raise LibraryError("Entity/company name is too long")
+    entity_id = _slug_entity_id(name)
+    with LOCK:
+        rows = _read_entity_rows()
+        taken = {row["id"] for row in rows} | {DEFAULT_ENTITY_ID}
+        clash = next((row for row in rows if (row.get("name") or "").lower() == name.lower()), None)
+        if clash is None and not any(row["id"] == DEFAULT_ENTITY_ID for row in rows) \
+                and name.lower() == DEFAULT_ENTITY_NAME.lower():
+            # The fallback bucket is implicit until it is written out; it still
+            # owns its name, so a second "Unassigned" can never be created.
+            clash = {"name": DEFAULT_ENTITY_NAME}
+        if clash:
+            raise LibraryError(f"An entity named {clash.get('name')} already exists")
+        candidate = entity_id
+        suffix = 2
+        while candidate in taken:
+            candidate = f"{entity_id}-{suffix}"
+            suffix += 1
+        rows.append({
+            "id": candidate,
+            "name": name,
+            "legal_name": legal_name.strip()[:MAX_ENTITY_NAME],
+            "code": code.strip()[:50],
+            "industry": industry.strip()[:100],
+            "notes": notes.strip()[:2000],
+            "created_at": _iso(datetime.utcnow().replace(microsecond=0)),
+        })
+        _write_entity_rows(rows)
+        published = _finish(f"Save library entity {name}")
+    payload = get_entity(candidate) or _entity_payload(rows[-1])
+    payload["published"] = published
+    payload.update(publish_outcome(published))
+    return payload
+
+
+def update_entity(entity_id: str, *, name: str | None = None, legal_name: str | None = None,
+                  code: str | None = None, industry: str | None = None,
+                  notes: str | None = None) -> dict:
+    require_id(entity_id, "entity id")
+    if entity_id == DEFAULT_ENTITY_ID:
+        raise LibraryError("The Unassigned bucket cannot be renamed; create a real entity and move its projects")
+    with LOCK:
+        rows = _read_entity_rows()
+        row = next((item for item in rows if item["id"] == entity_id), None)
+        if row is None:
+            raise NotFound("Entity not found")
+        if name is not None:
+            new_name = name.strip()
+            if not new_name:
+                raise LibraryError("Entity/company name is required")
+            if len(new_name) > MAX_ENTITY_NAME:
+                raise LibraryError("Entity/company name is too long")
+            if any(item["id"] != entity_id and (item.get("name") or "").lower() == new_name.lower()
+                   for item in rows):
+                raise LibraryError(f"An entity named {new_name} already exists")
+            if not any(item["id"] == DEFAULT_ENTITY_ID for item in rows) \
+                    and new_name.lower() == DEFAULT_ENTITY_NAME.lower():
+                raise LibraryError(f"An entity named {DEFAULT_ENTITY_NAME} already exists")
+            row["name"] = new_name
+        if legal_name is not None:
+            row["legal_name"] = legal_name.strip()[:MAX_ENTITY_NAME]
+        if code is not None:
+            row["code"] = code.strip()[:50]
+        if industry is not None:
+            row["industry"] = industry.strip()[:100]
+        if notes is not None:
+            row["notes"] = notes.strip()[:2000]
+        _write_entity_rows(rows)
+        # project.json carries the entity name denormalised so a project file read
+        # on its own is self-describing; a rename has to rewrite those files.
+        for project in list_projects():
+            if project.get("entity_id") == entity_id:
+                data = _read_project(project["id"]) or {}
+                data["entity_id"] = entity_id
+                data["entity_name"] = row["name"]
+                _dump(_project_dir(project["id"]) / "project.json", data)
+        published = _finish(f"Rename library entity {row['name']}")
+    payload = get_entity(entity_id) or {}
+    payload["published"] = published
+    payload.update(publish_outcome(published))
+    return payload
+
+
+def delete_entity(entity_id: str, *, reassign_to: str | None = None) -> dict:
+    """Remove an entity. Referenced projects are reassigned, never orphaned."""
+    require_id(entity_id, "entity id")
+    if entity_id == DEFAULT_ENTITY_ID:
+        raise LibraryError("The Unassigned bucket cannot be deleted")
+    with LOCK:
+        rows = _read_entity_rows()
+        row = next((item for item in rows if item["id"] == entity_id), None)
+        if row is None:
+            raise NotFound("Entity not found")
+        members = [item for item in list_projects() if item.get("entity_id") == entity_id]
+        if members and not reassign_to:
+            raise LibraryError(
+                f"{len(members)} project(s) still belong to {row.get('name')}; "
+                "choose another entity to move them to before deleting it"
+            )
+        target = None
+        if members:
+            target = ensure_default_entity() if reassign_to == DEFAULT_ENTITY_ID else get_entity(reassign_to)
+            if target is None:
+                raise NotFound("Entity to reassign the projects to was not found")
+            if target["id"] == entity_id:
+                raise LibraryError("Projects cannot be reassigned to the entity being deleted")
+        rows = [item for item in rows if item["id"] != entity_id]
+        _write_entity_rows(rows)
+        moved = []
+        if members and target is not None:
+            for project in members:
+                data = _read_project(project["id"]) or {}
+                data["entity_id"] = target["id"]
+                data["entity_name"] = target["name"]
+                _dump(_project_dir(project["id"]) / "project.json", data)
+                moved.append(project["id"])
+        published = _finish(f"Remove library entity {row.get('name')}")
+    return {
+        "id": entity_id,
+        "name": row.get("name") or entity_id,
+        "removed": True,
+        "reassigned_to": (target or {}).get("id"),
+        "reassigned_projects": moved,
+        "published": published,
+        **publish_outcome(published),
+    }
+
+
+def assign_project_entity(project_id: str, entity_id: str | None) -> dict:
+    """Tie a project to an entity, or move it to another one."""
+    require_id(project_id, "project id")
+    with LOCK:
+        data = _read_project(project_id)
+        if data is None:
+            raise NotFound("Project not found")
+        if entity_id in (None, "", "none"):
+            entity = ensure_default_entity()
+        else:
+            entity = get_entity(str(entity_id))
+            if entity is None:
+                raise NotFound("Entity not found")
+        data["entity_id"] = entity["id"]
+        data["entity_name"] = entity.get("name") or entity["id"]
+        _dump(_project_dir(project_id) / "project.json", data)
+        _write_catalog()
+        published = _finish(f"Assign project {data.get('name') or project_id} to entity {entity.get('name')}")
+    payload = _project_payload(data)
+    payload["published"] = published
+    payload.update(publish_outcome(published))
+    return payload
+
+
 def jenkins_script(steps) -> str:
     lines = [
         "pipeline {",
@@ -255,12 +545,28 @@ def _https_repo(url: str) -> str:
 
 def _project_payload(data: dict, published: bool | None = None) -> dict:
     project_id = data["id"]
+    entity_id = data.get("entity_id") or None
+    entity_name = data.get("entity_name") or ""
+    if entity_id and not entity_name:
+        # Older project files only recorded the id; resolve the display name.
+        # Read the raw registry rather than list_entities() -- that one counts
+        # projects by listing them, which would call right back into here.
+        row = next((item for item in _read_entity_rows() if item["id"] == entity_id), None)
+        if row is None and entity_id == DEFAULT_ENTITY_ID:
+            entity_name = DEFAULT_ENTITY_NAME
+        else:
+            entity_name = (row or {}).get("name") or entity_id
     payload = {
         "id": project_id,
         "name": data.get("name") or "",
         "base_url": data.get("base_url") or "",
         "industry_type": data.get("industry_type") or "Generic",
         "created_at": _iso(data.get("created_at")),
+        # Every project names the entity it belongs to. A project file written
+        # before entities existed reports the Unassigned bucket instead of null.
+        "entity_id": entity_id or DEFAULT_ENTITY_ID,
+        "entity_name": entity_name or DEFAULT_ENTITY_NAME,
+        "entity_assigned": bool(entity_id and entity_id != DEFAULT_ENTITY_ID),
         "source": "repository",
         "repository_path": project_repo_path(project_id),
     }
@@ -486,7 +792,9 @@ def list_recordings(project_id: str) -> list[dict]:
                         "name": rec.get("name") or "",
                         "start_url": "",
                         "status": "active",
-                        "created_at": _iso(datetime.utcnow()),
+                        # The catalog records when the recording was created; a
+                        # fresh timestamp here made every row look equally new.
+                        "created_at": rec.get("created_at") or _iso(datetime.utcnow()),
                         "step_count": rec.get("step_count") or 0,
                         "source": "repository",
                         "repository_path": rec.get("path") or recording_repo_path(project_id, rec.get("id")),
@@ -617,6 +925,10 @@ def _write_catalog() -> None:
                         "resources": _resource_names(project_id, rdata["id"]),
                         "path": recording_repo_path(project_id, rdata["id"]),
                     })
+        # Newest recording first, id breaking ties. `iterdir` order depends on
+        # the filesystem, so without this every save rewrote the committed
+        # catalog in a different order and the push diff was pure noise.
+        recordings.sort(key=lambda item: (item.get("created_at") or "", item["id"]), reverse=True)
         # Variables
         try:
             vars_list = [item.get("name") for item in _read_variables(project_id) if item.get("name")]
@@ -639,16 +951,26 @@ def _write_catalog() -> None:
     _CACHE["catalog_ts"] = 0
 
 
-def _write_project_files(project_id: str) -> dict:
+def _write_project_files(project_id: str, entity: dict | None = None) -> dict:
     with SessionLocal() as db:
         project = db.get(Project, project_id)
         if project is None:
             raise NotFound("Project not found")
+        # project.json is the source of truth for the entity assignment, so it has
+        # to survive every rewrite of this file (variables saves land here too).
+        previous = _read_project(project_id) or {}
+        entity_id = (entity or {}).get("id") or previous.get("entity_id") or None
+        entity_name = (entity or {}).get("name") or previous.get("entity_name") or ""
+        if entity_id and not entity_name:
+            row = next((item for item in _read_entity_rows() if item["id"] == entity_id), None)
+            entity_name = (row or {}).get("name") or (DEFAULT_ENTITY_NAME if entity_id == DEFAULT_ENTITY_ID else entity_id)
         data = {
             "id": project.id,
             "name": project.name,
             "base_url": project.base_url or "",
             "industry_type": project.industry_type or "Generic",
+            "entity_id": entity_id,
+            "entity_name": entity_name,
             "created_at": _iso(project.created_at),
         }
         variables = [
@@ -1300,7 +1622,27 @@ def _finish(message: str) -> bool:
     return published
 
 
-def create_project(name: str, base_url: str) -> dict:
+def create_project(name: str, base_url: str, entity_id: str | None = None,
+                   entity_name: str | None = None) -> dict:
+    """Create a project belonging to an entity/company.
+
+    ``entity_id`` is the normal path (the dashboard always sends one).
+    ``entity_name`` creates the entity on the way in, which keeps
+    "type a new company, then the project" a single round trip. With neither,
+    the project joins the Unassigned bucket so no project is entity-less.
+    """
+    if entity_id:
+        entity = get_entity(str(entity_id))
+        if entity is None:
+            raise NotFound(f"Entity not found: {entity_id}")
+    elif entity_name and str(entity_name).strip():
+        wanted = str(entity_name).strip()
+        entity = next((row for row in list_entities()
+                       if (row.get("name") or "").lower() == wanted.lower()), None)
+        if entity is None:
+            entity = create_entity(wanted)
+    else:
+        entity = ensure_default_entity()
     with LOCK:
         project_id = None
         try:
@@ -1314,8 +1656,9 @@ def create_project(name: str, base_url: str) -> dict:
                 db.commit()
                 db.refresh(project)
                 project_id = project.id
-            payload = _write_project_files(project_id)
-            payload.update(publish_outcome(_finish(f"Save library project {name} - {base_url}")))
+            payload = _write_project_files(project_id, entity)
+            payload.update(publish_outcome(_finish(
+                f"Save library project {name} - {base_url} - entity {entity.get('name')}")))
             return payload
         except Exception:
             if project_id:
@@ -1956,6 +2299,157 @@ def materialize_recording(recording_id: str) -> bool:
         return True
 
 
+def _live_recording_ids() -> set[str]:
+    """Recording ids a recorder session currently owns.
+
+    Read through ``sys.modules`` so importing this module never depends on the
+    recorder (and therefore on Playwright) being importable.
+    """
+    import sys
+    recorder_module = sys.modules.get("app.recorder")
+    if recorder_module is None or not hasattr(recorder_module, "SESSIONS"):
+        return set()
+    try:
+        return {str(rid) for rid in recorder_module.SESSIONS.keys()}
+    except Exception:
+        return set()
+
+
+def library_health() -> dict:
+    """What is on disk, what the catalog thinks is there, and what is drifting.
+
+    Read-only: this is the report the Record tab shows before a rescue runs, so
+    nothing here mutates the library.
+    """
+    live = _live_recording_ids()
+    on_disk: list[dict] = []
+    for project_id in _iter_project_ids():
+        folder = _project_dir(project_id) / "recordings"
+        if not folder.is_dir():
+            continue
+        for path in sorted(folder.iterdir()):
+            if not path.is_dir() or not _ID.match(path.name):
+                continue
+            data = _read_recording_file(project_id, path.name)
+            if data is None:
+                # A directory with no readable recording.json is a half-written
+                # export; listing it lets the operator see it instead of a
+                # recording that silently vanished from the tree.
+                on_disk.append({"id": path.name, "project_id": project_id,
+                                "name": "", "step_count": 0, "readable": False,
+                                "live": path.name in live})
+                continue
+            on_disk.append({
+                "id": data["id"], "project_id": project_id,
+                "name": data.get("name") or "", "step_count": len(data.get("steps") or []),
+                "parent_id": data.get("parent_id"), "tags": data.get("tags") or "",
+                "created_at": data.get("created_at"), "readable": True,
+                "live": data["id"] in live,
+            })
+    catalog = _read_catalog_fast() or {"projects": []}
+    catalog_entries = {}
+    for project in catalog.get("projects") or []:
+        for recording in project.get("recordings") or []:
+            catalog_entries.setdefault(recording.get("id"), {
+                "id": recording.get("id"), "project_id": project.get("id"),
+                "name": recording.get("name") or "",
+                "step_count": recording.get("step_count") or 0,
+            })
+    disk_ids = {item["id"] for item in on_disk if item.get("readable")}
+    orphans = sorted(
+        (item for item in on_disk if item.get("readable") and item["id"] not in catalog_entries),
+        key=lambda item: item.get("created_at") or "", reverse=True,
+    )
+    stale = [entry for rid, entry in catalog_entries.items() if rid not in disk_ids]
+    with SessionLocal() as db:
+        db_rows = {
+            row.id: {"id": row.id, "project_id": row.project_id, "name": row.name,
+                     "step_count": len(row.steps or [])}
+            for row in db.query(Recording)
+        }
+    database_only = [row for rid, row in db_rows.items() if rid not in disk_ids]
+    unreadable = [item for item in on_disk if not item.get("readable")]
+    return {
+        "library_dir": str(library_dir()),
+        "catalog_present": (library_dir() / "catalog.json").is_file(),
+        "projects_on_disk": len(_iter_project_ids()),
+        "catalog_projects": len(catalog.get("projects") or []),
+        "recordings_on_disk": len(disk_ids),
+        "recordings_in_catalog": len(catalog_entries),
+        "recordings_in_database": len(db_rows),
+        "orphan_recordings": orphans,
+        "database_only_recordings": sorted(database_only, key=lambda item: item.get("name") or ""),
+        "stale_catalog_entries": stale,
+        "unreadable_recordings": unreadable,
+        "live_recordings": sorted(live),
+        "healthy": not (orphans or database_only or stale or unreadable),
+    }
+
+
+def rescue_library(*, apply: bool = True, publish: bool = False) -> dict:
+    """Bring recordings that fell out of the library view back into it.
+
+    The order matters. A recording that exists only in the database is the one
+    that is genuinely at risk: the next materialize would delete it because no
+    file backs it, so it is exported to the tree *before* anything else runs.
+    Sorting elsewhere in the library (an unreadable folder, a recording missing
+    from ``catalog.json``) is then repaired by re-materializing and re-writing
+    the catalog.
+    """
+    report = library_health()
+    report["applied"] = False
+    if not apply:
+        return report
+
+    rescued: list[dict] = []
+    failed: list[dict] = []
+    with LOCK:
+        # 1. Export database-only recordings (an unsaved/crashed session) first.
+        target_ids = [item["id"] for item in report["database_only_recordings"]
+                      if item["id"] not in report["live_recordings"]]
+        for recording_id in target_ids:
+            entry = next(item for item in report["database_only_recordings"] if item["id"] == recording_id)
+            try:
+                payload = _write_recording_files(recording_id, include_exports=True)
+                rescued.append({"id": recording_id, "name": payload.get("name") or entry.get("name"),
+                                "project_id": entry.get("project_id"),
+                                "repository_path": payload.get("repository_path"),
+                                "step_count": len(payload.get("steps") or [])})
+            except Exception as exc:
+                logger.warning("RESCUE FAILED %s %s", recording_id, exc)
+                failed.append({"id": recording_id, "name": entry.get("name"),
+                               "error": str(exc).splitlines()[0][:200]})
+        # 2. Re-read the tree into the database, then rebuild the catalog so the
+        #    orphaned recordings are listed again and stale entries drop out.
+        try:
+            _materialize_unlocked()
+        except Exception as exc:
+            logger.warning("RESCUE MATERIALIZE FAILED %s", exc)
+            failed.append({"id": None, "name": "materialize", "error": str(exc).splitlines()[0][:200]})
+        try:
+            _write_catalog()
+        except Exception as exc:
+            logger.warning("RESCUE CATALOG FAILED %s", exc)
+            failed.append({"id": None, "name": "catalog", "error": str(exc).splitlines()[0][:200]})
+        if publish and (rescued or failed):
+            try:
+                _finish(f"Rescue {len(rescued)} recording(s) in the library")
+            except Exception as exc:
+                failed.append({"id": None, "name": "publish", "error": str(exc).splitlines()[0][:200]})
+    after = library_health()
+    return {
+        **report,
+        "applied": True,
+        "rescued": rescued,
+        "failed": failed,
+        "rescued_count": len(rescued),
+        "remaining_orphans": after["orphan_recordings"],
+        "remaining_database_only": after["database_only_recordings"],
+        "healthy": after["healthy"],
+        "after": after,
+    }
+
+
 def _library_disk_report() -> dict:
     """What is actually on disk under library/, independent of git."""
     folder = library_dir()
@@ -2193,6 +2687,7 @@ def list_all_recordings_fast() -> list[dict]:
                 "start_url": rec.get("start_url") or "",
                 "tags": rec.get("tags") or "",
                 "parent_id": rec.get("parent_id"),
+                "created_at": rec.get("created_at"),
                 "step_count": rec.get("step_count") or 0,
                 "resources": rec.get("resources") or [],
                 "repository_path": rec.get("path") or "",

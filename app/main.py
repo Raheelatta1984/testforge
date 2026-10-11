@@ -330,8 +330,26 @@ def create_project(body: dict):
     if len(name) > 200 or len(base_url) > 500:
         raise HTTPException(status_code=422, detail="Project name or application URL is too long")
 
+    # Entity/company the project belongs to. The dashboard sends entity_id from
+    # the entity it just created; an API client may instead send entity_name to
+    # create-and-assign in one call. Neither is an error: the project lands in
+    # the Unassigned bucket and the dashboard offers to move it.
+    entity_id = body.get("entity_id")
+    entity_name = body.get("entity_name")
+    if entity_id is not None and not isinstance(entity_id, str):
+        raise HTTPException(status_code=422, detail="entity_id must be an entity id")
+    if entity_name is not None and not isinstance(entity_name, str):
+        raise HTTPException(status_code=422, detail="entity_name must be text")
+    if isinstance(entity_name, str) and len(entity_name.strip()) > library_store.MAX_ENTITY_NAME:
+        raise HTTPException(status_code=422, detail="Entity/company name is too long")
+
+    def create() -> dict:
+        return library_store.create_project(name, base_url, entity_id=entity_id, entity_name=entity_name)
+
     try:
-        return library_store.create_project(name, base_url)
+        return create()
+    except NotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PublishError as exc:
         raise HTTPException(
             status_code=503,
@@ -340,7 +358,7 @@ def create_project(body: dict):
     except SQLAlchemyError as exc:
         try:
             if repair_schema():
-                return library_store.create_project(name, base_url)
+                return create()
         except (SQLAlchemyError, PublishError) as retry_exc:
             if isinstance(retry_exc, PublishError):
                 raise HTTPException(
@@ -476,6 +494,89 @@ def _library_http(exc: Exception) -> HTTPException:
     if isinstance(exc, LibraryError):
         return HTTPException(status_code=422, detail=str(exc))
     raise exc
+
+
+# --- Entities / companies -------------------------------------------------
+# A project belongs to exactly one entity. The dashboard creates entities here
+# first and then ties every project to one, so the library always answers
+# "whose application is this?" -- including for projects written before
+# entities existed, which report the Unassigned bucket until they are moved.
+
+@app.get("/api/entities")
+def get_entities():
+    try:
+        return library_store.list_entities()
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+
+
+@app.post("/api/entities", status_code=201)
+def create_entity(body: dict):
+    name = body.get("name")
+    if not isinstance(name, str) or not name.strip():
+        raise HTTPException(status_code=422, detail="Entity/company name is required")
+    values = {key: body.get(key) for key in ("legal_name", "code", "industry", "notes")}
+    for key, value in values.items():
+        if value is not None and not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"{key} must be text")
+    try:
+        return library_store.create_entity(name, **{k: (v or "") for k, v in values.items()})
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+
+
+@app.get("/api/entities/{entity_id}")
+def get_entity(entity_id: str):
+    try:
+        entity = library_store.get_entity(entity_id)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+    if entity is None:
+        raise HTTPException(status_code=404, detail="Entity not found")
+    entity["projects"] = [item for item in library_store.list_projects()
+                          if item.get("entity_id") == entity["id"]]
+    return entity
+
+
+@app.patch("/api/entities/{entity_id}")
+def update_entity(entity_id: str, body: dict):
+    fields = {key: body.get(key) for key in ("name", "legal_name", "code", "industry", "notes")
+              if key in body}
+    for key, value in fields.items():
+        if value is not None and not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"{key} must be text")
+    if not fields:
+        raise HTTPException(status_code=422, detail="Nothing to update")
+    try:
+        return library_store.update_entity(entity_id, **fields)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+
+
+@app.delete("/api/entities/{entity_id}")
+def delete_entity(entity_id: str, body: dict | None = None):
+    """Delete an entity; its projects must be reassigned first (never orphaned)."""
+    reassign_to = (body or {}).get("reassign_to")
+    if reassign_to is not None and not isinstance(reassign_to, str):
+        raise HTTPException(status_code=422, detail="reassign_to must be an entity id")
+    try:
+        return library_store.delete_entity(entity_id, reassign_to=reassign_to)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+
+
+@app.patch("/api/projects/{project_id}")
+def update_project(project_id: str, body: dict):
+    """Assign (or move) the entity a project belongs to."""
+    if "entity_id" not in body:
+        raise HTTPException(status_code=422, detail="Send entity_id to assign the project")
+    entity_id = body.get("entity_id")
+    if entity_id is not None and not isinstance(entity_id, str):
+        raise HTTPException(status_code=422, detail="entity_id must be an entity id or null")
+    try:
+        return library_store.assign_project_entity(project_id, entity_id)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
 
 
 @app.get("/api/variables")
@@ -730,6 +831,100 @@ async def recording_input(rid: str, body: dict):
     except (ValueError, RuntimeError, AssertionError) as exc:
         raise HTTPException(status_code=409, detail=str(exc).splitlines()[0][:500]) from exc
     return {"ok": True, "step": step, "optimized": True, "dedup": False}
+
+
+@app.post("/api/recordings/{rid}/replay")
+async def replay_existing_recording(rid: str, body: dict):
+    """Run another saved recording's steps inside this live recording session.
+
+    The replay happens in the browser the session already owns, so it is visible
+    in the live window, and by default every executed action is recorded as a
+    step of the recording being made. This is what makes a rescued or older
+    recording reusable while recording something new.
+    """
+    session = get_session(rid)
+    if session is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Start this recording's session first: an existing recording runs inside a live session",
+        )
+    source_id = body.get("recording_id") or body.get("source_recording_id")
+    if not isinstance(source_id, str) or not source_id.strip():
+        raise HTTPException(status_code=422, detail="Choose the existing recording to run")
+    source_id = source_id.strip()
+    if source_id == rid:
+        raise HTTPException(status_code=422, detail="This is the recording you are already making; choose another one")
+    if get_session(source_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="That recording has a live session of its own; save it before running it here",
+        )
+    recording = None
+    try:
+        recording = library_store.get_recording(source_id)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+    if recording is None and library_store.materialize_recording(source_id):
+        recording = library_store.get_recording(source_id)
+    if recording is None:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    steps = recording.get("steps") or []
+    if not steps:
+        raise HTTPException(status_code=422, detail="That recording has no steps to run")
+
+    # Variables resolve exactly like a run of the source recording: the source
+    # project's stored values, its saved input defaults, then this request's
+    # overrides. Encrypted values are unsealed only for the length of the replay.
+    from app.secrets_store import reveal_map
+    with SessionLocal() as db:
+        variables = resolve_variables(db, recording["project_id"])
+        row = db.get(Recording, source_id)
+        defaults = dict(row.input_defaults or {}) if row is not None else {}
+    for key, value in reveal_map(defaults).items():
+        variables[key] = value if isinstance(value, (str, int, float, bool)) else str(value)
+    overrides = body.get("variables") or {}
+    if not isinstance(overrides, dict):
+        raise HTTPException(status_code=422, detail="variables must be an object")
+    if len(overrides) > 50:
+        raise HTTPException(status_code=422, detail="Too many variable overrides")
+    for key, value in overrides.items():
+        if not isinstance(key, str) or len(key) > 100:
+            raise HTTPException(status_code=422, detail="Variable name is invalid")
+        if not isinstance(value, (str, int, float, bool)) or (isinstance(value, str) and len(value) > 4096):
+            raise HTTPException(status_code=422, detail=f"Variable {key} must be a short scalar value")
+        variables[key] = str(value)
+    record = True if body.get("record") is None else bool(body.get("record"))
+    try:
+        result = await session.replay(
+            steps, variables, record=record,
+            source={"id": source_id, "name": recording.get("name") or source_id},
+        )
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc).splitlines()[0][:500]) from exc
+    if not result["ok"]:
+        # 409: the recording itself is untouched, and the message names the step
+        # that failed so it can be fixed and replayed again.
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Ran {result['executed']} of {result['total']} step(s) from "
+                f"{recording.get('name') or source_id}, then step {result['failed_at']} failed: {result['error']}"
+            ),
+        )
+    return {
+        "ok": True,
+        "source_recording_id": source_id,
+        "source_name": recording.get("name"),
+        "executed": result["executed"],
+        "recorded": result["recorded"],
+        "total": result["total"],
+        "record": record,
+        "url": result.get("url"),
+        "message": (
+            f"Ran {result['executed']} step(s) from “{recording.get('name') or source_id}”; "
+            + (f"{result['recorded']} recorded into this session." if record else "nothing was recorded into this session.")
+        ),
+    }
 
 
 @app.post("/api/recordings/{rid}/stop")
@@ -1560,6 +1755,35 @@ def get_video(run_id: str):
     if not os.path.realpath(path).startswith(artifacts_root + os.sep):
         raise HTTPException(status_code=404, detail="Video file is missing")
     return FileResponse(path)
+
+
+@app.get("/api/library/health")
+async def library_health():
+    """What is on disk versus what the catalog, database and recorder know about.
+
+    Read-only scan: the Record tab's tree shows the same numbers and only calls
+    the rescue below when the operator asks for it.
+    """
+    try:
+        return await asyncio.to_thread(library_store.library_health)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Library scan failed: {redact(exc)}") from exc
+
+
+@app.post("/api/library/rescue")
+async def library_rescue(body: dict | None = None):
+    """Bring recordings that fell out of the library view back into it.
+
+    ``{"apply": false}`` returns the scan only, which is what the dashboard does
+    first so nothing is written before the operator sees what would change.
+    """
+    payload = body or {}
+    apply_changes = bool(payload.get("apply", True))
+    publish = bool(payload.get("publish", False))
+    try:
+        return await asyncio.to_thread(library_store.rescue_library, apply=apply_changes, publish=publish)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Library rescue failed: {redact(exc)}") from exc
 
 
 @app.get("/api/library")

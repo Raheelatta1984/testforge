@@ -115,6 +115,12 @@ MERGE_REPEAT_STEPS = os.environ.get("TF_MERGE_REPEAT_STEPS", "1").strip().lower(
     "1", "true", "yes", "on",
 }
 
+# One live replay of an existing recording into an open session: the expanded
+# action limit matches the executor's, and the recording cap matches the one
+# `handle_input` enforces so a replay cannot push a recording past 500 steps.
+MAX_REPLAY_STEPS = int(os.environ.get("TF_MAX_REPLAY_STEPS", "2000"))
+MAX_RECORDED_STEPS = 500
+
 # A database the service cannot ALTER (someone else owns the table) still must not
 # lose a step. A label a narrow column refuses is retried at a width every
 # revision of this schema has accepted -- 300 is the oldest width we know of, so
@@ -340,6 +346,91 @@ class RecorderSession:
             self.current_url = self.page.url
         await self._broadcast({"type": "step", "step": step})
         return step
+
+    async def replay(self, steps: list, variables: dict | None = None, *, record: bool = True,
+                     source: dict | None = None, max_steps: int = MAX_REPLAY_STEPS) -> dict:
+        """Run another saved recording's steps inside this live session.
+
+        This is "execute an existing recording while recording": the steps run in
+        the browser this session already owns, so the live window shows them, and
+        when ``record`` is on every executed action is written into *this*
+        recording as an editable step -- a rescued flow or a login sequence can be
+        reused instead of clicked again by hand.
+
+        Repeats are expanded before anything runs and then cleared on each step,
+        so a step never repeats twice. A failing step stops the run and is
+        reported with its position instead of being silently swallowed.
+        """
+        await self.wait_ready()
+        from app.executor import _expand_steps_with_repeat, replay_step
+
+        expanded = await _expand_steps_with_repeat(
+            [dict(step) for step in (steps or []) if isinstance(step, dict)]
+        )
+        if not expanded:
+            raise ValueError("That recording has no steps to run")
+        if len(expanded) > max_steps:
+            raise ValueError(
+                f"That recording expands to {len(expanded)} actions; the limit for one replay "
+                f"is {max_steps}. Run it as a normal execution instead."
+            )
+        if not hasattr(self, "_action_runtime"):
+            self._action_runtime = StepRuntime(self.page, os.path.join(ARTIFACTS, "rec", self.recording_id))
+        runtime = self._action_runtime
+        resolved = dict(variables or {})
+        result = {
+            "source": source, "total": len(expanded), "executed": 0, "recorded": 0,
+            "recorded_steps": [], "error": None, "failed_at": None,
+        }
+        for index, raw in enumerate(expanded, 1):
+            if self._closed:
+                raise RuntimeError("This recording session has been closed")
+            step = dict(raw)
+            # Expansion above already applied the repeat count.
+            step["repeat"] = 1
+            step["repeat_count"] = 1
+            async with self.preview.lock:
+                try:
+                    await replay_step(self.page, step, resolved, runtime=runtime)
+                except Exception as exc:
+                    self.page = runtime.page
+                    self.preview.page = self.page
+                    self.current_url = self.page.url
+                    result["error"] = (str(exc).splitlines() or [type(exc).__name__])[0][:300]
+                    result["failed_at"] = index
+                    logger.warning("LIVE REPLAY FAILED %s after step %s/%s: %s",
+                                   self.recording_id, index - 1, len(expanded), exc)
+                    break
+                self.page = runtime.page
+                self.preview.page = self.page
+                self.current_url = self.page.url
+                result["executed"] += 1
+                broadcast = None
+                if record and self.seq < MAX_RECORDED_STEPS:
+                    broadcast = await self._record(
+                        step.get("action"), value=step.get("value"),
+                        selector=step.get("selector"), label=step.get("label"),
+                    )
+                    result["recorded"] += 1
+                    result["recorded_steps"].append(broadcast)
+                if broadcast is not None:
+                    try:
+                        png = await self.page.screenshot(type="png", animations="disabled")
+                        task = asyncio.create_task(self._attach_image(broadcast, png))
+                        self._image_tasks.add(task)
+                        task.add_done_callback(self._image_tasks.discard)
+                    except Exception as exc:
+                        logger.warning("REPLAY STEP SCREENSHOT FAILED %s %s", self.recording_id, exc)
+                self.preview.touch()
+            if broadcast is not None:
+                await self._broadcast({"type": "step", "step": broadcast})
+            # Keep the event loop free: a long replay must not block the frame
+            # poller that paints the live window.
+            await asyncio.sleep(0)
+        self._schedule_export()
+        result["ok"] = result["error"] is None
+        result["url"] = self.current_url
+        return result
 
     async def _merge_into_previous(self, candidate):
         """Fold `candidate` into the previous row when it repeats it exactly.

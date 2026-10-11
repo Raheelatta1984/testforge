@@ -23,3 +23,6 @@ library/**/resources/plan-result.json
 # Ephemeral PDF binaries and runtime data must never enter Git history.
 artifacts/
 **/pdf-reports/
+
+# Sandbox runtime data (sqlite db, artifacts) for local preview sessions.
+.arena-artifacts/

@@ -874,6 +874,121 @@ class LibraryStoreTests(unittest.TestCase):
         self.assertEqual(library_store.get_recording("file-only-rec")["source"], "repository")
 
 
+    def test_UT_LIB_09_rescue_brings_back_a_database_only_recording(self):
+        """A recording whose files are gone is exported before anything deletes it.
+
+        This is the crash the Record tab's RESCUE button repairs: the row is in
+        the database but no `recording.json` backs it, and the next materialize
+        would drop it as database-only.
+        """
+        import shutil
+
+        from app import library_store
+
+        project = library_store.create_project("Rescue audit", "")
+        recording = library_store.create_recording(project["id"], "Lost flow", "/demo.html", steps=[
+            {"order": 1, "action": "navigate", "value": "https://example.com/", "label": "Open"},
+        ])
+        folder = (Path(os.environ["TF_LIBRARY_DIR"]) / "projects" / project["id"]
+                  / "recordings" / recording["id"])
+        self.assertTrue((folder / "recording.json").is_file())
+        shutil.rmtree(folder)                      # the crash: the tree lost the recording
+
+        report = library_store.library_health()
+        self.assertIn(recording["id"], [item["id"] for item in report["database_only_recordings"]])
+        self.assertFalse(report["healthy"])
+
+        result = library_store.rescue_library(apply=True)
+        self.assertEqual([item["id"] for item in result["rescued"]], [recording["id"]])
+        self.assertTrue((folder / "recording.json").is_file())
+        self.assertEqual(library_store.get_recording(recording["id"])["steps"][0]["action"], "navigate")
+        after = library_store.library_health()
+        self.assertEqual(after["database_only_recordings"], [])
+        self.assertTrue(after["healthy"])
+
+
+class EntityTests(unittest.TestCase):
+    """Entity/company is a first-class object a project is created against."""
+
+    def test_UT_ENT_01_a_project_without_a_chosen_entity_is_still_tied_to_one(self):
+        from app import library_store
+
+        project = library_store.create_project("Legacy file", "https://example.com")
+        self.assertEqual(project["entity_id"], library_store.DEFAULT_ENTITY_ID)
+        self.assertFalse(project["entity_assigned"])
+        self.assertTrue(project["entity_name"])
+        again = library_store.get_project(project["id"])
+        self.assertEqual(again["entity_id"], library_store.DEFAULT_ENTITY_ID)
+
+    def test_UT_ENT_02_an_entity_is_created_before_the_project_that_uses_it(self):
+        from app import library_store
+
+        entity = library_store.create_entity("Harris Farm Markets", code="HFM", industry="Retail")
+        self.assertEqual(entity["id"], "harris-farm-markets")
+        self.assertEqual(entity["code"], "HFM")
+        self.assertIn(entity["id"], [row["id"] for row in library_store.list_entities()])
+        project = library_store.create_project("Store replen", "", entity_id=entity["id"])
+        self.assertEqual(project["entity_name"], "Harris Farm Markets")
+        self.assertTrue(project["entity_assigned"])
+        counted = next(row for row in library_store.list_entities() if row["id"] == entity["id"])
+        self.assertIn(project["id"], counted["project_ids"])
+        # A project cannot be created against an entity that does not exist.
+        with self.assertRaises(library_store.NotFound):
+            library_store.create_project("Nowhere", "", entity_id="no-such-entity")
+
+    def test_UT_ENT_03_names_are_unique_including_the_implicit_bucket(self):
+        from app import library_store
+
+        library_store.create_entity("Acme Corp")
+        with self.assertRaises(library_store.LibraryError):
+            library_store.create_entity("acme corp")
+        with self.assertRaises(library_store.LibraryError):
+            library_store.create_entity("  ")
+        with self.assertRaises(library_store.LibraryError):
+            library_store.create_entity(library_store.DEFAULT_ENTITY_NAME)
+        with self.assertRaises(library_store.LibraryError):
+            library_store.create_entity("x" * (library_store.MAX_ENTITY_NAME + 1))
+
+    def test_UT_ENT_04_renaming_and_removing_an_entity_keeps_projects_tied(self):
+        from app import library_store
+
+        entity = library_store.create_entity("Gamma Retail")
+        project = library_store.create_project("Portal", "", entity_id=entity["id"])
+        renamed = library_store.update_entity(entity["id"], name="Gamma Holdings")
+        self.assertEqual(renamed["name"], "Gamma Holdings")
+        self.assertEqual(library_store.get_project(project["id"])["entity_name"], "Gamma Holdings")
+        with self.assertRaises(library_store.LibraryError):
+            library_store.delete_entity(entity["id"])          # members must be moved
+        removed = library_store.delete_entity(entity["id"], reassign_to=library_store.DEFAULT_ENTITY_ID)
+        self.assertEqual(removed["reassigned_projects"], [project["id"]])
+        moved = library_store.get_project(project["id"])
+        self.assertEqual(moved["entity_id"], library_store.DEFAULT_ENTITY_ID)
+        self.assertFalse(moved["entity_assigned"])
+        # The fallback bucket itself is immutable.
+        with self.assertRaises(library_store.LibraryError):
+            library_store.delete_entity(library_store.DEFAULT_ENTITY_ID)
+        with self.assertRaises(library_store.LibraryError):
+            library_store.update_entity(library_store.DEFAULT_ENTITY_ID, name="Nobody")
+
+    def test_UT_ENT_05_registry_lives_in_the_library_tree(self):
+        import json
+
+        from app import library_store
+
+        entity = library_store.create_entity("Beta Foods", notes="second tenant")
+        path = Path(os.environ["TF_LIBRARY_DIR"]) / "entities.json"
+        self.assertTrue(path.is_file())
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(raw["source"], "repository")
+        row = next(item for item in raw["entities"] if item["id"] == entity["id"])
+        self.assertEqual(row["name"], "Beta Foods")
+        self.assertEqual(row["notes"], "second tenant")
+        # Entities are listed before any project exists, last in the ordering
+        # only when they are the fallback bucket.
+        ids = [item["id"] for item in library_store.list_entities()]
+        self.assertLess(ids.index(entity["id"]), ids.index(library_store.DEFAULT_ENTITY_ID))
+
+
 class CatalogTests(unittest.TestCase):
     def test_UT_DOC_01_catalog_ids_match(self):
         import json
@@ -1157,6 +1272,139 @@ class WorkflowRegressionTests(unittest.TestCase):
         with SessionLocal() as db:
             self.assertEqual(resolve_variables(db, project["id"])["captured"], "beta")
             self.assertEqual([s.order for s in db.query(RecordingStep).filter_by(recording_id=rec["id"]).order_by(RecordingStep.order)], [1, 2, 3])
+
+    def test_UT_FLOW_10_running_a_saved_recording_inside_a_live_session(self):
+        """An existing recording can be replayed into the session being recorded.
+
+        This is the "execute another recording while recording" path: the steps
+        drive the live browser and, with record on, land in the open recording as
+        ordinary editable steps.
+        """
+        from app import library_store
+        from app.db import RecordingStep, SessionLocal
+        from app.recorder import RecorderSession
+        from tests.fakes import FakePage
+
+        project = library_store.create_project("Live replay", "")
+        source = library_store.create_recording(project["id"], "Login flow", "https://example.com/", steps=[
+            {"order": 1, "action": "navigate", "value": "https://example.com/login", "label": "Open login"},
+            {"order": 2, "action": "click", "selector": {"primary": "#user"}, "label": "Click user"},
+            {"order": 3, "action": "type", "value": "{{user}}", "selector": {"primary": "#user"}, "label": "Type user"},
+            {"order": 4, "action": "press", "value": "Enter", "label": "Press Enter"},
+        ])
+        target = library_store.create_recording(project["id"], "Rescued session", "https://example.com/")
+
+        class Preview:
+            def __init__(self): self.lock = asyncio.Lock(); self.page = None; self.touches = 0
+            def touch(self): self.touches += 1
+            async def stop(self): pass
+
+        page = FakePage(known={"#user"})
+        preview = Preview(); preview.page = page
+        session = RecorderSession(target["id"], "", 0)
+        session.page = page; session.preview = preview
+        session._ready.set(); session.status = "live"
+
+        async def exercise():
+            result = await session.replay(source["steps"], {"user": "Ada"},
+                                          record=True, source=source)
+            await session.stop()
+            return result
+
+        result = asyncio.run(exercise())
+        self.assertTrue(result["ok"], result.get("error"))
+        self.assertEqual([result["executed"], result["recorded"]], [4, 4])
+        self.assertIsNone(result["failed_at"])
+        self.assertEqual(page.gotos[0][0], "https://example.com/login")
+        self.assertIn(("locator", "#user"), page.clicks)
+        self.assertEqual(page.typed, ["Ada"])
+        self.assertEqual(page.pressed, ["Enter"])
+        self.assertTrue(preview.touches, "the live window must be kept awake while replaying")
+
+        with SessionLocal() as db:
+            rows = db.query(RecordingStep).filter_by(recording_id=target["id"]).order_by(RecordingStep.order).all()
+            self.assertEqual([row.order for row in rows], [1, 2, 3, 4])
+            self.assertEqual(rows[2].value, "{{user}}")
+        exported = library_store.get_recording(target["id"])
+        self.assertEqual([step["order"] for step in exported["steps"]], [1, 2, 3, 4])
+
+    def test_UT_FLOW_11_a_failed_live_replay_reports_its_step(self):
+        """A replay that cannot finish says which step failed and keeps the rest."""
+        from app import library_store
+        from app.db import RecordingStep, SessionLocal
+        from app.executor import replay_step as real_replay_step
+        from app.recorder import RecorderSession
+        from tests.fakes import FakePage
+
+        project = library_store.create_project("Broken live replay", "")
+        source = library_store.create_recording(project["id"], "Half flow", "https://example.com/", steps=[
+            {"order": 1, "action": "navigate", "value": "https://example.com/step", "label": "Open step"},
+            {"order": 2, "action": "click", "selector": {"primary": "#ghost"}, "label": "Click ghost"},
+        ])
+        target = library_store.create_recording(project["id"], "Target", "https://example.com/")
+
+        class Preview:
+            def __init__(self): self.lock = asyncio.Lock(); self.page = None
+            def touch(self): pass
+            async def stop(self): pass
+
+        page = FakePage()
+        preview = Preview(); preview.page = page
+        session = RecorderSession(target["id"], "", 0)
+        session.page = page; session.preview = preview
+        session._ready.set(); session.status = "live"
+
+        calls = []
+
+        async def flaky_replay(page_, step, variables, **kwargs):
+            calls.append(step.get("action"))
+            if step.get("action") == "click":
+                raise RuntimeError("Timeout 3000ms exceeded waiting for #ghost")
+            return await real_replay_step(page_, step, variables, **kwargs)
+
+        async def exercise():
+            with patch("app.executor.replay_step", flaky_replay):
+                result = await session.replay(source["steps"], {}, record=True, source=source)
+            await session.stop()
+            return result
+
+        result = asyncio.run(exercise())
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["failed_at"], 2)
+        self.assertEqual(result["executed"], 1)
+        self.assertIn("#ghost", result["error"] or "")
+        self.assertEqual(calls, ["navigate", "click"])
+        with SessionLocal() as db:
+            rows = db.query(RecordingStep).filter_by(recording_id=target["id"]).all()
+            self.assertEqual(len(rows), 1, "only the step that ran is recorded")
+
+    def test_UT_FLOW_12_a_closed_session_refuses_to_replay(self):
+        from app import library_store
+        from app.recorder import RecorderSession
+        from tests.fakes import FakePage
+
+        project = library_store.create_project("Closed replay", "")
+        source = library_store.create_recording(project["id"], "Anything", "https://example.com/", steps=[
+            {"order": 1, "action": "press", "value": "Enter", "label": "Press Enter"},
+        ])
+
+        class Preview:
+            def __init__(self): self.lock = asyncio.Lock(); self.page = None
+            def touch(self): pass
+            async def stop(self): pass
+
+        page = FakePage()
+        preview = Preview(); preview.page = page
+        session = RecorderSession(source["id"], "", 0)
+        session.page = page; session.preview = preview
+        session._ready.set(); session.status = "live"; session._closed = True
+
+        async def exercise():
+            with self.assertRaises(RuntimeError):
+                await session.replay(source["steps"], {}, record=False, source=source)
+
+        asyncio.run(exercise())
+        self.assertEqual(page.pressed, [], "nothing may run in a closed session")
 
     def test_UT_FLOW_06_compact_png_preserves_format_and_never_grows(self):
         import io
