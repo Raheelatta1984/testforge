@@ -316,5 +316,312 @@ class ImportTests(unittest.TestCase):
         asyncio.run(exercise())
 
 
+TXT_STEPS = b"""Test Case: Replenishment login
+Preconditions: UAT user with store access
+1. Open https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&storeNo=426
+2. Enter {{user}} in the Username field
+3. Type Spring2026! in the Password field
+4. Click the Sign in button
+5. Verify the page contains Welcome
+"""
+
+
+class ImportFormatTests(unittest.TestCase):
+    """Every market format the upload box accepts (UT_IMP_24 onwards)."""
+
+    def test_UT_IMP_24_plain_text_steps_and_parameters(self):
+        result = parse_file('login.txt', TXT_STEPS)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['detected']['format'], 'text')
+        self.assertEqual(result['steps'][0]['action'], 'navigate')
+        self.assertEqual(result['steps'][1]['selector']['primary'], 'Username')
+        self.assertEqual(result['steps'][1]['value'], '{{user}}')
+        self.assertFalse(result['source_executed'])
+
+    def test_UT_IMP_25_markdown_pipe_table(self):
+        markdown = b"""# Login
+Precondition: UAT available
+
+| Step | Action | Expected Result |
+| --- | --- | --- |
+| 1 | Open https://example.test | Sign-in form appears |
+| 2 | Enter {{user}} in the Username field | |
+| 3 | Click the Sign in button | Dashboard loads |
+"""
+        result = parse_file('login.md', markdown)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['detected']['format'], 'table')
+        actions = [step['action'] for step in result['steps']]
+        # Each row contributes its own expectation, kept in sheet order.
+        self.assertEqual(actions, ['navigate', 'assert_contains', 'fill', 'click', 'assert_contains'])
+        self.assertEqual(result['steps'][2]['value'], '{{user}}')
+
+    def test_UT_IMP_26_market_headers_and_metadata_columns(self):
+        azure = b"""Test Case,Step,Action,Expected Result,Priority
+Replenishment,1,Open https://example.test,Launch pad is displayed,1
+Replenishment,2,Enter Ada in the Username field,,1
+"""
+        result = parse_file('azdo.csv', azure)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertTrue(any(d['severity'] == 'note' for d in result['diagnostics']))
+        self.assertEqual(result['steps'][0]['action'], 'navigate')
+
+    def test_UT_IMP_27_two_test_cases_in_one_sheet_is_refused(self):
+        table = b"""Test Case,Step,Action
+Login,1,Click the Sign in button
+Logout,1,Click the Sign out button
+"""
+        result = parse_file('two.csv', table)
+        self.assertFalse(result['can_save'])
+        self.assertTrue(any('test case' in d['message'].lower() for d in result['diagnostics']))
+
+    def test_UT_IMP_28_psv_and_tsv_delimiters(self):
+        psv = b'action|selector|value\nnavigate||https://example.test\nclick|#go|\n'
+        result = parse_file('steps.psv', psv)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual([step['action'] for step in result['steps']], ['navigate', 'click'])
+
+    def test_UT_IMP_29_selenium_ide_side(self):
+        side = json.dumps({'id': 'suite', 'tests': [{'name': 'Login', 'commands': [
+            {'command': 'open', 'target': '/login', 'value': ''},
+            {'command': 'type', 'target': '#txtUser', 'value': '{{user}}'},
+            {'command': 'assertText', 'target': '//h1', 'value': 'Welcome'},
+            {'command': 'pause', 'target': '5000', 'value': ''}]}]}).encode()
+        result = parse_file('login.side', side)
+        # A fixed pause is refused, exactly like Thread.sleep: the rest still imports.
+        self.assertFalse(result['can_save'])
+        self.assertEqual(result['steps'][0]['value'], '{{base_url}}/login')
+        self.assertTrue(any('Fixed sleeps' in d['message'] for d in result['diagnostics']))
+        without_pause = json.dumps({'id': 'suite', 'tests': [{'name': 'Login', 'commands': side and [
+            {'command': 'open', 'target': '/login', 'value': ''},
+            {'command': 'type', 'target': '#txtUser', 'value': '{{user}}'}]}]}).encode()
+        self.assertTrue(parse_file('login.side', without_pause)['can_save'])
+
+    def test_UT_IMP_30_postman_collection(self):
+        collection = json.dumps({'info': {'name': 'Store API', 'schema': 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json'},
+            'item': [{'name': 'Get stores', 'request': {'method': 'GET', 'url': {'raw': 'https://api.example.test/stores?storeNo=426'}},
+                      'event': [{'listen': 'test', 'script': {'exec': ['pm.response.to.have.status(200);']}}]}]}).encode()
+        result = parse_file('store.postman_collection.json', collection)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['steps'][0]['action'], 'api_request')
+        self.assertEqual(result['steps'][0]['value'], 'https://api.example.test/stores?storeNo=426')
+
+    def test_UT_IMP_31_robot_framework(self):
+        robot = b"""*** Settings ***
+Documentation   Login smoke
+*** Variables ***
+${USER}    Ada
+*** Test Cases ***
+Store login
+    Open Browser    https://example.test/login    chromium
+    Input Text    id=txtUser    ${USER}
+    Click Button    Sign in
+    Page Should Contain    Dashboard
+"""
+        result = parse_file('login.robot', robot)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['detected']['format'], 'robot')
+        self.assertEqual(result['steps'][1]['value'], '{{USER}}')
+        self.assertTrue(result['variable_suggestions'])
+
+    def test_UT_IMP_32_cypress_spec_not_reported_as_playwright(self):
+        cypress = b"""describe('login', () => {
+  it('signs in', () => {
+    cy.visit('/login');
+    cy.get('#txtUser').type('{{user}}');
+    cy.get('button').contains('Sign in').click();
+    cy.url().should('include', '/dashboard');
+  });
+});"""
+        result = parse_file('login.cy.js', cypress)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['detected']['why'], 'Cypress spec (cy.* commands)')
+        self.assertEqual(result['steps'][2]['selector']['kind'], 'text')
+
+    def test_UT_IMP_33_java_and_csharp_subset(self):
+        java = b"""public class LoginTest {
+  @Test
+  public void login() {
+    driver.get("https://example.test/login");
+    driver.findElement(By.Id("txtUser")).sendKeys("{{user}}");
+    driver.findElement(By.XPath("//button[text()='Sign in']")).click();
+    Assert.assertEquals("Welcome", driver.findElement(By.Id("hdr")).getText());
+    Thread.sleep(3000);
+  }
+}"""
+        result = parse_file('LoginTest.java', java)
+        self.assertFalse(result['can_save'])
+        self.assertTrue(any('Fixed sleeps' in d['message'] for d in result['diagnostics']))
+        self.assertEqual(result['detected']['format'], 'java')
+        plain = java.replace(b'    Thread.sleep(3000);\n', b'')
+        self.assertTrue(parse_file('LoginTest.java', plain)['can_save'])
+
+    def test_UT_IMP_34_word_document_tables(self):
+        document = ['<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>',
+                    '<w:p><w:r><w:t>Test case: Login</w:t></w:r></w:p>']
+        rows = [['Step', 'Action', 'Expected Result'], ['1', 'Open https://example.test', 'Login page'],
+                ['2', 'Click the Sign in button', 'Dashboard']]
+        document.append('<w:tbl>' + ''.join('<w:tr>' + ''.join('<w:tc><w:p><w:r><w:t>%s</w:t></w:r></w:p></w:tc>' % cell for cell in row) + '</w:tr>' for row in rows) + '</w:tbl>')
+        document.append('</w:body></w:document>')
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w') as archive:
+            archive.writestr('word/document.xml', ''.join(document))
+        result = parse_file('login.docx', buffer.getvalue())
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['detected']['format'], 'docx')
+        macros = io.BytesIO()
+        with zipfile.ZipFile(macros, 'w') as archive:
+            archive.writestr('word/document.xml', ''.join(document))
+            archive.writestr('word/vbaProject.bin', b'\x00')
+        self.assertFalse(parse_file('login.docm', macros.getvalue())['can_save'])
+
+    def test_UT_IMP_35_yaml_and_xml_step_lists(self):
+        yaml_source = b"""name: Login smoke
+variables:
+  user: Ada
+steps:
+  - action: navigate
+    value: https://example.test/login
+  - Click the Sign in button
+"""
+        result = parse_file('login.yaml', yaml_source)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['detected']['format'], 'yaml')
+        xml_source = b'<suite><testcase name="Open https://example.test"/><testcase name="Click the Sign in button"/></suite>'
+        xml_result = parse_file('cases.xml', xml_source)
+        self.assertTrue(xml_result['can_save'], xml_result['diagnostics'])
+        self.assertEqual(xml_result['steps'][0]['action'], 'navigate')
+
+    def test_UT_IMP_36_har_capture_and_sniffing(self):
+        har = json.dumps({'log': {'entries': [
+            {'request': {'method': 'GET', 'url': 'https://example.test/login', 'headers': []}, 'response': {'content': {'mimeType': 'text/html'}}},
+            {'request': {'method': 'GET', 'url': 'https://example.test/api/stores', 'headers': [{'name': 'Cookie', 'value': 'secret'}, {'name': 'Accept', 'value': 'application/json'}]},
+             'response': {'content': {'mimeType': 'application/json'}}}]}}).encode()
+        result = parse_file('capture.har', har)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual(result['detected']['format'], 'har')
+        self.assertEqual([step['action'] for step in result['steps']], ['navigate', 'api_request'])
+        # An unknown extension is sniffed rather than refused.
+        sniffed = parse_file('steps.weird', TXT_STEPS)
+        self.assertTrue(sniffed['can_save'], sniffed['diagnostics'])
+        self.assertEqual(sniffed['detected']['format'], 'text')
+
+    def test_UT_IMP_37_html_page_and_legacy_suite(self):
+        page = (b'<html><body><h1>Login</h1><p>Open https://example.test</p>'
+                b'<p>Enter {{user}} in the Username field</p>'
+                b'<p>Click the Sign in button</p><p>Verify the page contains Welcome</p></body></html>')
+        result = parse_file('steps.html', page)
+        self.assertTrue(result['can_save'], result['diagnostics'])
+        self.assertEqual([step['action'] for step in result['steps']][:3], ['navigate', 'fill', 'click'])
+        suite = (b'<html><body><table><tr><th>Command</th><th>Target</th><th>Value</th></tr>'
+                 b'<tr><td>open</td><td>https://example.test</td><td></td></tr>'
+                 b'<tr><td>click</td><td>Sign in</td><td></td></tr></table></body></html>')
+        suite_result = parse_file('suite.html', suite)
+        self.assertTrue(suite_result['can_save'], suite_result['diagnostics'])
+        self.assertEqual(suite_result['steps'][0]['action'], 'navigate')
+
+    def test_UT_IMP_38_error_blocks_but_note_does_not(self):
+        result = parse_file('mixed.txt', b"""1. Open https://example.test
+2. Upload the invoice file
+3. Click the Submit button
+""")
+        severities = {d['severity'] for d in result['diagnostics']}
+        self.assertIn('error', severities)
+        self.assertFalse(result['can_save'])
+        self.assertEqual(result['steps'][0]['action'], 'navigate')
+
+
+class VariableOnboardingTests(unittest.TestCase):
+    """Literals become reusable variables; the reviewer decides (UT_IMP_39+)."""
+
+    def test_UT_IMP_39_plan_names_values_after_their_field(self):
+        from app import variables_ai
+        steps = [{'id': 'a', 'order': 1, 'action': 'fill', 'value': 'Ada.Lovelace', 'selector': {'label': 'Username'}},
+                 {'id': 'b', 'order': 2, 'action': 'fill', 'value': 'Spring2026!', 'selector': {'label': 'Password'}},
+                 {'id': 'c', 'order': 3, 'action': 'assert_contains', 'value': 'Welcome Ada.Lovelace', 'selector': {'primary': 'body'}}]
+        plan = variables_ai.plan(steps)
+        names = {item['name'] for item in plan['candidates']}
+        self.assertIn('username', names)
+        self.assertIn('password', names)
+        secret = next(item for item in plan['candidates'] if item['name'] == 'password')
+        self.assertTrue(secret['is_secret'])
+        self.assertEqual(secret['category'], 'Auth')
+        # The expectation follows the same variable rather than duplicating the literal.
+        steps_out, created, _reused = variables_ai.apply(steps, [{'name': item['name'], 'value': item['value'],
+                                                                  'is_secret': item['is_secret'], 'category': item['category']}
+                                                                 for item in plan['candidates']])
+        self.assertEqual(steps_out[0]['value'], '{{username}}')
+        self.assertEqual(steps_out[2]['value'], 'Welcome {{username}}')
+        self.assertEqual({item['name'] for item in created}, {'username', 'password'})
+
+    def test_UT_IMP_40_repeated_literal_reuses_one_variable_and_url_query(self):
+        from app import variables_ai
+        steps = [{'id': 'a', 'order': 1, 'action': 'navigate', 'value': 'https://example.test/login?storeNo=426', 'selector': {}},
+                 {'id': 'b', 'order': 2, 'action': 'fill', 'value': '426', 'selector': {'label': 'Store number'}},
+                 {'id': 'c', 'order': 3, 'action': 'fill', 'value': '426', 'selector': {'label': 'Store number'}}]
+        plan = variables_ai.plan(steps)
+        # One literal, one variable, three usages: the URL query and both fields.
+        self.assertEqual(plan['count'], 1)
+        store = next(item for item in plan['candidates'] if item['value'] == '426')
+        self.assertEqual(store['usages_count'], 3)
+        steps_out, _created, _reused = variables_ai.apply(steps, [{'name': item['name'], 'value': item['value']} for item in plan['candidates']])
+        self.assertIn('storeNo={{storeno}}', steps_out[0]['value'])
+        self.assertEqual(steps_out[1]['value'], '{{storeno}}')
+
+    def test_UT_IMP_41_invalid_names_and_placeholders_are_left_alone(self):
+        from app import variables_ai
+        steps = [{'id': 'a', 'order': 1, 'action': 'fill', 'value': '{{user}}', 'selector': {'label': 'Username'}},
+                 {'id': 'b', 'order': 2, 'action': 'press', 'value': 'Enter', 'selector': {}}]
+        self.assertEqual(variables_ai.plan(steps)['count'], 0)
+        with self.assertRaises(ValueError):
+            variables_ai.apply(steps, [{'name': 'bad name', 'value': 'Ada'}])
+
+    def test_UT_IMP_42_recording_endpoints_onboard_variables(self):
+        client = TestClient(app)
+        project = client.post('/api/projects', json={'name': 'Onboard', 'base_url': 'https://example.test'}).json()
+        recording = client.post('/api/recordings', json={'project_id': project['id'], 'name': 'Login', 'start_url': 'https://example.test'}).json()
+        with SessionLocal() as db:
+            db.add(RecordingStep(recording_id=recording['id'], order=1, action='fill', value='Ada',
+                                 label='Name', selector={'label': 'Username'}))
+            db.commit()
+        plan = client.post(f"/api/recordings/{recording['id']}/variable-plan", json={})
+        self.assertEqual(plan.status_code, 200, plan.text)
+        candidates = plan.json()['candidates']
+        self.assertEqual([item['name'] for item in candidates], ['username'])
+        applied = client.post(f"/api/recordings/{recording['id']}/variables",
+                              json={'assignments': [{'name': 'username', 'value': 'Ada'}]})
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertEqual(applied.json()['counts'], {'steps_changed': 1, 'variables_created': 1, 'variables_reused': 0})
+        with SessionLocal() as db:
+            step = db.query(RecordingStep).filter_by(recording_id=recording['id']).first()
+            self.assertEqual(step.value, '{{username}}')
+        # Applying twice is a no-op, not a duplicate variable (the recorder may retry).
+        again = client.post(f"/api/recordings/{recording['id']}/variables", json={'assignments': [{'name': 'username', 'value': 'Ada'}]})
+        self.assertEqual(again.status_code, 200, again.text)
+        self.assertEqual(again.json()['counts'], {'steps_changed': 0, 'variables_created': 0, 'variables_reused': 0})
+
+    def test_UT_IMP_43_import_variable_endpoints(self):
+        client = TestClient(app)
+        steps = [{'order': 1, 'action': 'fill', 'value': 'Ada', 'selector': {'label': 'Username'}}]
+        plan = client.post('/api/imports/variable-plan', json={'steps': steps})
+        self.assertEqual(plan.status_code, 200, plan.text)
+        self.assertEqual(plan.json()['candidates'][0]['name'], 'username')
+        # A missing project must fail before anything is written.
+        missing = client.post('/api/imports/variables', json={'project_id': '', 'steps': steps,
+                                                             'assignments': [{'name': 'username', 'value': 'Ada'}]})
+        self.assertEqual(missing.status_code, 422)
+
+    def test_UT_IMP_44_plan_catalog_is_one_cached_read(self):
+        client = TestClient(app)
+        first = client.get('/api/plans/catalog')
+        self.assertEqual(first.status_code, 200, first.text)
+        payload = first.json()
+        self.assertIn('recordings', payload)
+        self.assertIn('projects', payload)
+        self.assertIn('recording_defaults', payload)
+        cached = client.get('/api/plans/catalog').json()
+        self.assertEqual(cached['generated_at'], payload['generated_at'])
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

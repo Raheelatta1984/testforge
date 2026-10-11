@@ -54,6 +54,7 @@ _CACHE: dict[str, Any] = {
     "variables": {},  # project_id -> (mtime, ts, data)
     "materialize_mtime": 0,
     "materialize_ts": 0,
+    "plan_catalog": None,  # (timestamp, payload) for the Execution-plan tab
 }
 CACHE_TTL_PROJECTS = 10  # seconds
 CACHE_TTL_RECORDINGS = 5
@@ -1264,6 +1265,10 @@ def publish_blocked() -> bool:
 
 
 def _finish(message: str) -> bool:
+    # Every write path ends here, so this is the one place the Execution-plan
+    # catalog has to be dropped: the tab must never show a recording or a variable
+    # that was renamed a moment ago.
+    _CACHE["plan_catalog"] = None
     _write_catalog()
     try:
         published = _publish_unlocked(message)
@@ -1431,6 +1436,180 @@ def create_variable(project_id: str, name: str, value: str, *, is_secret=False, 
                 except Exception:
                     pass
             raise
+
+
+def create_variables(project_id: str, items: list[dict]) -> dict:
+    """Create several variables in one transaction, one export and one push.
+
+    Onboarding a recording offers every literal at once; creating them through
+    the single-variable endpoint would publish once per value.
+    """
+    from app.secrets_store import encrypt, validate_name, PREFIX
+    if not isinstance(items, list) or not items or len(items) > 60:
+        raise ValueError("Provide between 1 and 60 variables")
+    require_id(project_id, "project id")
+    prepared = []
+    seen = set()
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Each variable needs a name and a value")
+        name = str(item.get("name") or "").strip()
+        validate_name(name)
+        if name in seen:
+            raise ValueError(f"Variable {name} was supplied twice")
+        seen.add(name)
+        value = "" if item.get("value") is None else str(item.get("value"))
+        if len(value) > 4096:
+            raise ValueError("Input values are limited to 4096 characters")
+        if value.startswith(PREFIX):
+            raise ValueError("Cannot submit ciphertext as a new value")
+        secret = bool(item.get("is_secret"))
+        prepared.append({"name": name, "value": encrypt(value) if secret else value,
+                         "is_secret": secret,
+                         "category": "Parameter" if str(item.get("category")) == "Parameter" else
+                                     ("Auth" if str(item.get("category")) == "Auth" else "General")})
+    with LOCK:
+        if _read_project(project_id) is None:
+            raise NotFound("Project not found")
+        with SessionLocal() as db:
+            present = db.get(Project, project_id) is not None
+        if not present:
+            _materialize_unlocked()
+        created_ids = []
+        try:
+            with SessionLocal() as db:
+                if db.get(Project, project_id) is None:
+                    raise NotFound("Project not found")
+                for item in prepared:
+                    if db.query(Variable).filter_by(project_id=project_id, name=item["name"]).first():
+                        raise ValueError(f"Variable/parameter {item['name']} already exists in this project")
+                    variable = Variable(project_id=project_id, name=item["name"], value=item["value"],
+                                        is_secret=item["is_secret"], category=item["category"])
+                    db.add(variable)
+                    db.flush()
+                    created_ids.append(variable.id)
+                db.commit()
+            _write_project_files(project_id)
+            _CACHE["variables"].pop(project_id, None)
+            published = _finish(f"Save {len(prepared)} library variable(s) - Project {project_id}")
+            saved = [item for item in list_variables(project_id) if item["id"] in set(created_ids)]
+            outcome = publish_outcome(published)
+            return {"variables": [{**item, **outcome} for item in saved], "created": len(saved), **outcome}
+        except Exception:
+            if created_ids:
+                with SessionLocal() as db:
+                    for variable_id in created_ids:
+                        row = db.get(Variable, variable_id)
+                        if row is not None:
+                            db.delete(row)
+                    db.commit()
+                try:
+                    _write_project_files(project_id)
+                    _write_catalog()
+                except Exception:
+                    pass
+            raise
+
+
+def apply_variables_to_recording(recording_id: str, assignments: list[dict], *, publish=True) -> dict:
+    """Replace literals in a saved recording with `{{variables}}` and create them.
+
+    This is the second half of save-time onboarding: the recording is already
+    stored, so the rewrite is applied to the step rows, the recording is exported
+    (and pushed, per the deployment's publishing settings), and the summary says
+    exactly which steps changed.
+    """
+    from app import variables_ai
+    if not isinstance(assignments, list) or not assignments:
+        raise ValueError("Select at least one value to turn into a variable")
+    if len(assignments) > 60:
+        raise ValueError("At most 60 values can be onboarded at once")
+    require_id(recording_id, "recording id")
+    rows = None
+    with SessionLocal() as db:
+        recording = db.get(Recording, recording_id)
+        if recording is None:
+            raise NotFound("Recording not found")
+        project_id = recording.project_id
+        rows = sorted(list(recording.steps or []), key=lambda row: row.order or 0)
+    existing = list_variables(project_id)
+    steps, to_create, reused = variables_ai.apply(rows, assignments, existing)
+    created = []
+    if to_create:
+        result = create_variables(project_id, to_create)
+        created = result.get("variables") or []
+    changes = []
+    with LOCK, SessionLocal() as db:
+        recording = db.get(Recording, recording_id)
+        if recording is None:
+            raise NotFound("Recording not found")
+        by_id = {row.id: row for row in recording.steps}
+        for step in steps:
+            row = by_id.get(step.get("id"))
+            if row is None or step.get("value") == row.value:
+                continue
+            changes.append({"step_id": row.id, "order": row.order, "before": row.value, "after": step["value"]})
+            row.value = step["value"]
+        db.commit()
+    payload = export_recording(recording_id, publish=publish) or {}
+    payload.update({
+        "changed_steps": changes,
+        "created_variables": [{"id": item.get("id"), "name": item.get("name"),
+                               "category": item.get("category"), "is_secret": item.get("is_secret")}
+                              for item in created],
+        "reused_variables": reused,
+        "counts": {"steps_changed": len(changes), "variables_created": len(created),
+                   "variables_reused": len(reused)},
+    })
+    _CACHE["plan_catalog"] = None
+    return payload
+
+
+def plan_catalog() -> dict:
+    """Everything the Execution-plan tab needs, in one cached read.
+
+    Selecting a recording in a plan must not cost a round trip per recording: the
+    tab asks once for the recordings, the input names each one uses and the
+    variables of every project, then renders from that.
+    """
+    now = time.time()
+    cached = _CACHE.get("plan_catalog")
+    if cached and (now - cached[0]) < CACHE_TTL_RECORDINGS:
+        return cached[1]
+    projects = {}
+    for project in list_projects():
+        try:
+            variables = list_variables(project["id"])
+        except NotFound:
+            # A project removed while the catalog was being built is simply absent.
+            continue
+        projects[project["id"]] = {
+            "name": project.get("name") or project["id"],
+            "variables": [{"id": item.get("id"), "name": item.get("name"),
+                           "category": item.get("category"), "is_secret": bool(item.get("is_secret")),
+                           "value": "" if item.get("is_secret") else item.get("value")}
+                          for item in variables],
+        }
+    recordings = []
+    for item in list_all_recordings_fast():
+        recordings.append({
+            "id": item.get("id"), "project_id": item.get("project_id"),
+            "project_name": item.get("project_name"), "name": item.get("name"),
+            "start_url": item.get("start_url") or "", "tags": item.get("tags") or "",
+            "parent_id": item.get("parent_id"), "step_count": item.get("step_count") or 0,
+        })
+    inputs = {}
+    try:
+        with SessionLocal() as db:
+            for recording_id, defaults in db.query(Recording.id, Recording.input_defaults).all():
+                inputs[recording_id] = dict(defaults) if isinstance(defaults, dict) else {}
+    except Exception:
+        inputs = {}
+    payload = {"generated_at": now, "projects": projects, "recordings": recordings,
+               "recording_defaults": inputs,
+               "cache_seconds": CACHE_TTL_RECORDINGS}
+    _CACHE["plan_catalog"] = (now, payload)
+    return payload
 
 
 def update_variable(variable_id: str, *, name: str | None = None, value: str | None = None, is_secret=None, category=None) -> dict:

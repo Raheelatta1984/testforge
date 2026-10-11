@@ -87,7 +87,7 @@ function App({ access }) {
     setLiveWindow(next);
     localStorage.setItem("tf_live_window", next ? "1" : "0");
   };
-  const tabs = [["demo","🧪"], ["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"], ["azure","☁️"]];
+  const tabs = [["demo","🧪"], ["projects","📁"], ["variables","🔤"], ["record","⏺"], ["plan","🧭"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"], ["azure","☁️"]];
 
   return e('div', { className: "h-full flex flex-col" },
     e('header', { className: "p-4 border-b border-slate-800 flex justify-between bg-slate-950/80 backdrop-blur" },
@@ -105,6 +105,7 @@ function App({ access }) {
       tab === "projects" && e(Projects, { setActiveProject, activeProject }),
       tab === "variables" && e(Variables, { project: activeProject }),
       tab === "record" && e(Recorder, { project: activeProject }),
+      tab === "plan" && e(ExecutionPlan, { project: activeProject, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "library" && e(Library, { project: activeProject, liveWindow, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId, liveWindow, setLiveWindow: toggleLiveWindow }),
       tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts),
@@ -138,6 +139,9 @@ function Recorder({ project }) {
   const [variableName, setVariableName] = useState("");
   const [varsList, setVarsList] = useState([]);
   const [publishInfo, setPublishInfo] = useState(null);
+  const [varReview, setVarReview] = useState(null);
+  const [varNote, setVarNote] = useState("");
+  const [varBusy, setVarBusy] = useState(false);
   const recRef = useRef(null);
   const frameUrl = useRef(null);
   const initialStepsLoaded = useRef(false);
@@ -238,6 +242,36 @@ function Recorder({ project }) {
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
+  // End-of-recording onboarding (requirement: ask before the values become data).
+  // The proposal is computed server-side from the saved steps, so naming and
+  // substitution behave exactly like the imported-script flow.
+  const openVariableReview = async (id) => {
+    setVarBusy(true);
+    try {
+      const plan = await API.post("/api/recordings/" + id + "/variable-plan", {});
+      if (plan.candidates && plan.candidates.length) { setVarReview(plan); setVarNote(""); }
+      else setVarNote("Every input already uses a variable — nothing to onboard.");
+    } catch (err) { setVarNote("Variable review unavailable: " + err.message); }
+    finally { setVarBusy(false); }
+  };
+  const applyVariableReview = async () => {
+    const chosen = (varReview.candidates || []).filter(item => item.selected !== false);
+    if (!chosen.length) { setVarReview(null); setVarNote("Values kept as typed."); return; }
+    setVarBusy(true);
+    try {
+      const result = await API.post("/api/recordings/" + varReview.recording.id + "/variables", {
+        assignments: chosen.map(item => ({ name: item.name, value: item.value, is_secret: !!item.is_secret, category: item.category, create: !!item.create }))
+      });
+      const counts = result.counts || {};
+      setVarNote(`✅ ${counts.variables_created || 0} variable(s) created, ${counts.steps_changed || 0} step(s) now use {{variables}}` +
+        (counts.variables_reused ? `, ${counts.variables_reused} linked to existing variables` : "") + ".");
+      setVarReview(null);
+      API.get(`/api/projects/${project.id}/variables`).then(data => setVarsList(data.variables || [])).catch(() => {});
+    } catch (err) { setVarNote("Could not apply variables: " + err.message); }
+    finally { setVarBusy(false); }
+  };
+  const editCandidate = (item, change) => setVarReview(plan => ({ ...plan,
+    candidates: (plan.candidates || []).map(entry => entry.value === item.value ? { ...entry, ...change } : entry) }));
   const stop = async () => {
     const id = recId;
     recRef.current = null;
@@ -256,6 +290,8 @@ function Recorder({ project }) {
         : result.publish_state === "refused" ? "refused"
         : (result.retry_scheduled ? "retry" : "local"));
       setError("");
+      // The recording is safe; ask about the values that were typed into it.
+      openVariableReview(id);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -375,7 +411,29 @@ function Recorder({ project }) {
         (saveState === "published" ? "bg-emerald-950/40 border-emerald-800/40 text-emerald-200"
           : saveState === "retry" ? "bg-amber-950/40 border-amber-800/40 text-amber-200"
           : "bg-slate-950 border-slate-800 text-slate-300") },
-        (saveState === "published" ? "✅ " : saveState === "retry" ? "⏳ " : "💾 ") + saveNote)
+        (saveState === "published" ? "✅ " : saveState === "retry" ? "⏳ " : "💾 ") + saveNote),
+      varNote && e("p", { role: "status", className: "text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-300" }, varNote),
+      varBusy && e("p", { role: "status", className: "text-xs text-indigo-300" }, "Checking recorded values…"),
+      varReview && e("div", { className: "bg-amber-950/30 border border-amber-800/50 p-4 rounded-2xl space-y-3" },
+        e("p", { className: "text-sm font-bold text-amber-200" }, "Save complete — name the values you typed"),
+        e("p", { className: "text-xs text-amber-100/80" }, `${varReview.summary}. Tick what should become a reusable variable/parameter; the saved steps will carry {{name}} instead of the literal value.`),
+        (varReview.candidates || []).map((item, i) => e("div", { key: i, className: "bg-slate-950/70 p-2 rounded-xl space-y-1" },
+          e("label", { className: "flex flex-wrap items-center gap-2 text-xs" },
+            e("input", { type: "checkbox", checked: item.selected !== false, onChange: evt => editCandidate(item, { selected: evt.target.checked }) }),
+            e("span", { className: "text-slate-400" }, `${item.usages_count}×`),
+            e("input", { "aria-label": "Variable name", value: item.name, onChange: evt => editCandidate(item, { name: evt.target.value }), className: "bg-slate-800 p-1 rounded w-40" }),
+            e("span", { className: "text-slate-300 break-all" }, `= ${item.is_secret ? "••••••" : item.value}`),
+            e("label", { className: "flex items-center gap-1 text-slate-400" },
+              e("input", { type: "checkbox", checked: !!item.is_secret, onChange: evt => editCandidate(item, { is_secret: evt.target.checked }) }), "secret"),
+            e("select", { "aria-label": "Variable category", value: item.category, onChange: evt => editCandidate(item, { category: evt.target.value }), className: "bg-slate-800 rounded" },
+              ["General", "Parameter", "Auth"].map(name => e("option", { key: name, value: name }, name))),
+            item.reuse && !item.create && e("label", { className: "flex items-center gap-1 text-emerald-300" },
+              e("input", { type: "checkbox", checked: !!item.create, onChange: evt => editCandidate(item, { create: evt.target.checked }) }), "create separate"),
+            item.reuse && e("span", { className: "text-emerald-300" }, "already a variable")),
+          (item.preview || []).map((row, j) => e("p", { key: j, className: "text-[10px] text-slate-500 break-all" }, `#${row.order} ${row.before} → ${row.after}`)))),
+        e("div", { className: "flex gap-2" },
+          e("button", { onClick: applyVariableReview, disabled: varBusy, className: "bg-emerald-700 px-4 py-2 rounded text-xs disabled:opacity-50" }, "APPLY TO RECORDING"),
+          e("button", { onClick: () => { setVarReview(null); setVarNote("Values kept as typed."); }, disabled: varBusy, className: "bg-slate-700 px-4 py-2 rounded text-xs" }, "KEEP LITERALS")))
     )
   );
 }

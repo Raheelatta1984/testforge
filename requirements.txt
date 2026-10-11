@@ -22,6 +22,11 @@ Pillow==11.0.0
 
 # Harden XML parsing in user-uploaded Excel workbooks.
 defusedxml==0.7.1
+# Extra upload formats: legacy .xls sheets, Word .docx text, PDF text layers and
+# YAML step lists. Small, pure-python, and unused unless such a file is uploaded.
+xlrd==2.0.1
+PyYAML==6.0.2
+pypdf==5.1.0
 # Authenticated encryption and local PDF generation; no hosted services.
 cryptography==46.0.3
 reportlab==4.4.4

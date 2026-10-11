@@ -204,3 +204,96 @@ function ScenarioPlans({project}) {
       ['queued','running'].includes(batch.status)?e('button',{className:'key-btn',onClick:()=>work(()=>API.post(`/api/runs/batch/${batch.id}/cancel`,{}))},'CANCEL EXECUTION'):e(ReportLinks,{kind:'batch',id:batch.id})),
     notice && e('p',{role:'status',className:'text-xs text-amber-300'},notice));
 }
+
+/* The Execution-plan tab sits next to AI recording: pick recordings in order and
+   the inputs they need appear from one cached catalog read, not one fetch per
+   recording. Linking a recording never touches the network. */
+function ExecutionPlan({project, onRun}) {
+  const [catalog,setCatalog]=useState(null), [catalogMs,setCatalogMs]=useState(null), [error,setError]=useState('');
+  const [plan,setPlan]=useState([]), [activeId,setActiveId]=useState(''), [search,setSearch]=useState('');
+  const [values,setValues]=useState({}), [notice,setNotice]=useState(''), [busy,setBusy]=useState(false), [batch,setBatch]=useState(null);
+  const loadCatalog=async()=>{
+    const started=performance.now();
+    try { const data=await API.get('/api/plans/catalog'); setCatalog(data); setCatalogMs(Math.round(performance.now()-started)); setError(''); }
+    catch(err) { setError(err.message); }
+  };
+  useEffect(()=>{ setPlan([]); setActiveId(''); setValues({}); setBatch(null); setNotice(''); loadCatalog(); },[project && project.id]);
+  useEffect(()=>{ if(!batch || !['queued','running'].includes(batch.status)) return; const timer=setTimeout(()=>API.get(`/api/runs/batch/${batch.id}`).then(setBatch).catch(err=>setError(err.message)),1500); return ()=>clearTimeout(timer); },[batch]);
+  const work=async(fn)=>{ setBusy(true); try { await fn(); } catch(err) { setError(err.message); } finally { setBusy(false); } };
+  if(!project) return e('section',{className:'text-center text-slate-500 font-bold py-20'},'SELECT A PROJECT, THEN BUILD AN EXECUTION PLAN');
+
+  const recordings=(catalog && catalog.recordings) || [];
+  const needle=search.trim().toLowerCase();
+  const matches=needle ? recordings.filter(r=>`${r.project_name||''} ${r.name||''} ${r.tags||''}`.toLowerCase().includes(needle)) : recordings;
+  const active=recordings.find(r=>r.id===activeId) || null;
+  const defaults=(catalog && catalog.recording_defaults && activeId && catalog.recording_defaults[activeId]) || {};
+  // Project parameters plus whatever this recording needs, resolved locally.
+  const projectVars=((catalog && catalog.projects && project && catalog.projects[project.id]) || {}).variables || [];
+  const activeProjectId=active && active.project_id;
+  // The recording's own project first: those are the variables it will resolve.
+  const activeProjectVars=((catalog && catalog.projects && activeProjectId && catalog.projects[activeProjectId]) || {}).variables || [];
+  const definitions=[...activeProjectVars, ...projectVars];
+  const seen=new Set(), uniqueDefs=definitions.filter(v=>{ if(seen.has(v.name)) return false; seen.add(v.name); return true; });
+  const inputsReady=Object.keys(values).length>0;
+  const link=(recording)=>{
+    if(!recording) return;
+    setPlan(prev=>prev.some(entry=>entry.recording_id===recording.id) ? prev : [...prev,{recording_id:recording.id,name:recording.name,project_name:recording.project_name}]);
+    setActiveId(recording.id); setValues({}); setBatch(null);
+    setNotice(`Linked ${recording.name}. Inputs appeared instantly from the cached catalog — no extra request.`);
+  };
+  const move=(index,to)=>{ const next=[...plan]; const [entry]=next.splice(index,1); next.splice(to,0,entry); setPlan(next); };
+  const activeDefaults=defaults;
+
+  return e('section',{className:'space-y-4'},
+    e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-2'},
+      e('h2',{className:'font-bold text-indigo-300'},'Execution plan'),
+      e('p',{className:'text-xs text-slate-400'},'Build an ordered run: pick repository recordings in the order they must execute, review the variables/parameters each one needs, then queue one batch. Login and logout share the browser session; a failed recording stops the plan. Selecting a recording costs no request — the whole catalog is one cached read.'),
+      e('div',{className:'flex flex-wrap items-center gap-2 text-xs'},
+        e('input',{className:'flex-1 min-w-[12rem] bg-slate-800 p-2 rounded','aria-label':'Search recordings',placeholder:'Search recordings by name, project or tag…',value:search,onChange:ev=>setSearch(ev.target.value)}),
+        e('button',{className:'key-btn',onClick:loadCatalog},'REFRESH CATALOG'),
+        catalog && e('span',{className:'text-slate-500'},`${recordings.length} recordings · catalog in ${catalogMs} ms · cached ${catalog.cache_seconds}s on the server`)),
+      error && e('p',{role:'alert',className:'text-xs text-red-300'},error))),
+    e('div',{className:'grid gap-4 md:grid-cols-2'},
+      e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2'},
+        e('h3',{className:'text-sm font-bold text-indigo-300'},'1 · Link a recording'),
+        e('div',{className:'max-h-72 overflow-auto space-y-1'},
+          !catalog && e('p',{className:'text-xs text-slate-400'},'Loading the catalog…'),
+          catalog && matches.length===0 && e('p',{className:'text-xs text-slate-400'},'No recording matches that search.'),
+          matches.slice(0,200).map(recording=>e('div',{key:recording.id,className:'flex items-center gap-2 bg-slate-950 p-2 rounded text-xs'},
+            e('button',{className:'flex-1 text-left',onClick:()=>link(recording),'aria-label':`Link ${recording.name}`},
+              e('span',{className:'font-bold'},recording.name),
+              e('span',{className:'block text-slate-500'},`${recording.project_name||recording.project_id} · ${recording.step_count} steps${plan.some(entry=>entry.recording_id===recording.id)?' · linked':''}`)),
+            e('button',{className:'key-btn',onClick:()=>setActiveId(recording.id)},'INPUTS')))),
+      e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2'},
+        e('h3',{className:'text-sm font-bold text-indigo-300'},'2 · Ordered plan'),
+        plan.length===0 && e('p',{className:'text-xs text-slate-400'},'Nothing linked yet. Pick a recording on the left.'),
+        e('ol',{className:'space-y-1'},plan.map((entry,index)=>e('li',{key:entry.recording_id,className:'flex items-center gap-2 bg-slate-950 p-2 rounded text-xs'},
+          e('button',{className:'flex-1 text-left',onClick:()=>{setActiveId(entry.recording_id);setValues({});}},
+            e('span',{className:activeId===entry.recording_id?'text-emerald-300':'text-slate-200'},`${index+1}. ${entry.name}`),
+            e('span',{className:'block text-slate-500'},entry.project_name||'')),
+          e('button',{className:'key-btn',disabled:index===0,onClick:()=>move(index,index-1)},'UP'),
+          e('button',{className:'key-btn',disabled:index===plan.length-1,onClick:()=>move(index,index+1)},'DOWN'),
+          e('button',{className:'key-btn',onClick:()=>setPlan(plan.filter((_,i)=>i!==index))},'REMOVE'))))),
+        e('div',{className:'flex flex-wrap gap-2'},
+          e('button',{className:'key-btn',disabled:busy||!plan.length,onClick:()=>work(async()=>{
+            const result=await API.post('/api/runs/batch',{recording_ids:plan.map(entry=>entry.recording_id),name:'Execution plan',share_session:true,screenshots:'all',display_window:false,retry_transient:false});
+            setBatch({id:result.batch_id,status:result.status}); setNotice('Ordered plan queued.');})},'RUN ORDERED PLAN'),
+          e('button',{className:'key-btn',onClick:()=>{setPlan([]);setActiveId('');setValues({});setBatch(null);}},'CLEAR PLAN'))),
+    active && e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-3'},
+      e('h3',{className:'text-sm font-bold text-indigo-300'},`3 · Variables & parameters · ${active.name}`),
+      e('p',{className:'text-xs text-slate-400'},`Loaded from the cached catalog in ${catalogMs} ms. Values here are the recording's saved defaults; edits can be saved back to this recording, and {{placeholders}} stay variables when the plan runs.`),
+      e(InputFields,{definitions:uniqueDefs,defaults:activeDefaults,values,onChange:setValues}),
+      e('div',{className:'flex flex-wrap gap-2'},
+        e('button',{className:'key-btn',disabled:busy,onClick:()=>work(async()=>{
+          const result=await API.put(`/api/recordings/${active.id}/inputs`,{variables:{...activeDefaults,...values}});
+          setNotice(result.publish_message||'Recording defaults saved for this plan.'); setValues({}); loadCatalog();})},'SAVE AS RECORDING DEFAULTS'),
+        e('button',{className:'key-btn',disabled:busy,onClick:()=>work(async()=>{
+          const result=await API.post(`/api/recordings/${active.id}/run`,{});
+          if(result && result.run_id && onRun) onRun(result.run_id); else setNotice('Run started — open the Runs tab.');})},'RUN THIS RECORDING'),
+        e('button',{className:'key-btn',onClick:()=>{setActiveId('');setValues({});}},'CLOSE INPUTS'))),
+    batch && e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2'},
+      e('p',{role:'status',className:'text-xs'},`Plan execution: ${batch.status} · ${batch.progress_pct||0}% · ${batch.passed||0} passed / ${batch.total||0}`),
+      ['queued','running'].includes(batch.status) ? e('button',{className:'key-btn',onClick:()=>work(()=>API.post(`/api/runs/batch/${batch.id}/cancel`,{}))},'CANCEL EXECUTION') : e(ReportLinks,{kind:'batch',id:batch.id})),
+    notice && e('p',{role:'status',className:'text-xs text-amber-300'},notice),
+    inputsReady && e('p',{className:'text-xs text-emerald-300'},'Edits are kept in this tab until you save them as the recording defaults.'));
+}

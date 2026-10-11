@@ -183,6 +183,60 @@ def save_inputs(recording_id, body):
         return {'defaults': public_map(recording.input_defaults), 'publish_message': result.get('publish_message')}
 
 
+@router.post('/api/recordings/{recording_id}/variable-plan')
+def recording_variable_plan(recording_id: str):
+    """Propose the variables a finished recording should carry.
+
+    Called by the recorder right after SAVE: every literal that was typed is
+    listed with the variable name it would get, grouped by value, with a preview
+    of the step it changes. Nothing is written until the user confirms.
+    """
+    from app import variables_ai
+    from app.db import Recording, RecordingStep, SessionLocal
+    with SessionLocal() as db:
+        # Steps are authoritative in the database right after a recording: the
+        # file snapshot can lag behind the final debounced export.
+        row = db.get(Recording, recording_id)
+        if row is None:
+            library_store.materialize_recording(recording_id)
+            row = db.get(Recording, recording_id)
+        if row is None:
+            raise HTTPException(404, 'Recording not found')
+        project_id = row.project_id
+        name = row.name
+        steps = sorted(db.query(RecordingStep).filter_by(recording_id=recording_id).all(),
+                       key=lambda step: step.order or 0)
+        if not steps:
+            steps = sorted(list(row.steps or []), key=lambda step: step.order or 0)
+    existing = library_store.list_variables(project_id) if project_id else []
+    result = variables_ai.plan(steps, existing)
+    result['recording'] = {'id': recording_id, 'name': name, 'step_count': len(steps)}
+    result['existing'] = [{'id': item.get('id'), 'name': item.get('name'),
+                           'category': item.get('category'), 'is_secret': bool(item.get('is_secret'))}
+                          for item in existing]
+    return result
+
+
+@router.post('/api/recordings/{recording_id}/variables')
+def adopt_recording_variables(recording_id: str, payload: dict):
+    """End-of-recording onboarding: turn typed literals into reusable variables.
+
+    The recorder sends what was typed (its proposal); the server reads the stored
+    steps and rewrites the ones that really hold those literals. Applying twice is
+    safe -- a step that already carries ``{{name}}`` is left alone.
+    """
+    try:
+        result = library_store.apply_variables_to_recording(recording_id, payload.get('assignments'))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except library_store.NotFound as exc:
+        raise HTTPException(404, str(exc)) from exc
+    if result.get('retry_scheduled'):
+        from app.main import schedule_publish_retry
+        schedule_publish_retry()
+    return result
+
+
 @router.put('/api/recordings/{recording_id}/inputs')
 async def update_inputs(recording_id: str, request: Request):
     return await _exclusive(save_inputs, recording_id, await body_json(request))

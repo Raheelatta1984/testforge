@@ -247,6 +247,69 @@ async def edit_metadata(rid: str, request: Request):
     return result
 
 
+def variable_plan_for_import(body):
+    """Which literals in a preview would become variables, and what they become."""
+    from app import variables_ai
+    project_id = body.get('project_id')
+    steps = body.get('steps')
+    if not isinstance(steps, list):
+        raise ValueError('Provide the imported steps to review')
+    existing = library_store.list_variables(project_id) if isinstance(project_id, str) and project_id else []
+    plan = variables_ai.plan(steps, existing, body.get('variables') if isinstance(body.get('variables'), dict) else None)
+    return {**plan, 'existing': [{'id': item.get('id'), 'name': item.get('name'),
+                                  'category': item.get('category'), 'is_secret': bool(item.get('is_secret'))}
+                                 for item in existing]}
+
+
+@router.post('/api/imports/variable-plan')
+async def imports_variable_plan(request: Request):
+    """Onboarding preview for an uploaded script: inputs -> variables."""
+    body = await body_json(request)
+    try:
+        return variable_plan_for_import(body)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def adopt_import_variables(body):
+    """Create the chosen variables and return the substituted steps (nothing saved)."""
+    from app import variables_ai
+    project_id = body.get('project_id')
+    steps = body.get('steps')
+    assignments = body.get('assignments')
+    if not isinstance(project_id, str) or not isinstance(steps, list):
+        raise ValueError('Provide the project and the imported steps')
+    if not isinstance(assignments, list) or not assignments:
+        raise ValueError('Select at least one value to turn into a variable')
+    with library_store.LOCK:
+        existing = library_store.list_variables(project_id)
+        substituted, to_create, reused = variables_ai.apply(steps, assignments, existing)
+        created = []
+        if to_create:
+            created = library_store.create_variables(project_id, to_create).get('variables') or []
+    return {'steps': substituted, 'created_variables': created, 'reused_variables': reused,
+            'counts': {'variables_created': len(created), 'variables_reused': len(reused)}}
+
+
+@router.post('/api/imports/variables')
+async def imports_variables(request: Request):
+    """Create variables for an uploaded script and hand back the rewritten steps."""
+    result = await _exclusive(adopt_import_variables, await body_json(request))
+    if result.get('retry_scheduled'):
+        from app.main import schedule_publish_retry
+        schedule_publish_retry()
+    return result
+
+
+@router.get('/api/plans/catalog')
+def plans_catalog():
+    """One fast read for the Execution-plan tab: recordings, inputs and variables."""
+    try:
+        return library_store.plan_catalog()
+    except library_store.LibraryError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.get('/api/imports/packs')
 def packs():
     from app.domain_packs import PACKS

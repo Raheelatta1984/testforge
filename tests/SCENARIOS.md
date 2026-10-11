@@ -232,6 +232,27 @@ These unit/API cases live in `tests/test_imports.py` and are included by the har
 | UT-IMP-21 | Action schema versions fail closed; JS option text is not rewritten accidentally. |
 | UT-IMP-22 | Idle websocket sender is cancelled when the client disconnects. |
 | UT-IMP-23 | Subscriber count/event queues are bounded and retain the final result. |
+| UT-IMP-24 | Plain-text step list imports as canonical steps; `{{placeholders}}` are preserved. |
+| UT-IMP-25 | Markdown/pipe table rows import in sheet order with their expected results. |
+| UT-IMP-26 | Market headers (Test Case/Step/Action) import; metadata columns become non-blocking notes. |
+| UT-IMP-27 | Two test cases in one sheet are refused rather than silently merged. |
+| UT-IMP-28 | Pipe/semicolon delimited scripts (`.psv`) import without a CSV header guess. |
+| UT-IMP-29 | Selenium IDE `.side` imports; a fixed `pause` is refused like `Thread.sleep`. |
+| UT-IMP-30 | Postman v2 collection imports as an `api_request` with its status assertion. |
+| UT-IMP-31 | Robot Framework suite imports; `*** Variables ***` become variable suggestions. |
+| UT-IMP-32 | A Cypress spec is read by the Cypress grammar, not reported as Playwright. |
+| UT-IMP-33 | Java/C# Selenium subsets import; `Thread.sleep` blocks the save with a fix. |
+| UT-IMP-34 | Word `.docx` tables and paragraphs import; a macro-enabled file is rejected. |
+| UT-IMP-35 | YAML and XML/test-case-name sources import as canonical steps. |
+| UT-IMP-36 | HAR captures become navigate + API steps with Cookie headers dropped; unknown extensions are sniffed. |
+| UT-IMP-37 | HTML pages and legacy Selenium HTML suites import; page headings are notes, not errors. |
+| UT-IMP-38 | An unsupported line is an error that blocks saving; a note never blocks it. |
+| UT-IMP-39 | Typed literals are named after their field, secrets marked, and expectations reuse the variable. |
+| UT-IMP-40 | One repeated literal becomes one variable with every usage rewritten (URL query included). |
+| UT-IMP-41 | Values already using `{{variables}}`, keys and invalid names are left alone. |
+| UT-IMP-42 | `variable-plan`/`variables` on a recording rewrite stored steps and are idempotent on retry. |
+| UT-IMP-43 | Import `variable-plan`/`variables` endpoints propose and create variables without saving. |
+| UT-IMP-44 | `/api/plans/catalog` returns recordings, inputs and variables in one cached read. |
 
 Opt-in **real Chromium** checks in `tests/test_browser_features.py` use a local fixture
 HTTP server. Set `TF_TEST_BROWSER=1`; the export parity case also needs
