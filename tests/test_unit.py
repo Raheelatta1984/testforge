@@ -1480,6 +1480,75 @@ class SchemaDriftTests(unittest.TestCase):
             })
             self.assertEqual(accepted.status_code, 201)
 
+    def test_UT_DB_07_a_step_is_kept_even_when_the_column_cannot_be_widened(self):
+        """A table the service may not ALTER still gets the action, not an error."""
+        from sqlalchemy.exc import ProgrammingError
+        from app import library_store, recorder
+        from app.db import LABEL_LIMIT, RecordingStep, SessionLocal
+
+        url = ("https://login.microsoftonline.com/9f/oauth2/v2.0/authorize?client_id=00000007"
+               "&redirect_uri=" + "https%3A%2F%2Fharrisfarm-uat.sandbox.operations.dynamics.com%2F" * 9
+               + "&state=abc")
+        project = library_store.create_project("Unowned table", "")
+        rec = library_store.create_recording(project["id"], "narrow", "/demo.html")
+        session = recorder.RecorderSession(rec["id"], "", 0)
+        real_session = recorder.SessionLocal
+        original_repair = recorder.repair_schema
+        attempts, repairs = [], []
+
+        class NarrowSession:
+            """The real session, plus the `varchar(300)` column nobody widened."""
+
+            def __init__(self):
+                self._db = real_session()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return self._db.__exit__(*exc)
+
+            def add(self, row):
+                self.row = row
+                self._db.add(row)
+
+            def commit(self):
+                if len(self.row.label or "") > 300:
+                    self._db.rollback()
+                    raise ProgrammingError(
+                        "INSERT INTO recording_steps (recording_id, \"order\", action, label) VALUES (...)",
+                        {},
+                        Exception("value too long for type character varying(300)"),
+                    )
+                self._db.commit()
+
+        def narrow_session():
+            attempts.append(1)
+            return NarrowSession()
+
+        async def exercise():
+            step = await session._record("navigate", value=url, label=f"Open {url}", force_new=True)
+            await session.stop()
+            return step
+
+        try:
+            recorder.SessionLocal = narrow_session
+            recorder.repair_schema = lambda: repairs.append(True) or True
+            step = asyncio.run(exercise())
+        finally:
+            recorder.SessionLocal = real_session
+            recorder.repair_schema = original_repair
+
+        self.assertEqual(len(attempts), 3, "insert, repaired insert, shortened label")
+        self.assertTrue(repairs, "the repair is still attempted first")
+        self.assertEqual(step["value"], url, "the URL the replay needs survives")
+        self.assertLessEqual(len(step["label"]), recorder.FALLBACK_LABEL_LIMIT)
+        self.assertLess(recorder.FALLBACK_LABEL_LIMIT, LABEL_LIMIT)
+        with SessionLocal() as db:
+            rows = db.query(RecordingStep).filter_by(recording_id=rec["id"]).all()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].value, url)
+
 
 class PreviewCostTests(unittest.TestCase):
     def test_UT_RUN_03_no_frame_is_rendered_without_a_viewer(self):

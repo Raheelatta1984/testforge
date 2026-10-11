@@ -115,6 +115,18 @@ MERGE_REPEAT_STEPS = os.environ.get("TF_MERGE_REPEAT_STEPS", "1").strip().lower(
     "1", "true", "yes", "on",
 }
 
+# A database the service cannot ALTER (someone else owns the table) still must not
+# lose a step. A label a narrow column refuses is retried at a width every
+# revision of this schema has accepted -- 300 is the oldest width we know of, so
+# 200 leaves room for the " ×N" marker a later compression adds.
+FALLBACK_LABEL_LIMIT = 200
+
+
+def _too_long_for_column(exc) -> bool:
+    """True when the database refused a value for exceeding its column width."""
+    message = str(getattr(exc, "orig", None) or exc)
+    return "too long for type character" in message or "StringDataRightTruncation" in message
+
 # Upper bound on a merged repeat count, matching the executor's replay cap.
 MAX_REPEAT = 100
 
@@ -427,8 +439,20 @@ class RecorderSession:
             try:
                 return self._insert_step(action, value, label, selector)
             except SQLAlchemyError as retry_exc:
-                logger.exception("RECORD FAILED %s %s", self.recording_id, retry_exc)
-                raise RuntimeError(f"Failed to save step: {retry_exc}") from retry_exc
+                if not _too_long_for_column(retry_exc):
+                    logger.exception("RECORD FAILED %s %s", self.recording_id, retry_exc)
+                    raise RuntimeError(f"Failed to save step: {retry_exc}") from retry_exc
+                # The repair could not widen the column -- the service may not own
+                # the table. The action matters more than its label: keep the step
+                # with a label that fits the narrowest schema, and leave the URL
+                # the replay needs untouched in `value`.
+                logger.warning("RECORD SHORTENED LABEL %s %s", self.recording_id, retry_exc)
+                try:
+                    return self._insert_step(action, value,
+                                             fit_text(label, FALLBACK_LABEL_LIMIT), selector)
+                except SQLAlchemyError as final_exc:
+                    logger.exception("RECORD FAILED %s %s", self.recording_id, final_exc)
+                    raise RuntimeError(f"Failed to save step: {final_exc}") from final_exc
 
     async def _record(self, action, value=None, label=None, selector=None, force_new=False):
         """Persist the action, folding it into the previous row when it repeats it.
