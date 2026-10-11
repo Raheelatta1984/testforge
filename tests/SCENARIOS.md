@@ -146,6 +146,7 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-BATCH-09 | One batch at a time | The batch budget hands out one permit and refuses the second, then recovers both counters on release. |
 | UT-BATCH-10 | Batch holds the browser slot | While a batch replays, the shared browser budget reports exactly one active slot, so a recording session cannot open a second Chromium; the slot is released when the batch ends. |
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
+| UT-IMG-01 | COPY survives .dockerignore | Every local `COPY` source in the Dockerfile (app, library, logs, docs, requirements.txt) is present in the build context. A `docs` entry in `.dockerignore` once broke every deploy with `failed to compute cache key ... "/docs": not found` while the Azure tab needed the guide inside the image. |
 
 Publishing (`UT-PUB-*`) covers the four ways a save can end: published, saved locally with a retry that really is scheduled, saved locally with publishing disabled and no retry promised, and *refused* — GitHub answered 401/403, so no retry is scheduled and the message names the fix. `UT-PUB-09` keeps a rate-limit 403 out of that last bucket, because it is the same status and a very different outcome. The API publisher is exercised against an in-memory fake transport, so no test touches GitHub.
 
