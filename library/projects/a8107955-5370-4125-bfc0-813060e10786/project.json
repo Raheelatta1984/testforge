@@ -1,6 +1,8 @@
 {
   "base_url": "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
   "created_at": "2026-10-11T14:47:07Z",
+  "entity_id": "harris-farm-markets",
+  "entity_name": "Harris Farm Markets",
   "id": "a8107955-5370-4125-bfc0-813060e10786",
   "industry_type": "Generic",
   "name": "D365_UAT_Store_Replen"

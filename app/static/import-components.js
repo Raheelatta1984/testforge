@@ -10,32 +10,6 @@ function ActionComposer({ onSave, label = 'ADD STEP' }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => { API.get('/api/imports/formats').then(d => setActions(d.actions)).catch(err => setError(err.message)); }, []);
-  const reviewVariables = async () => {
-    setBusy(true); setError(''); const version=generation.current;
-    try {
-      const result=await API.post('/api/imports/variable-plan',{project_id:project.id,steps:preview.steps});
-      if(version!==generation.current) return;
-      setVariablePlan(result); setExistingVars(result.existing || []);
-      if(!result.count) setNotice('No literal input values found — every value already uses a variable.');
-    } catch(err){if(version===generation.current)setError(err.message);}
-    finally {setBusy(false);}
-  };
-  const adoptVariables = async () => {
-    if(!variablePlan) return;
-    setBusy(true); setError(''); const version=generation.current;
-    try {
-      const chosen=(variablePlan.candidates||[]).filter(item=>item.selected!==false);
-      if(!chosen.length) throw new Error('Keep at least one value, or cancel the review.');
-      const result=await API.post('/api/imports/variables',{project_id:project.id,steps:preview.steps,
-        assignments:chosen.map(item=>({name:item.name,value:item.value,is_secret:!!item.is_secret,category:item.category,create:!!item.create}))});
-      if(version!==generation.current) return;
-      setPreview({...preview,steps:result.steps}); setAdopted(result.created_variables || []);
-      setVariablePlan(null); setDraft(null); setSaved(null);
-      setNotice(`${result.counts.variables_created} variable(s) created, ${result.counts.variables_reused} reused. Steps now reference the variables — test before publishing.`);
-    } catch(err){if(version===generation.current)setError(err.message);}
-    finally {setBusy(false);}
-  };
-  const edits=(item,change)=>setVariablePlan(plan=>({...plan,candidates:(plan.candidates||[]).map(entry=>entry.value===item.value?{...entry,...change}:entry)}));
   const save = async () => {
     setBusy(true); setError('');
     try {
@@ -81,8 +55,41 @@ function ImportScripts({ project, onSaved, onRun }) {
   const [draft,setDraft] = useState(null);
   const [planOptions,setPlanOptions] = useState('{}');
   const [packs,setPacks]=useState([]);
+  // Input-review state. These declarations (and the three helpers below) belong
+  // to this component: without them every render of the Library tab threw
+  // `setVariablePlan is not defined` and the tab rendered nothing at all.
+  const [variablePlan,setVariablePlan] = useState(null);
+  const [adopted,setAdopted] = useState([]);
+  const [existingVars,setExistingVars] = useState([]);
   useEffect(()=>{API.get('/api/imports/packs').then(setPacks).catch(()=>{});},[]);
   const generation = useRef(0);
+  const reviewVariables = async () => {
+    if(!preview?.steps?.length) return;
+    setBusy(true); setError(''); const version=generation.current;
+    try {
+      const result=await API.post('/api/imports/variable-plan',{project_id:project.id,steps:preview.steps});
+      if(version!==generation.current) return;
+      setVariablePlan(result); setExistingVars(result.existing || []);
+      if(!result.count) setNotice('No literal input values found — every value already uses a variable.');
+    } catch(err){if(version===generation.current)setError(err.message);}
+    finally {setBusy(false);}
+  };
+  const adoptVariables = async () => {
+    if(!variablePlan) return;
+    setBusy(true); setError(''); const version=generation.current;
+    try {
+      const chosen=(variablePlan.candidates||[]).filter(item=>item.selected!==false);
+      if(!chosen.length) throw new Error('Keep at least one value, or cancel the review.');
+      const result=await API.post('/api/imports/variables',{project_id:project.id,steps:preview.steps,
+        assignments:chosen.map(item=>({name:item.name,value:item.value,is_secret:!!item.is_secret,category:item.category,create:!!item.create}))});
+      if(version!==generation.current) return;
+      setPreview({...preview,steps:result.steps}); setAdopted(result.created_variables || []);
+      setVariablePlan(null); setDraft(null); setSaved(null);
+      setNotice(`${result.counts.variables_created} variable(s) created, ${result.counts.variables_reused} reused. Steps now reference the variables — test before publishing.`);
+    } catch(err){if(version===generation.current)setError(err.message);}
+    finally {setBusy(false);}
+  };
+  const edits=(item,change)=>setVariablePlan(plan=>({...plan,candidates:(plan.candidates||[]).map(entry=>entry.value===item.value?{...entry,...change}:entry)}));
   useEffect(()=>{
     if(!draft || !['queued','running'].includes(draft.status)) return;
     let disposed=false, timer;
@@ -238,4 +245,187 @@ function RecordingMetadata({ recording, recordings, onSaved }) {
       e('option',{value:''},'No parent'),recordings.filter(r=>r.id!==recording.id).map(r=>e('option',{key:r.id,value:r.id},r.name)))),
     e('button',{onClick:save,disabled:busy,className:'bg-indigo-600 p-2 rounded text-xs'},busy?'SAVING…':'SAVE NAME / TAGS / GROUP'),
     error && e('p',{role:'status',className:'text-xs text-amber-300'},error));
+}
+
+/* --- Previous recordings: tree view, rescue and reuse ---------------------
+   The Record tab lists every recording that already exists, grouped by the
+   project it belongs to and nested by parent/child, so a session that was never
+   saved (or a recording that fell out of the catalog) can be found, rescued and
+   reused instead of being recorded again by hand. */
+function recordingGroups(recordings, activeProjectId) {
+  const groups = new Map();
+  for (const row of recordings || []) {
+    const key = row.project_id || 'unknown';
+    if (!groups.has(key)) groups.set(key, {
+      id: key,
+      name: row.project_name || key,
+      rows: [],
+      active: key === activeProjectId,
+    });
+    groups.get(key).rows.push(row);
+  }
+  const list = [...groups.values()];
+  for (const group of list) {
+    group.rows.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')));
+    group.roots = buildRecordingTree(group.rows);
+  }
+  // Active project first, then alphabetical: the one being recorded is the one
+  // the operator is looking for.
+  list.sort((a, b) => (b.active ? 1 : 0) - (a.active ? 1 : 0) || a.name.localeCompare(b.name));
+  return list;
+}
+
+function buildRecordingTree(rows) {
+  const nodes = new Map(rows.map(row => [row.id, { ...row, children: [] }]));
+  const roots = [];
+  for (const node of nodes.values()) {
+    const parent = node.parent_id ? nodes.get(node.parent_id) : null;
+    if (parent && parent !== node) parent.children.push(node);
+    else roots.push(node);
+  }
+  return roots;
+}
+
+function RecordingTreeRow({ node, depth, onResume, onRun, busyId, onOpen }) {
+  const [open, setOpen] = useState(depth < 1);
+  const children = node.children || [];
+  return e('div', { className: depth ? 'border-l border-slate-800 ml-2 pl-2' : '' },
+    e('div', { className: 'flex items-center gap-2 py-1' },
+      children.length
+        ? e('button', { type: 'button', className: 'key-btn w-6 shrink-0', 'aria-expanded': open,
+            'aria-label': (open ? 'Collapse ' : 'Expand ') + (node.name || node.id),
+            onClick: () => setOpen(!open) }, open ? '▾' : '▸')
+        : e('span', { className: 'w-6 shrink-0 text-center text-slate-700' }, '•'),
+      e('div', { className: 'min-w-0 flex-1' },
+        e('div', { className: 'text-xs font-bold text-slate-200 truncate' }, node.name || node.id,
+          children.length ? e('span', { className: 'text-[9px] text-slate-500 font-normal' }, ` +${children.length}`) : null),
+        e('div', { className: 'text-[9px] text-slate-500 truncate' },
+          `${node.step_count || 0} step(s)` +
+          (node.tags ? ` · ${node.tags}` : '') +
+          (node.created_at ? ` · ${String(node.created_at).slice(0, 16).replace('T', ' ')}` : '')),
+        node.unreadable ? e('div', { className: 'text-[9px] text-amber-400' }, 'folder has no readable recording.json') : null),
+      e('div', { className: 'flex gap-1 shrink-0' },
+        onOpen && e('button', { type: 'button', className: 'key-btn', onClick: () => onOpen(node) }, 'OPEN'),
+        onResume && !node.unreadable && e('button', { type: 'button', disabled: busyId === node.id,
+          className: 'key-btn ' + (children.length ? '' : 'bg-indigo-900'),
+          title: 'Open this recording in the remote browser and append new steps to it',
+          onClick: () => onResume(node) }, busyId === node.id ? '…' : 'RESUME'),
+        onRun && !node.unreadable && e('button', { type: 'button', disabled: busyId === node.id,
+          className: 'key-btn', title: 'Execute this recording in a fresh browser',
+          onClick: () => onRun(node) }, 'RUN'))),
+    open && children.map(child => e(RecordingTreeRow, {
+      key: child.id, node: child, depth: depth + 1, onResume, onRun, busyId, onOpen,
+    })));
+}
+
+function PreviousRecordings({ project, recordings, onResume, onRun, onOpen, busyId, onRescued }) {
+  const [openGroups, setOpenGroups] = useState({});
+  const [filter, setFilter] = useState('');
+  const [rescue, setRescue] = useState(null);
+  const [rescueBusy, setRescueBusy] = useState(false);
+  const [rescueNote, setRescueNote] = useState('');
+  const [show, setShow] = useState(true);
+  const visible = (recordings || []).filter(row => {
+    const needle = filter.trim().toLowerCase();
+    if (!needle) return true;
+    return [row.name, row.tags, row.project_name, row.id].some(value =>
+      String(value || '').toLowerCase().includes(needle));
+  });
+  const groups = recordingGroups(visible, project && project.id);
+  const scan = async (apply) => {
+    setRescueBusy(true); setRescueNote('');
+    try {
+      const result = await API.post('/api/library/rescue', { apply: !!apply });
+      setRescue(result);
+      if (apply) {
+        setRescueNote(`Rescued ${result.rescued_count || 0} recording(s) that existed only in the database.` +
+          (result.remaining_orphans && result.remaining_orphans.length
+            ? ` ${result.remaining_orphans.length} folder(s) are still unreadable.` : '') +
+          (result.healthy ? ' Library is healthy.' : ''));
+        if (onRescued) onRescued();
+      }
+    } catch (err) { setRescueNote('Rescue failed: ' + err.message); }
+    finally { setRescueBusy(false); }
+  };
+  return e('details', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3',
+      open: show, onToggle: ev => setShow(ev.target.open) },
+    e('summary', { className: 'font-bold text-indigo-300 cursor-pointer text-sm' },
+      `📼 Previous recordings · ${recordings.length} in the library`),
+    e('p', { className: 'text-[11px] text-slate-400' },
+      'Browse, resume or run anything that is already saved — including recordings from other projects. ' +
+      'RESUME opens the old recording in the browser and appends what you do next; RUN executes it in a fresh browser.'),
+    e('input', { value: filter, onChange: ev => setFilter(ev.target.value),
+      'aria-label': 'Filter previous recordings', placeholder: 'Filter by name, tag or project',
+      className: 'w-full bg-slate-800 p-2 rounded text-xs' }),
+    groups.length === 0 && e('p', { className: 'text-xs text-slate-500' },
+      recordings.length ? 'No recording matches that filter.' : 'Nothing saved yet — start a recording below.'),
+    groups.map(group => e('div', { key: group.id, className: 'bg-slate-950 rounded-xl border border-slate-800 p-2' },
+      e('button', { type: 'button', className: 'w-full flex justify-between items-center text-left',
+        'aria-expanded': openGroups[group.id] !== undefined ? !!openGroups[group.id] : !!group.active,
+        onClick: () => setOpenGroups(prev => ({ ...prev, [group.id]: !(prev[group.id] !== undefined ? prev[group.id] : group.active) })) },
+        e('span', { className: 'text-[11px] font-bold ' + (group.active ? 'text-indigo-300' : 'text-slate-300') },
+          (group.active ? '● ' : '') + group.name + (group.active ? ' (current project)' : '')),
+        e('span', { className: 'text-[10px] text-slate-500' }, `${group.rows.length} recording(s)`)),
+      ((openGroups[group.id] !== undefined) ? openGroups[group.id] : group.active) &&
+        e('div', { className: 'mt-1 space-y-0.5' },
+          group.roots.map(node => e(RecordingTreeRow, {
+            key: node.id, node, depth: 0, onResume, onRun, busyId, onOpen,
+          }))) )),
+    e('div', { className: 'flex flex-wrap items-center gap-2 border-t border-slate-800 pt-2' },
+      e('button', { type: 'button', className: 'key-btn', disabled: rescueBusy,
+        onClick: () => scan(false) }, rescueBusy ? 'SCANNING…' : 'SCAN LIBRARY'),
+      e('button', { type: 'button', className: 'key-btn bg-emerald-900', disabled: rescueBusy,
+        title: 'Re-export recordings that only exist in the database and re-index the catalog',
+        onClick: () => scan(true) }, rescueBusy ? 'RESCUING…' : 'RESCUE / RE-INDEX'),
+      rescue && e('span', { className: 'text-[10px] ' + (rescue.healthy ? 'text-emerald-300' : 'text-amber-300') },
+        `on disk ${rescue.recordings_on_disk} · catalog ${rescue.recordings_in_catalog} · ` +
+        `database-only ${(rescue.database_only_recordings || []).length} · orphans ${(rescue.orphan_recordings || []).length} · ` +
+        `unreadable ${(rescue.unreadable_recordings || []).length} · live ${(rescue.live_recordings || []).length}`),
+      rescueNote && e('span', { role: 'status', className: 'text-[10px] text-emerald-300' }, rescueNote)),
+    rescue && (rescue.database_only_recordings || []).length > 0 && e('div', { className: 'text-[10px] text-amber-300 space-y-0.5' },
+      e('div', { className: 'font-bold' }, 'Recordings that exist only in the database (rescue exports them to the library):'),
+      rescue.database_only_recordings.slice(0, 8).map(row => e('div', { key: row.id },
+        `• ${row.name || row.id} · ${row.step_count || 0} step(s) · project ${row.project_id}`))),
+    rescue && (rescue.unreadable_recordings || []).length > 0 && e('div', { className: 'text-[10px] text-amber-400' },
+      `${rescue.unreadable_recordings.length} folder(s) hold no readable recording.json and cannot be listed.`));
+}
+
+function RunExistingRecording({ recId, recordings, onDone }) {
+  const [sourceId, setSourceId] = useState('');
+  const [record, setRecord] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const options = (recordings || []).filter(row => row.id !== recId);
+  const run = async () => {
+    if (!sourceId) return;
+    setBusy(true); setError(''); setNote('');
+    try {
+      const result = await API.post(`/api/recordings/${recId}/replay`, { recording_id: sourceId, record });
+      setNote(`✅ ${result.message}` + (result.url ? ` Now on ${result.url}` : ''));
+      if (onDone) onDone(result);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  return e('details', { className: 'bg-slate-900 border border-slate-800 rounded-xl p-2' },
+    e('summary', { className: 'text-xs font-bold text-indigo-300 cursor-pointer' },
+      '▶ RUN AN EXISTING RECORDING IN THIS SESSION'),
+    e('p', { className: 'text-[10px] text-slate-400 mt-1' },
+      'Executes a saved recording in the browser this session already owns, so its steps happen live and ' +
+      (record ? 'are added to this recording as editable steps.' : 'are not written into this recording.')),
+    e('div', { className: 'flex flex-wrap gap-2 items-center mt-2' },
+      e('select', { value: sourceId, disabled: busy, 'aria-label': 'Recording to run inside this session',
+        onChange: ev => setSourceId(ev.target.value), className: 'flex-1 min-w-[12rem] bg-slate-800 p-2 rounded text-xs' },
+        e('option', { value: '' }, options.length ? 'Choose a saved recording…' : 'No other recording is saved in the library'),
+        options.map(row => e('option', { key: row.id, value: row.id },
+          `${row.project_name ? row.project_name + ' · ' : ''}${row.name} (${row.step_count || 0} steps)`))),
+      e('label', { className: 'text-[10px] text-slate-400 flex items-center gap-1' },
+        e('input', { type: 'checkbox', checked: record, disabled: busy, onChange: () => setRecord(!record) }),
+        'record its steps'),
+      e('button', { type: 'button', className: 'key-btn bg-indigo-800 disabled:opacity-50',
+        disabled: busy || !sourceId, onClick: run }, busy ? 'RUNNING…' : 'RUN NOW')),
+    busy && e('p', { role: 'status', className: 'text-[10px] text-indigo-300' },
+      'Running the saved recording in the live browser — watch the window above.'),
+    note && e('p', { role: 'status', className: 'text-[10px] text-emerald-300' }, note),
+    error && e('p', { role: 'alert', className: 'text-[10px] text-red-300' }, error));
 }

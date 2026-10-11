@@ -42,6 +42,9 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-FLOW-07 | Merged repeat expansion | A step stored with `repeat=3` expands to three executions during replay. |
 | UT-FLOW-08 | Capture is never merged | Two `save_variable` steps on the same field keep separate rows, because each captures a different value. |
 | UT-FLOW-09 | Compress an existing recording | `POST /api/recordings/{id}/steps/compress` collapses four identical clicks into one step with `repeat=4`. |
+| UT-FLOW-10 | Run a saved recording inside a live session | `RecorderSession.replay()` drives the open browser with another recording's steps and writes each executed action into the recording being made. |
+| UT-FLOW-11 | A failed live replay reports its step | A step that raises stops the replay, reports its position and error, and only the steps that ran are recorded. |
+| UT-FLOW-12 | A closed session refuses a replay | A session that has been closed raises instead of running steps. |
 | UT-BOOT-01 | Import the recorder and the executor | Both modules load. This is the regression where `IS_TERMUX`, `interpolate`, and `CICD_INTERVAL` were missing and both features were offline. |
 | UT-BOOT-02 | Config contract | `IS_TERMUX` is a bool, `CICD_INTERVAL` is a positive int, and `interpolate` is `apply_variables`. |
 | UT-BOOT-03 | Run model columns | `recording_id`, `execution_log`, `progress_pct`, and `rog_monitor_log` exist. `target_id` and `rog_investigation` do not. |
@@ -90,6 +93,12 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-LIB-06 | Publish | A local git remote receives only `library/` files. `KEEP.txt` is untouched. |
 | UT-LIB-07 | Failed push | The project is not listed and the database row is removed. |
 | UT-LIB-08 | File-only recording | A recording that exists only as JSON is loaded into the database for replay. |
+| UT-LIB-09 | Rescue a database-only recording | A recording whose files are gone is reported as database-only by `library_health()` and re-exported by `rescue_library(apply=True)` before materialize could drop it. |
+| UT-ENT-01 | An entity-less project is still tied to one | A project created without an entity reports the `unassigned` bucket, so no project is ever entity-less. |
+| UT-ENT-02 | Create the entity, then the project | An entity is created with code and industry, the project names it, and an unknown `entity_id` is refused with `NotFound`. |
+| UT-ENT-03 | Entity names are unique | A duplicate name (case-insensitive), a blank name, the reserved `Unassigned` name and an over-long name are all refused. |
+| UT-ENT-04 | Rename and remove keep projects tied | A rename rewrites the member `project.json`; deleting an entity with members needs `reassign_to`, the members move, and the fallback bucket cannot be renamed or deleted. |
+| UT-ENT-05 | The registry lives in the library tree | `library/entities.json` is written with `source=repository`, and a new entity is listed before the fallback bucket. |
 | UT-RUN-01 | Recording with no steps | Status becomes `error`, the monitor log says no steps, and no browser is launched. |
 | UT-RUN-02 | Run whose recording was deleted | Status becomes `error` and the event says `Recording not found`. |
 | UT-RUN-03 | Preview with no viewer | While `should_capture` reports zero viewers the loop renders nothing; capture resumes once somebody watches. |

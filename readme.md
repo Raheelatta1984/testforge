@@ -5,6 +5,9 @@
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
 - **Local helpers (no paid AI calls):** Browser-dependent voice input, deterministic text cleanup, and recording-variable association tagging. Autonomous AI execution is not connected.
 - **Tree Hierarchy:** Parent Group -> Sub-recording chunk organization.
+- **Entities (companies):** a company/entity is created before its projects and every project belongs to one; the registry is `library/entities.json`, the Projects tab groups and filters by it, and a project written before entities existed sits in an `Unassigned` bucket that can be moved at any time.
+- **Previous recordings tree (Record tab):** every recording in the library, grouped by project and nested by parent recording, with **RESUME** (open the old recording and append) and **RUN** (execute it as a run). **SCAN LIBRARY** / **RESCUE** list and re-export recordings that fell out of the catalog or exist only in the database, so nothing is lost.
+- **Run a recording inside a recording:** while a session is live, `POST /api/recordings/{id}/replay` executes another saved recording in that same browser; its steps are added to the recording being made (or run without being written, at the operator's choice).
 - **Repeated steps:** Consecutive identical actions are recorded as one step carrying a repeat count, and replay expands it back into N actions.
 - **Execution:** Optional step-by-step live view in the Runs tab, reusing the evidence JPEG without a second screencast loop.
 - **Batch execution:** One browser at a time replays recordings, with learned timeouts and one reusable low-quality screenshot per step (`POST /api/runs/batch`).

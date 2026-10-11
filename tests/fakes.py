@@ -20,6 +20,11 @@ class FakeLocator:
         self.page.timeouts[selector_key(self.selector)] = timeout
         self.page.fills.append((self.selector, value))
 
+    async def press_sequentially(self, value, delay=None, timeout=None):
+        """What `StepRuntime.perform` calls for a stored `type` step."""
+        self.page.timeouts[selector_key(self.selector)] = timeout
+        self.page.typed.append(value)
+
     async def input_value(self, timeout=None):
         return self.page.input_values.get(self.selector, "")
 

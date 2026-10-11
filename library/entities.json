@@ -1,0 +1,14 @@
+{
+  "entities": [
+    {
+      "code": "HFM",
+      "created_at": "2026-10-11T21:51:29Z",
+      "id": "harris-farm-markets",
+      "industry": "Retail grocery",
+      "legal_name": "",
+      "name": "Harris Farm Markets",
+      "notes": ""
+    }
+  ],
+  "source": "repository"
+}

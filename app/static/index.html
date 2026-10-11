@@ -53,7 +53,7 @@ const API = {
   post: (u, b) => apiRequest(u, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
   put: (u, b) => apiRequest(u, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
   patch: (u, b) => apiRequest(u, {method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify(b)}),
-  del: u => apiRequest(u, {method:'DELETE'})
+  del: (u, b) => apiRequest(u, {method:'DELETE', headers:{'Content-Type':'application/json'}, body: b ? JSON.stringify(b) : undefined})
 };
 
 function AiInput({ value, onChange, placeholder, isArea }) {
@@ -104,7 +104,8 @@ function App({ access }) {
         onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "projects" && e(Projects, { setActiveProject, activeProject }),
       tab === "variables" && e(Variables, { project: activeProject }),
-      tab === "record" && e(Recorder, { project: activeProject }),
+      tab === "record" && e(Recorder, { project: activeProject, liveWindow,
+        onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "plan" && e(ExecutionPlan, { project: activeProject, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "library" && e(Library, { project: activeProject, liveWindow, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId, liveWindow, setLiveWindow: toggleLiveWindow }),
@@ -122,7 +123,7 @@ function App({ access }) {
   );
 }
 
-function Recorder({ project }) {
+function Recorder({ project, onRun, liveWindow }) {
   const [recId, setRecId] = useState(null);
   const [frame, setFrame] = useState(null);
   const [status, setStatus] = useState("");
@@ -142,9 +143,24 @@ function Recorder({ project }) {
   const [varReview, setVarReview] = useState(null);
   const [varNote, setVarNote] = useState("");
   const [varBusy, setVarBusy] = useState(false);
+  // Every recording already in the library, so the tab can show a tree of what
+  // exists and reuse (resume / run) instead of someone re-recording it.
+  const [libraryRecs, setLibraryRecs] = useState([]);
+  const [libraryNote, setLibraryNote] = useState("");
+  const [resumeBusy, setResumeBusy] = useState("");
   const recRef = useRef(null);
   const frameUrl = useRef(null);
   const initialStepsLoaded = useRef(false);
+
+  // Every recording already in the library, for the tree of previous recordings
+  // above the start form and for the "run an existing recording" panel.
+  const loadLibraryRecs = () => {
+    API.get("/api/library/recordings").then(rows => {
+      setLibraryRecs(Array.isArray(rows) ? rows : []);
+      setLibraryNote("");
+    }).catch(err => setLibraryNote("Could not list saved recordings: " + err.message));
+  };
+  useEffect(() => { loadLibraryRecs(); }, [project && project.id]);
 
   // Where a SAVE will land. Read once from the cheap catalog endpoint so the tab
   // can say "publishes to owner/repo@branch" or "stays local" before the user
@@ -242,6 +258,43 @@ function Recorder({ project }) {
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
+  // Continue an existing recording: the session opens on that recording's start
+  // URL with its step count as the sequence, so new actions append after the old
+  // ones instead of starting a second, unrelated recording. This is the rescue
+  // path for a session that was never saved.
+  const resume = async (recording) => {
+    setBusy(true); setError(""); setResumeBusy(recording.id);
+    try {
+      const full = await API.get("/api/recordings/" + recording.id);
+      initialStepsLoaded.current = true;   // steps come from the recording itself
+      setSteps((full.steps || []).slice().sort((a, b) => (b.order || 0) - (a.order || 0)));
+      setFrame(null);
+      setStatus("Launching browser fast");
+      setName(full.name || recording.name || "");
+      setUrl(full.start_url || recording.start_url || "");
+      setSaveNote("");
+      setRecId(recording.id);
+      await API.post("/api/recordings/" + recording.id + "/session", {});
+      setSaveNote("Continuing this recording: " + (full.steps || []).length +
+        " saved step(s) are kept and new actions are appended after them.");
+      setSaveState("local");
+    } catch (err) {
+      setError("Could not continue that recording: " + err.message);
+      setRecId(null);
+    } finally { setBusy(false); setResumeBusy(""); }
+  };
+  // Run a saved recording from the tree: queue it like the Library tab does and
+  // hand the run id to the Runs tab, which follows it to the end.
+  const runExisting = async (recording) => {
+    setResumeBusy(recording.id); setError("");
+    try {
+      const res = await API.post("/api/runs", {
+        target_id: recording.id, display_window: liveWindow !== false });
+      if (onRun) onRun(res.run_id);
+    } catch (err) { setError("Could not queue that recording: " + err.message); }
+    finally { setResumeBusy(""); }
+  };
+
   // End-of-recording onboarding (requirement: ask before the values become data).
   // The proposal is computed server-side from the saved steps, so naming and
   // substitution behave exactly like the imported-script flow.
@@ -344,6 +397,7 @@ function Recorder({ project }) {
           : e("div", { className: "browser-wait" }, error || status || "Starting the remote browser FAST…")
       )
     ),
+    e(RunExistingRecording, {recId, recordings: libraryRecs, onDone: loadLibraryRecs}),
     e(ActionComposer, {label:"EXECUTE & RECORD ACTION", onSave: async step => { const res = await API.post(`/api/recordings/${recId}/input`, {type:"action", step}); if (res.step) setSteps(prev => [res.step, ...prev.filter(s => s.id !== res.step.id)]); }}),
     varsList.length > 0 && e("div", { className: "flex gap-1 flex-wrap px-1" },
       e("span", { className: "text-[10px] text-slate-500" }, "Variables:"),
@@ -380,6 +434,9 @@ function Recorder({ project }) {
   );
 
   return e("div", { className: "space-y-4" },
+    e(PreviousRecordings, {project, recordings: libraryRecs, busyId: resumeBusy,
+      onResume: resume, onRun: runExisting, onRescued: loadLibraryRecs}),
+    libraryNote && e("p", { role: "alert", className: "text-xs text-amber-300" }, libraryNote),
     e("div", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-3" },
       e("div", { className: "flex justify-between items-center" },
         e("h2", { className: "font-bold text-lg text-indigo-300" }, "Record in remote browser ⚡ FAST"),
@@ -918,6 +975,19 @@ function Projects({ setActiveProject, activeProject }) {
   const [notice, setNotice] = useState("");
   const [varsMap, setVarsMap] = useState({});
   const [loadTime, setLoadTime] = useState("");
+  // Entity/company: every project belongs to one. The registry is managed here,
+  // before a project is created, and each project card can be moved between
+  // entities afterwards -- including projects written before this existed.
+  const [entities, setEntities] = useState([]);
+  const [entityName, setEntityName] = useState("");
+  const [entityCode, setEntityCode] = useState("");
+  const [entityIndustry, setEntityIndustry] = useState("");
+  const [entityNotes, setEntityNotes] = useState("");
+  const [entityBusy, setEntityBusy] = useState(false);
+  const [entityNotice, setEntityNotice] = useState("");
+  const [entityError, setEntityError] = useState("");
+  const [chosenEntity, setChosenEntity] = useState("");
+  const [filterEntity, setFilterEntity] = useState("all");
 
   const load = async () => {
     setLoading(true);
@@ -944,6 +1014,80 @@ function Projects({ setActiveProject, activeProject }) {
   };
   useEffect(() => { load(); }, []);
 
+  const loadEntities = async (selectId) => {
+    try {
+      const rows = await API.get("/api/entities");
+      const list = Array.isArray(rows) ? rows : [];
+      setEntities(list);
+      setEntityError("");
+      setChosenEntity(prev => {
+        if (selectId && list.some(item => item.id === selectId)) return selectId;
+        if (prev && list.some(item => item.id === prev)) return prev;
+        const real = list.find(item => !item.system);
+        return real ? real.id : "";
+      });
+    } catch (err) { setEntityError("Could not load companies/entities: " + err.message); }
+  };
+  useEffect(() => { loadEntities(); }, []);
+
+  const createEntity = async (event) => {
+    event.preventDefault();
+    if (!entityName.trim()) { setEntityError("Enter the company/entity name first."); return; }
+    setEntityBusy(true); setEntityError(""); setEntityNotice("");
+    try {
+      const created = await API.post("/api/entities", {
+        name: entityName.trim(), code: entityCode.trim(), industry: entityIndustry.trim(), notes: entityNotes.trim(),
+      });
+      setEntityName(""); setEntityCode(""); setEntityIndustry(""); setEntityNotes("");
+      setEntityNotice(created.publish_message || `Entity “${created.name}” saved.`);
+      await loadEntities(created.id);
+    } catch (err) { setEntityError("Could not create the entity: " + err.message); }
+    finally { setEntityBusy(false); }
+  };
+
+  const renameEntity = async (entity) => {
+    const next = window.prompt("New name for this company/entity", entity.name);
+    if (next === null) return;
+    if (!next.trim() || next.trim() === entity.name) return;
+    setEntityBusy(true); setEntityError(""); setEntityNotice("");
+    try {
+      const saved = await API.patch("/api/entities/" + entity.id, { name: next.trim() });
+      setEntityNotice(saved.publish_message || `Renamed to “${saved.name}”; its ${saved.project_count || 0} project(s) follow.`);
+      await Promise.all([loadEntities(saved.id), load()]);
+    } catch (err) { setEntityError("Could not rename the entity: " + err.message); }
+    finally { setEntityBusy(false); }
+  };
+
+  const removeEntity = async (entity) => {
+    const others = entities.filter(item => item.id !== entity.id);
+    const target = entity.project_count > 0
+      ? window.prompt(`“${entity.name}” still has ${entity.project_count} project(s).\n\nMove them to which entity? Type the id:\n` +
+          others.map(item => `${item.id} — ${item.name}`).join("\n"), others.find(item => item.system) ? others.find(item => item.system).id : (others[0] || {}).id || "")
+      : null;
+    if (entity.project_count > 0 && (target === null || !target.trim())) return;
+    if (entity.project_count === 0 && !window.confirm(`Delete the entity “${entity.name}”?`)) return;
+    setEntityBusy(true); setEntityError(""); setEntityNotice("");
+    try {
+      const result = await API.del("/api/entities/" + entity.id, target ? { reassign_to: target.trim() } : {});
+      setEntityNotice(`Removed “${result.name}”` +
+        (result.reassigned_projects && result.reassigned_projects.length
+          ? `; ${result.reassigned_projects.length} project(s) moved to ${result.reassigned_to}.` : "."));
+      await Promise.all([loadEntities(), load()]);
+    } catch (err) { setEntityError("Could not delete the entity: " + err.message); }
+    finally { setEntityBusy(false); }
+  };
+
+  const assignEntity = async (project, entityId) => {
+    setEntityBusy(true); setEntityError(""); setEntityNotice("");
+    try {
+      const saved = await API.patch("/api/projects/" + project.id, { entity_id: entityId });
+      setProjs(prev => prev.map(item => item.id === saved.id ? { ...item, ...saved } : item));
+      setEntityNotice(`“${saved.name}” now belongs to ${saved.entity_name}.`);
+      loadEntities();
+    } catch (err) { setEntityError("Could not move the project: " + err.message); }
+    finally { setEntityBusy(false); }
+  };
+
   const create = async (event) => {
     event.preventDefault();
     if (!name.trim()) {
@@ -953,17 +1097,24 @@ function Projects({ setActiveProject, activeProject }) {
     setSaving(true);
     setError("");
     setNotice("");
+    if (!chosenEntity) {
+      setError("Create a company/entity first (step 1) and pick it for this project.");
+      return;
+    }
     try {
       const project = await API.post("/api/projects", {
         name: name.trim(),
-        base_url: baseUrl.trim()
+        base_url: baseUrl.trim(),
+        entity_id: chosenEntity
       });
       setProjs(prev => [project, ...prev.filter(item => item.id !== project.id)]);
       setName("");
       setBaseUrl("");
-      setNotice(project.published ? `Project “${project.name}” saved to GitHub branch ⚡.` : `Project “${project.name}” saved to library. Pushing to the active branch...`);
-      // Reload vars
-      setTimeout(load, 500);
+      setNotice(project.published
+        ? `Project “${project.name}” (${project.entity_name}) saved to GitHub branch ⚡.`
+        : `Project “${project.name}” (${project.entity_name}) saved to the library. Pushing to the active branch...`);
+      // Reload vars and entity counts
+      setTimeout(() => { load(); loadEntities(); }, 500);
     } catch (err) {
       setError(`Could not create project: ${err.message}`);
     } finally {
@@ -971,28 +1122,96 @@ function Projects({ setActiveProject, activeProject }) {
     }
   };
 
+  const realEntities = entities.filter(item => !item.system);
+  const shownProjects = filterEntity === "all" ? projs : projs.filter(p => (p.entity_id || "unassigned") === filterEntity);
   return e('div', { className: "space-y-4" },
+    // STEP 1 — company/entity. Deliberately above the project form: a project has
+    // to belong to a company, so the company comes first.
+    e('div', { className: "bg-slate-900 p-5 rounded-3xl border border-emerald-900/60 space-y-3" },
+      e('div', { className: "flex justify-between items-center" },
+        e('h2', { className: "font-bold text-lg text-emerald-300" }, "Step 1 · Company / entity 🏢"),
+        entityBusy && e('span', { className: "fast-badge" }, "WORKING…")),
+      e('p', { className: "text-xs text-slate-400" },
+        "Every project is tied to a company or entity. Create one here first — projects are grouped, filtered and reported under it."),
+      e('form', { onSubmit: createEntity, className: "grid grid-cols-2 gap-2" },
+        e('input', { value: entityName, onChange: evt => setEntityName(evt.target.value), required: true, maxLength: 200,
+          'aria-label': 'Company or entity name', placeholder: "Company / entity name, e.g. Harris Farm Markets",
+          className: "col-span-2 bg-slate-800 rounded-lg px-3 py-2 text-sm border border-slate-700" }),
+        e('input', { value: entityCode, onChange: evt => setEntityCode(evt.target.value), maxLength: 50,
+          'aria-label': 'Company code', placeholder: "Short code (HFM)", className: "bg-slate-800 rounded-lg px-3 py-2 text-xs border border-slate-700" }),
+        e('input', { value: entityIndustry, onChange: evt => setEntityIndustry(evt.target.value), maxLength: 100,
+          'aria-label': 'Industry', placeholder: "Industry (optional)", className: "bg-slate-800 rounded-lg px-3 py-2 text-xs border border-slate-700" }),
+        e('input', { value: entityNotes, onChange: evt => setEntityNotes(evt.target.value), maxLength: 2000,
+          'aria-label': 'Entity notes', placeholder: "Notes (optional)",
+          className: "col-span-2 bg-slate-800 rounded-lg px-3 py-2 text-xs border border-slate-700" }),
+        e('button', { type: "submit", disabled: entityBusy,
+          className: "col-span-2 bg-emerald-700 disabled:opacity-60 py-2 rounded-xl font-bold text-sm" },
+          entityBusy ? "SAVING ENTITY…" : "CREATE COMPANY / ENTITY")),
+      entities.length > 0 && e('div', { className: "space-y-1" },
+        e('div', { className: "text-[10px] uppercase font-bold text-slate-500" }, "Entities in this library"),
+        entities.map(entity => e('div', { key: entity.id, className: "flex flex-wrap items-center gap-2 text-xs bg-slate-950 rounded-xl px-3 py-2" },
+          e('span', { className: "font-bold " + (entity.system ? "text-amber-300" : "text-slate-200") },
+            entity.name + (entity.code ? ` (${entity.code})` : "") + (entity.system ? " · legacy bucket" : "")),
+          e('span', { className: "text-[10px] text-slate-500" },
+            `${entity.project_count || 0} project(s)` + (entity.industry ? ` · ${entity.industry}` : "")),
+          e('span', { className: "flex-1" }),
+          !entity.system && e('button', { type: "button", className: "key-btn", disabled: entityBusy,
+            onClick: () => renameEntity(entity) }, "RENAME"),
+          !entity.system && e('button', { type: "button", className: "key-btn text-red-300", disabled: entityBusy,
+            onClick: () => removeEntity(entity) }, "DELETE"))),
+        e('p', { className: "text-[10px] text-slate-500" },
+          "Projects created before companies existed sit in “Unassigned”; move each one to a real entity below — a project is never left without one.")),
+      entityError && e('p', { role: "alert", className: "text-xs text-red-300" }, entityError),
+      entityNotice && e('p', { role: "status", className: "text-xs text-emerald-300" }, entityNotice)),
     e('form', { onSubmit: create, className: "bg-slate-900 p-6 rounded-3xl border border-slate-800" },
       e('div', { className: "flex justify-between items-center mb-1" },
-        e('h2', { className: "font-bold text-lg text-indigo-300" }, "Create a test project ⚡"),
+        e('h2', { className: "font-bold text-lg text-indigo-300" }, "Step 2 · Create a test project ⚡"),
         loadTime && e('span', { className: "fast-badge" }, loadTime)
       ),
-      e('p', { className: "text-xs text-slate-500 mb-4" }, "Projects, recordings, variables stored in GitHub branch branch. Loads super fast from catalog. Pushes immediately to the active branch with description."),
-      e('label', { className: "block text-xs text-slate-400 mb-1", htmlFor: "project-name" }, "Project name"),
+      e('p', { className: "text-xs text-slate-500 mb-4" }, "Projects, recordings, variables stored in GitHub branch. Loads super fast from catalog. Pushes immediately to the active branch with description."),
+      e('label', { className: "block text-xs text-slate-400 mb-1", htmlFor: "project-entity" }, "Belongs to company / entity"),
+      realEntities.length === 0
+        ? e('p', { className: "text-xs text-amber-300 mb-2" },
+            "No company/entity exists yet — create one in step 1 above, then this project can be created.")
+        : e('select', { id: "project-entity", value: chosenEntity, onChange: evt => setChosenEntity(evt.target.value),
+            className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" },
+            e('option', { value: '' }, "Choose the company/entity…"),
+            realEntities.map(entity => e('option', { key: entity.id, value: entity.id },
+              entity.name + (entity.code ? ` (${entity.code})` : "")))),
+      e('label', { className: "block text-xs text-slate-400 mt-3 mb-1", htmlFor: "project-name" }, "Project name"),
       e('input', { id: "project-name", required: true, maxLength: 200, value: name, onChange: evt => setName(evt.target.value), placeholder: "e.g. Customer Portal", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e('label', { className: "block text-xs text-slate-400 mt-3 mb-1", htmlFor: "project-url" }, "Application URL (optional)"),
       e('input', { id: "project-url", type: "url", maxLength: 500, value: baseUrl, onChange: evt => setBaseUrl(evt.target.value), placeholder: "https://example.com", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
-      e('button', { type: "submit", disabled: saving, className: "w-full bg-indigo-600 disabled:opacity-60 mt-4 py-3 rounded-xl font-bold shadow-xl" }, saving ? "CREATING & PUSHING…⚡" : "CREATE PROJECT"),
+      e('button', { type: "submit", disabled: saving || !chosenEntity,
+        className: "w-full bg-indigo-600 disabled:opacity-60 mt-4 py-3 rounded-xl font-bold shadow-xl" },
+        saving ? "CREATING & PUSHING…⚡" : (!chosenEntity ? "CREATE A COMPANY/ENTITY FIRST" : "CREATE PROJECT")),
       error && e('p', { role: "alert", className: "mt-3 text-sm text-red-300" }, error),
       notice && e('p', { role: "status", className: "mt-3 text-sm text-emerald-300" }, notice)
     ),
+    entities.length > 0 && e('div', { className: "flex items-center gap-2 flex-wrap" },
+      e('span', { className: "text-[10px] uppercase font-bold text-slate-500" }, "Filter by entity"),
+      e('select', { value: filterEntity, onChange: evt => setFilterEntity(evt.target.value), 'aria-label': 'Filter projects by entity',
+        className: "bg-slate-800 rounded px-2 py-1 text-xs" },
+        e('option', { value: "all" }, `All entities (${projs.length})`),
+        entities.map(entity => e('option', { key: entity.id, value: entity.id },
+          `${entity.name} (${projs.filter(p => (p.entity_id || "unassigned") === entity.id).length})`)))),
     loading && e('p', { className: "text-sm text-slate-400" }, "Loading projects super fast from GitHub branch… ⚡"),
-    !loading && projs.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No projects in GitHub library yet. Create one above - pushes to the active branch immediately."),
-    projs.map(p => e('div', { key: p.id, onClick: () => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); }, className: `p-5 bg-slate-900 rounded-3xl border ${activeProject && activeProject.id===p.id ? 'border-indigo-500' : 'border-slate-800'} mb-3 shadow-md hover:border-indigo-500 transition-all cursor-pointer` },
-      e('div', { className: "flex justify-between items-start" },
-        e('div', { className: "font-bold text-sm" }, p.name),
+    !loading && projs.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No projects in the library yet. Create the company/entity above, then the project - both publish immediately."),
+    !loading && projs.length > 0 && shownProjects.length === 0 && e('p', { className: "text-sm text-slate-500 text-center py-6" }, "No project belongs to that entity yet."),
+    shownProjects.map(p => e('div', { key: p.id, className: `p-5 bg-slate-900 rounded-3xl border ${activeProject && activeProject.id===p.id ? 'border-indigo-500' : 'border-slate-800'} mb-3 shadow-md hover:border-indigo-500 transition-all` },
+      e('div', { className: "flex justify-between items-start gap-2" },
+        e('button', { type: "button", className: "font-bold text-sm text-left", onClick: () => { setActiveProject(p); localStorage.setItem("tf_project", JSON.stringify(p)); } }, p.name),
         e('span', { className: "fast-badge" }, "BRANCH")
       ),
+      e('div', { className: "flex flex-wrap items-center gap-2 mt-1" },
+        e('span', { className: "text-[10px] px-2 py-0.5 rounded-full " + (p.entity_assigned === false ? "bg-amber-900/60 text-amber-200" : "bg-emerald-900/60 text-emerald-200") },
+          "🏢 " + (p.entity_name || "Unassigned")),
+        e('label', { className: "text-[10px] text-slate-500" }, "move to ",
+          e('select', { value: p.entity_id || "unassigned", disabled: entityBusy,
+            'aria-label': `Entity for ${p.name}`,
+            onChange: evt => assignEntity(p, evt.target.value),
+            className: "bg-slate-800 rounded px-1 py-0.5 text-[10px] text-slate-200" },
+            entities.map(entity => e('option', { key: entity.id, value: entity.id }, entity.name))))),
       e('div', { className: "text-[10px] text-emerald-400 font-normal mt-1" }, "GitHub branch · " + (p.repository_path || "library")),
       p.base_url && e('div', { className: "text-[10px] text-slate-500 font-normal mt-1" }, p.base_url),
       varsMap[p.id] && varsMap[p.id].length > 0 && e('div', { className: "mt-2" },
