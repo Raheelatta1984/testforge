@@ -1,1 +1,22 @@
 ﻿Summary,Step,Action,Description,Input,Screenshot
+"Session 12/10/2026, 8:22:44 am",1,navigate,Open https://login.microsoftonline.com/74512bd2-de5d-4870-83ee-50eebf992b45/oauth2/authorize?client_id=00000015-0000-0000-c000-000000000000&response_type=code%20id_token&scope=openid%20profile&state=OpenIdConnect.AuthenticationProperties%3DAQAAANCMnd8BFdERjHoAwE_Cl-sBAAAACtQKQ4Qtkk-zuqZ4Dv9DWwAAAAACAAAAAAAQZgAAAAEAACAAAABEo21UoRzOikQ6xy530x73fjrP-WtdCbgSlunJT97c7AAAAAAOgAAAAAIAACAAAADmlVDv7fikZaQiNtHT6i9sTdOJANjIyh6XAnFYHpks8HAAAABXoU-nCmD9r92iij_RP0sQuG_W1gOnFDRk2EvbDZIXkCtXKzivKvpR_bhFkwPFBkJ…,https://login.microsoftonline.com/74512bd2-de5d-4870-83ee-50eebf992b45/oauth2/authorize?client_id=00000015-0000-0000-c000-000000000000&response_type=code%20id_token&scope=openid%20profile&state=OpenIdConnect.AuthenticationProperties%3DAQAAANCMnd8BFdERjHoAwE_Cl-sBAAAACtQKQ4Qtkk-zuqZ4Dv9DWwAAAAACAAAAAAAQZgAAAAEAACAAAABEo21UoRzOikQ6xy530x73fjrP-WtdCbgSlunJT97c7AAAAAAOgAAAAAIAACAAAADmlVDv7fikZaQiNtHT6i9sTdOJANjIyh6XAnFYHpks8HAAAABXoU-nCmD9r92iij_RP0sQuG_W1gOnFDRk2EvbDZIXkCtXKzivKvpR_bhFkwPFBkJ1AefGcXV6xvOv02aefo3D7Jwrn0yFr4HFpo0UAW3B7G61B9m0HQQUn3oUDrKg4FrJ-bfDhrfDyYpZ_zE0FrG_QAAAAG8Zm6PvsF4hf9MAyIt-6Oocn6jtYSXwa-UJt5htKyJRRMjroahaYYyxdw3iVIEtqc7hEjc-UioY6qH3IpeL1U0%26RedirectTo%3Dhttps%253A%252F%252Fharrisfarm-uat.sandbox.operations.dynamics.com%252F&response_mode=form_post&nonce=639273506181049180.M2IzM2QwOTEtMzJhZi00NWU3LTg0ZjEtOWE0ODk5NjJhNDA0NjBjZTk0YzEtOTRjZC00ZTc3LTk0ZWYtMWZhN2NkNDlhZjhm&redirect_uri=https%3A%2F%2Fgw.au-il102.gateway.prod.island.powerapps.com%2Freplyurl%2Fv1&max_age=86400&x-client-SKU=ID_NET472&x-client-ver=8.3.0.0,
+"Session 12/10/2026, 8:22:44 am",2,click,"Click Enter your email, phone, or Skype.",,step-002.png
+"Session 12/10/2026, 8:22:44 am",3,type,Type: {{D365_Login_ID}},{{D365_Login_ID}},step-003.png
+"Session 12/10/2026, 8:22:44 am",4,press,Press Tab,Tab,step-004.png
+"Session 12/10/2026, 8:22:44 am",5,click,Click Next,,step-005.png
+"Session 12/10/2026, 8:22:44 am",6,click,Click Enter the password for ratta@harrisfarm.com.au,,step-006.png
+"Session 12/10/2026, 8:22:44 am",7,type,Type: {{D365_login_Pass}},{{D365_login_Pass}},step-007.png
+"Session 12/10/2026, 8:22:44 am",8,press,Press Tab,Tab,step-008.png
+"Session 12/10/2026, 8:22:44 am",9,click,Click Sign in,,step-009.png
+"Session 12/10/2026, 8:22:44 am",10,click,"Click ratta@harrisfarm.com.au
+Let's keep your account secure
+We'll help you set up ano",,step-010.png
+"Session 12/10/2026, 8:22:44 am",11,click,Click Not now,,step-011.png
+"Session 12/10/2026, 8:22:44 am",12,click,Click Yes,,step-012.png
+"Session 12/10/2026, 8:22:44 am",13,click,Click Order,,step-013.png
+"Session 12/10/2026, 8:22:44 am",14,click,Click Sort largest to smallest,,step-014.png
+"Session 12/10/2026, 8:22:44 am",15,click,Click Order,,step-015.png
+"Session 12/10/2026, 8:22:44 am",16,click,"Click Filter field: Order, operator: is equal to",,step-016.png
+"Session 12/10/2026, 8:22:44 am",17,type,Type: 91020262,91020262,step-017.png
+"Session 12/10/2026, 8:22:44 am",18,click,Click Apply,,step-018.png
+"Session 12/10/2026, 8:22:44 am",19,click,Click 91020262,,step-019.png

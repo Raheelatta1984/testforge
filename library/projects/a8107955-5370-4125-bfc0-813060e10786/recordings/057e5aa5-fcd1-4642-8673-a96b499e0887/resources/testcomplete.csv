@@ -1,1 +1,20 @@
 ﻿Step,Action,Selector,Input,Screenshot
+1,navigate,{},https://login.microsoftonline.com/74512bd2-de5d-4870-83ee-50eebf992b45/oauth2/authorize?client_id=00000015-0000-0000-c000-000000000000&response_type=code%20id_token&scope=openid%20profile&state=OpenIdConnect.AuthenticationProperties%3DAQAAANCMnd8BFdERjHoAwE_Cl-sBAAAACtQKQ4Qtkk-zuqZ4Dv9DWwAAAAACAAAAAAAQZgAAAAEAACAAAABEo21UoRzOikQ6xy530x73fjrP-WtdCbgSlunJT97c7AAAAAAOgAAAAAIAACAAAADmlVDv7fikZaQiNtHT6i9sTdOJANjIyh6XAnFYHpks8HAAAABXoU-nCmD9r92iij_RP0sQuG_W1gOnFDRk2EvbDZIXkCtXKzivKvpR_bhFkwPFBkJ1AefGcXV6xvOv02aefo3D7Jwrn0yFr4HFpo0UAW3B7G61B9m0HQQUn3oUDrKg4FrJ-bfDhrfDyYpZ_zE0FrG_QAAAAG8Zm6PvsF4hf9MAyIt-6Oocn6jtYSXwa-UJt5htKyJRRMjroahaYYyxdw3iVIEtqc7hEjc-UioY6qH3IpeL1U0%26RedirectTo%3Dhttps%253A%252F%252Fharrisfarm-uat.sandbox.operations.dynamics.com%252F&response_mode=form_post&nonce=639273506181049180.M2IzM2QwOTEtMzJhZi00NWU3LTg0ZjEtOWE0ODk5NjJhNDA0NjBjZTk0YzEtOTRjZC00ZTc3LTk0ZWYtMWZhN2NkNDlhZjhm&redirect_uri=https%3A%2F%2Fgw.au-il102.gateway.prod.island.powerapps.com%2Freplyurl%2Fv1&max_age=86400&x-client-SKU=ID_NET472&x-client-ver=8.3.0.0,
+2,click,"{""primary"": ""#i0116"", ""x"": 362, ""y"": 249, ""text"": ""Enter your email, phone, or Skype."", ""tag"": ""input""}",,step-002.png
+3,type,"{""primary"": ""#i0116""}",{{D365_Login_ID}},step-003.png
+4,press,{},Tab,step-004.png
+5,click,"{""primary"": ""#idSIButton9"", ""x"": 647, ""y"": 380, ""text"": ""Next"", ""tag"": ""input""}",,step-005.png
+6,click,"{""primary"": ""#i0118"", ""x"": 360, ""y"": 299, ""text"": ""Enter the password for ratta@harrisfarm.com.au"", ""tag"": ""input""}",,step-006.png
+7,type,"{""primary"": ""#i0118""}",{{D365_login_Pass}},step-007.png
+8,press,{},Tab,step-008.png
+9,click,"{""primary"": ""#idSIButton9"", ""x"": 640, ""y"": 433, ""text"": ""Sign in"", ""tag"": ""input""}",,step-009.png
+10,click,"{""primary"": ""#lightbox"", ""x"": 640, ""y"": 433, ""text"": ""ratta@harrisfarm.com.au\nLet's keep your account secure\nWe'll help you set up ano"", ""tag"": ""div""}",,step-010.png
+11,click,"{""primary"": ""#skipMfaRegistrationLink"", ""x"": 358, ""y"": 362, ""text"": ""Not now"", ""tag"": ""a""}",,step-011.png
+12,click,"{""primary"": ""#idSIButton9"", ""x"": 622, ""y"": 434, ""text"": ""Yes"", ""tag"": ""input""}",,step-012.png
+13,click,"{""primary"": ""#GridHeader_Num_3_0_header > div:nth-of-type(1)"", ""x"": 444, ""y"": 413, ""text"": ""Order"", ""tag"": ""div""}",,step-013.png
+14,click,"{""primary"": ""#__Descending_GridHeader_Num_label"", ""x"": 465, ""y"": 224, ""text"": ""Sort largest to smallest"", ""tag"": ""span""}",,step-014.png
+15,click,"{""primary"": ""#GridHeader_Num_3_0_header > div:nth-of-type(1)"", ""x"": 441, ""y"": 412, ""text"": ""Order"", ""tag"": ""div""}",,step-015.png
+16,click,"{""primary"": ""#__FilterField_GridHeader_Num_Num_Input_0_0_input"", ""x"": 447, ""y"": 332, ""text"": ""Filter field: Order, operator: is equal to"", ""tag"": ""input""}",,step-016.png
+17,type,"{""primary"": ""#__FilterField_GridHeader_Num_Num_Input_0_0_input""}",91020262,step-017.png
+18,click,"{""primary"": ""#__GridHeader_Num_ApplyFilters_label"", ""x"": 434, ""y"": 370, ""text"": ""Apply"", ""tag"": ""span""}",,step-018.png
+19,click,"{""primary"": ""#GridHeader_Num_3_0_0_input"", ""x"": 442, ""y"": 448, ""text"": ""91020262"", ""tag"": ""input""}",,step-019.png

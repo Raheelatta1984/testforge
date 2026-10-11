@@ -1,1 +1,258 @@
-[]
+[
+  {
+    "id": "533bf7c7-057e-478c-a76a-79df66a855b3",
+    "order": 1,
+    "action": "navigate",
+    "value": "https://login.microsoftonline.com/74512bd2-de5d-4870-83ee-50eebf992b45/oauth2/authorize?client_id=00000015-0000-0000-c000-000000000000&response_type=code%20id_token&scope=openid%20profile&state=OpenIdConnect.AuthenticationProperties%3DAQAAANCMnd8BFdERjHoAwE_Cl-sBAAAACtQKQ4Qtkk-zuqZ4Dv9DWwAAAAACAAAAAAAQZgAAAAEAACAAAABEo21UoRzOikQ6xy530x73fjrP-WtdCbgSlunJT97c7AAAAAAOgAAAAAIAACAAAADmlVDv7fikZaQiNtHT6i9sTdOJANjIyh6XAnFYHpks8HAAAABXoU-nCmD9r92iij_RP0sQuG_W1gOnFDRk2EvbDZIXkCtXKzivKvpR_bhFkwPFBkJ1AefGcXV6xvOv02aefo3D7Jwrn0yFr4HFpo0UAW3B7G61B9m0HQQUn3oUDrKg4FrJ-bfDhrfDyYpZ_zE0FrG_QAAAAG8Zm6PvsF4hf9MAyIt-6Oocn6jtYSXwa-UJt5htKyJRRMjroahaYYyxdw3iVIEtqc7hEjc-UioY6qH3IpeL1U0%26RedirectTo%3Dhttps%253A%252F%252Fharrisfarm-uat.sandbox.operations.dynamics.com%252F&response_mode=form_post&nonce=639273506181049180.M2IzM2QwOTEtMzJhZi00NWU3LTg0ZjEtOWE0ODk5NjJhNDA0NjBjZTk0YzEtOTRjZC00ZTc3LTk0ZWYtMWZhN2NkNDlhZjhm&redirect_uri=https%3A%2F%2Fgw.au-il102.gateway.prod.island.powerapps.com%2Freplyurl%2Fv1&max_age=86400&x-client-SKU=ID_NET472&x-client-ver=8.3.0.0",
+    "label": "Open https://login.microsoftonline.com/74512bd2-de5d-4870-83ee-50eebf992b45/oauth2/authorize?client_id=00000015-0000-0000-c000-000000000000&response_type=code%20id_token&scope=openid%20profile&state=OpenIdConnect.AuthenticationProperties%3DAQAAANCMnd8BFdERjHoAwE_Cl-sBAAAACtQKQ4Qtkk-zuqZ4Dv9DWwAAAAACAAAAAAAQZgAAAAEAACAAAABEo21UoRzOikQ6xy530x73fjrP-WtdCbgSlunJT97c7AAAAAAOgAAAAAIAACAAAADmlVDv7fikZaQiNtHT6i9sTdOJANjIyh6XAnFYHpks8HAAAABXoU-nCmD9r92iij_RP0sQuG_W1gOnFDRk2EvbDZIXkCtXKzivKvpR_bhFkwPFBkJ…",
+    "selector": null
+  },
+  {
+    "id": "2b9ceb35-19ae-455a-b077-ad72a3f42754",
+    "order": 2,
+    "action": "click",
+    "value": null,
+    "label": "Click Enter your email, phone, or Skype.",
+    "selector": {
+      "primary": "#i0116",
+      "x": 362,
+      "y": 249,
+      "text": "Enter your email, phone, or Skype.",
+      "tag": "input"
+    },
+    "screenshot": "step-002.png"
+  },
+  {
+    "id": "052523c2-d002-4e61-9237-f7094801d655",
+    "order": 3,
+    "action": "type",
+    "value": "{{D365_Login_ID}}",
+    "label": "Type: {{D365_Login_ID}}",
+    "selector": {
+      "primary": "#i0116"
+    },
+    "screenshot": "step-003.png"
+  },
+  {
+    "id": "222a128f-a990-461b-a71a-0abbc8648b49",
+    "order": 4,
+    "action": "press",
+    "value": "Tab",
+    "label": "Press Tab",
+    "selector": null,
+    "screenshot": "step-004.png",
+    "repeat": 3
+  },
+  {
+    "id": "10d3fd8f-ef55-49a2-870b-37f54f83ec36",
+    "order": 5,
+    "action": "click",
+    "value": null,
+    "label": "Click Next",
+    "selector": {
+      "primary": "#idSIButton9",
+      "x": 647,
+      "y": 380,
+      "text": "Next",
+      "tag": "input"
+    },
+    "screenshot": "step-005.png"
+  },
+  {
+    "id": "b995b44b-f57d-4568-8a35-d74f668a6e88",
+    "order": 6,
+    "action": "click",
+    "value": null,
+    "label": "Click Enter the password for ratta@harrisfarm.com.au",
+    "selector": {
+      "primary": "#i0118",
+      "x": 360,
+      "y": 299,
+      "text": "Enter the password for ratta@harrisfarm.com.au",
+      "tag": "input"
+    },
+    "screenshot": "step-006.png"
+  },
+  {
+    "id": "fba39152-3e1e-4c81-81a2-6e277e5e046c",
+    "order": 7,
+    "action": "type",
+    "value": "{{D365_login_Pass}}",
+    "label": "Type: {{D365_login_Pass}}",
+    "selector": {
+      "primary": "#i0118"
+    },
+    "screenshot": "step-007.png"
+  },
+  {
+    "id": "94b8c2ac-a270-4b2b-8601-e2a677d1d300",
+    "order": 8,
+    "action": "press",
+    "value": "Tab",
+    "label": "Press Tab",
+    "selector": null,
+    "screenshot": "step-008.png",
+    "repeat": 3
+  },
+  {
+    "id": "10ea7775-cb85-4fad-95f6-fcb2367b2214",
+    "order": 9,
+    "action": "click",
+    "value": null,
+    "label": "Click Sign in",
+    "selector": {
+      "primary": "#idSIButton9",
+      "x": 640,
+      "y": 433,
+      "text": "Sign in",
+      "tag": "input"
+    },
+    "screenshot": "step-009.png"
+  },
+  {
+    "id": "ed4b214c-dcda-435b-9fb9-5fe18a22df7c",
+    "order": 10,
+    "action": "click",
+    "value": null,
+    "label": "Click ratta@harrisfarm.com.au\nLet's keep your account secure\nWe'll help you set up ano",
+    "selector": {
+      "primary": "#lightbox",
+      "x": 640,
+      "y": 433,
+      "text": "ratta@harrisfarm.com.au\nLet's keep your account secure\nWe'll help you set up ano",
+      "tag": "div"
+    },
+    "screenshot": "step-010.png"
+  },
+  {
+    "id": "7ebcac1f-1505-4caa-a1d9-53f5d4a03ac5",
+    "order": 11,
+    "action": "click",
+    "value": null,
+    "label": "Click Not now",
+    "selector": {
+      "primary": "#skipMfaRegistrationLink",
+      "x": 358,
+      "y": 362,
+      "text": "Not now",
+      "tag": "a"
+    },
+    "screenshot": "step-011.png"
+  },
+  {
+    "id": "504150b8-f0a2-4d16-9f19-7542809e62ff",
+    "order": 12,
+    "action": "click",
+    "value": null,
+    "label": "Click Yes",
+    "selector": {
+      "primary": "#idSIButton9",
+      "x": 622,
+      "y": 434,
+      "text": "Yes",
+      "tag": "input"
+    },
+    "screenshot": "step-012.png"
+  },
+  {
+    "id": "e6f8f67a-2adb-4bfc-a6a7-a1b7c457b325",
+    "order": 13,
+    "action": "click",
+    "value": null,
+    "label": "Click Order",
+    "selector": {
+      "primary": "#GridHeader_Num_3_0_header > div:nth-of-type(1)",
+      "x": 444,
+      "y": 413,
+      "text": "Order",
+      "tag": "div"
+    },
+    "screenshot": "step-013.png"
+  },
+  {
+    "id": "4106eac2-64a5-4c9f-b4ec-aa9e68d0fea6",
+    "order": 14,
+    "action": "click",
+    "value": null,
+    "label": "Click Sort largest to smallest",
+    "selector": {
+      "primary": "#__Descending_GridHeader_Num_label",
+      "x": 465,
+      "y": 224,
+      "text": "Sort largest to smallest",
+      "tag": "span"
+    },
+    "screenshot": "step-014.png"
+  },
+  {
+    "id": "818cf08d-b73c-47e6-91f2-497b1d4d98b2",
+    "order": 15,
+    "action": "click",
+    "value": null,
+    "label": "Click Order",
+    "selector": {
+      "primary": "#GridHeader_Num_3_0_header > div:nth-of-type(1)",
+      "x": 441,
+      "y": 412,
+      "text": "Order",
+      "tag": "div"
+    },
+    "screenshot": "step-015.png"
+  },
+  {
+    "id": "e693a21e-0cab-4566-abf2-102bdabff389",
+    "order": 16,
+    "action": "click",
+    "value": null,
+    "label": "Click Filter field: Order, operator: is equal to",
+    "selector": {
+      "primary": "#__FilterField_GridHeader_Num_Num_Input_0_0_input",
+      "x": 447,
+      "y": 332,
+      "text": "Filter field: Order, operator: is equal to",
+      "tag": "input"
+    },
+    "screenshot": "step-016.png"
+  },
+  {
+    "id": "a6c5dd5c-0cd6-46a4-acc3-9e98e56b2727",
+    "order": 17,
+    "action": "type",
+    "value": "91020262",
+    "label": "Type: 91020262",
+    "selector": {
+      "primary": "#__FilterField_GridHeader_Num_Num_Input_0_0_input"
+    },
+    "screenshot": "step-017.png"
+  },
+  {
+    "id": "eca0b5b0-fa9c-4e41-9f8c-a1af6a0997c7",
+    "order": 18,
+    "action": "click",
+    "value": null,
+    "label": "Click Apply",
+    "selector": {
+      "primary": "#__GridHeader_Num_ApplyFilters_label",
+      "x": 434,
+      "y": 370,
+      "text": "Apply",
+      "tag": "span"
+    },
+    "screenshot": "step-018.png"
+  },
+  {
+    "id": "1cdacaaf-e9e7-496b-88bd-67553120ee92",
+    "order": 19,
+    "action": "click",
+    "value": null,
+    "label": "Click 91020262",
+    "selector": {
+      "primary": "#GridHeader_Num_3_0_0_input",
+      "x": 442,
+      "y": 448,
+      "text": "91020262",
+      "tag": "input"
+    },
+    "screenshot": "step-019.png"
+  }
+]
