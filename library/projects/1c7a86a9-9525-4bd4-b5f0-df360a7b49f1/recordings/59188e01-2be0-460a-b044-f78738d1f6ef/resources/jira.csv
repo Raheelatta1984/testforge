@@ -1,1 +1,31 @@
 ﻿Summary,Step,Action,Description,Input,Screenshot
+"Session 12/10/2026, 01:28:15",1,navigate,Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08,https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08,
+"Session 12/10/2026, 01:28:15",2,click,"Click 126,319",,step-002.png
+"Session 12/10/2026, 01:28:15",3,type,Type: Sa,Sa,step-003.png
+"Session 12/10/2026, 01:28:15",4,click,"Click 136,411",,step-004.png
+"Session 12/10/2026, 01:28:15",5,type,Type: {{HFM_Ext_pass}},{{HFM_Ext_pass}},step-005.png
+"Session 12/10/2026, 01:28:15",6,click,Click Sign in,,step-006.png
+"Session 12/10/2026, 01:28:15",7,click,Click HFM Internal Production,,step-007.png
+"Session 12/10/2026, 01:28:15",8,type,Type: Hi tech,Hi tech,step-008.png
+"Session 12/10/2026, 01:28:15",9,click,Click HFM Internal Production,,step-009.png
+"Session 12/10/2026, 01:28:15",10,click,Click HFM Internal Production,,step-010.png
+"Session 12/10/2026, 01:28:15",11,click,Click Filter stores,,step-011.png
+"Session 12/10/2026, 01:28:15",12,type,Type: Tech,Tech,step-012.png
+"Session 12/10/2026, 01:28:15",13,click,"Click Hi-Tech
+Store 426",,step-013.png
+"Session 12/10/2026, 01:28:15",14,click,"Click Monday 19th of October 2026
+Friday 16th of October 2026
+Thursday 15th of October",,step-014.png
+"Session 12/10/2026, 01:28:15",15,click,Click ASIAN - BABY / SHANGHI BOK CHOY,,step-015.png
+"Session 12/10/2026, 01:28:15",16,click,Click Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY,,step-016.png
+"Session 12/10/2026, 01:28:15",17,type,Type: 5,5,step-017.png
+"Session 12/10/2026, 01:28:15",18,press,Press Enter,Enter,step-018.png
+"Session 12/10/2026, 01:28:15",19,click,"Click 657,475",,step-019.png
+"Session 12/10/2026, 01:28:15",20,type,Type: 2,2,step-020.png
+"Session 12/10/2026, 01:28:15",21,click,Click Ordered quantity for ASIAN - BUK CHOY - EACH,,step-021.png
+"Session 12/10/2026, 01:28:15",22,click,Click Ordered quantity for ASIAN - CHOY SUM - EACH,,step-022.png
+"Session 12/10/2026, 01:28:15",23,click,Click Ordered quantity for ASIAN - CHOY SUM - EACH,,step-023.png
+"Session 12/10/2026, 01:28:15",24,click,Click Comment for ASIAN - BUK CHOY - EACH,,step-024.png
+"Session 12/10/2026, 01:28:15",25,type,Type: Test automation tool,Test automation tool,step-025.png
+"Session 12/10/2026, 01:28:15",26,click,"Click 753,538",,step-026.png
+"Session 12/10/2026, 01:28:15",27,click,Click Sign out,,step-027.png
