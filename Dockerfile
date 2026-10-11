@@ -34,6 +34,9 @@ COPY library ./library
 # nothing on disk. They are a few hundred KB of text, and the reader that serves
 # them is capped (see TF_MAX_LOG_FILE_BYTES).
 COPY logs ./logs
+# The Azure deployment guide ships with the image so the dashboard's Azure tab
+# can render it (GET /api/docs/azure-guide). A few hundred KB of markdown.
+COPY docs ./docs
 RUN mkdir -p /app/artifacts/runs /app/artifacts/rec /app/artifacts/batches
 
 ENV TF_ARTIFACTS=/app/artifacts \

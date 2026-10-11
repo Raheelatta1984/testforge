@@ -1,6 +1,7 @@
 # TestForge AI Tracking
 - **Database:** Permanently stored in Neon PostgreSQL / SQLite (Configured in config.py).
-- **Architecture:** 8-tab Persistent Dashboard (Optimized for Android 12).
+- **Architecture:** 10-tab Persistent Dashboard (Optimized for Android 12).
+- **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
 - **AI Features:** Voice-to-Text input, AI Step Rephrase, Recording-Variable association tagging.
 - **Tree Hierarchy:** Parent Group -> Sub-recording chunk organization.
 - **Repeated steps:** Consecutive identical actions are recorded as one step carrying a repeat count, and replay expands it back into N actions.

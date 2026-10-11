@@ -2754,6 +2754,36 @@ class BatchExecutionTests(unittest.TestCase):
                          "the slot is released when the batch ends")
 
 
+class AzureGuideTests(unittest.TestCase):
+    """The Azure tab reads the deployment guide that ships in docs/."""
+
+    def test_AZ_01_the_guide_is_served_as_markdown(self):
+        from app import main as app_main
+        payload = app_main.azure_deployment_guide()
+        self.assertEqual(payload["source"], "docs/azure-devops-deployment-guide.md")
+        self.assertTrue(payload["markdown"].startswith("# "), "the guide must start with its title heading")
+        self.assertIn("## 1. Target state", payload["markdown"])
+        self.assertGreater(payload["bytes"], 10000, "a stub or empty guide must fail the test, not ship")
+        self.assertFalse(payload["truncated"])
+        self.assertLessEqual(len(payload["markdown"].encode("utf-8")), app_main.DOCS_GUIDE_MAX_BYTES)
+
+    def test_AZ_02_repeated_reads_are_cached(self):
+        from app import main as app_main
+        self.assertIs(app_main.azure_deployment_guide(), app_main.azure_deployment_guide())
+
+    def test_AZ_03_a_deployment_without_the_guide_says_where_to_read_it(self):
+        from app import main as app_main
+        original = app_main._guide_path
+        app_main._guide_path = lambda: "/nonexistent/azure-devops-deployment-guide.md"
+        try:
+            with self.assertRaises(HTTPException) as caught:
+                app_main.azure_deployment_guide()
+        finally:
+            app_main._guide_path = original
+        self.assertEqual(caught.exception.status_code, 404)
+        self.assertIn("github.com", caught.exception.detail, "the error must point at the guide in the repository")
+
+
 def AdaptivePacerForTest():
     """A pacer with no profile file, so tests never touch artifacts/batches."""
     from app.batch_runner import AdaptivePacer
