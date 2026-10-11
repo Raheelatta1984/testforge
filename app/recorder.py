@@ -18,11 +18,13 @@ import re
 import time
 
 from playwright.async_api import async_playwright
+from sqlalchemy.exc import SQLAlchemyError
 
 from app.browser import Preview, explain_launch_error, launch_kwargs
 from app.config import ARTIFACTS, logger
 from app.guardrails import browser_budget
-from app.db import RecordingStep, SessionLocal, resolve_variables, interpolate, Variable, VAR_REGEX
+from app.db import (RecordingStep, SessionLocal, resolve_variables, interpolate,
+                    Variable, VAR_REGEX, fit_text, repair_schema)
 from app import library_store
 from app.step_runtime import StepRuntime, normalize_step
 
@@ -379,6 +381,55 @@ class RecorderSession:
             logger.warning("MERGE SKIPPED %s %s", self.recording_id, exc)
             return None
 
+    def _insert_step(self, action, value, label, selector):
+        """Write one step row and return it with its generated id and order.
+
+        No read-back after the commit: the primary key is generated in Python
+        (see `generate_uuid`) and every other field is the value just written, so
+        a second `SELECT` would only add a way for the save to fail -- a row that
+        a concurrent library write replaced made `refresh()` raise
+        `Could not refresh instance`, which surfaced as another
+        `Failed to save step`.
+        """
+        with SessionLocal() as db:
+            row = RecordingStep(
+                recording_id=self.recording_id,
+                order=self.seq,
+                action=action,
+                value=value,
+                label=label,
+                selector=selector,
+                repeat_count=1,
+            )
+            db.add(row)
+            db.commit()
+            return row
+
+    async def _save_step_row(self, action, value, label, selector):
+        """Insert the step, repairing the schema once if the database refuses it.
+
+        A narrow legacy column (or any other drift) must not cost the user the
+        click they just made, so a rejected insert is retried after
+        `repair_schema()` -- the same repair-and-retry the project API performs.
+        """
+        try:
+            return self._insert_step(action, value, label, selector)
+        except SQLAlchemyError as exc:
+            logger.warning("RECORD RETRY %s %s", self.recording_id, exc)
+            repaired = False
+            try:
+                repaired = bool(await asyncio.to_thread(repair_schema))
+            except Exception as repair_exc:
+                logger.warning("RECORD REPAIR FAILED %s %s", self.recording_id, repair_exc)
+            if not repaired:
+                logger.exception("RECORD FAILED %s %s", self.recording_id, exc)
+                raise RuntimeError(f"Failed to save step: {exc}") from exc
+            try:
+                return self._insert_step(action, value, label, selector)
+            except SQLAlchemyError as retry_exc:
+                logger.exception("RECORD FAILED %s %s", self.recording_id, retry_exc)
+                raise RuntimeError(f"Failed to save step: {retry_exc}") from retry_exc
+
     async def _record(self, action, value=None, label=None, selector=None, force_new=False):
         """Persist the action, folding it into the previous row when it repeats it.
 
@@ -386,6 +437,11 @@ class RecorderSession:
         the replay expands back into N actions. `force_new` keeps an action on its
         own row even when the previous one matches.
         """
+        # Labels are display text and must fit the column they are stored in: a
+        # D365 staging URL redirects to a login URL of several hundred characters,
+        # and Postgres rejects an over-long value instead of truncating it. The
+        # full URL stays in `value`, so the replay is unaffected.
+        label = fit_text(label)
         candidate = {"action": action, "value": value, "label": label, "selector": selector}
         if not force_new and MERGE_REPEAT_STEPS and (action or "").lower() not in MERGE_EXCLUDED_ACTIONS:
             merged = await self._merge_into_previous(candidate)
@@ -400,31 +456,22 @@ class RecorderSession:
         self.seq += 1
 
         try:
-            with SessionLocal() as db:
-                row = RecordingStep(
-                    recording_id=self.recording_id,
-                    order=self.seq,
-                    action=action,
-                    value=value,
-                    label=label,
-                    selector=selector,
-                    repeat_count=1,
-                )
-                db.add(row)
-                db.commit()
-                db.refresh(row)
-                step = {
-                    "id": row.id,
-                    "order": row.order,
-                    "action": row.action,
-                    "value": row.value,
-                    "label": row.label,
-                    "selector": row.selector,
-                    "repeat": 1,
-                }
+            row = await self._save_step_row(action, value, label, selector)
+        except RuntimeError:
+            raise                      # already reported as "Failed to save step"
         except Exception as e:
             logger.exception("RECORD FAILED %s %s", self.recording_id, e)
             raise RuntimeError(f"Failed to save step: {e}") from e
+
+        step = {
+            "id": row.id,
+            "order": row.order,
+            "action": row.action,
+            "value": row.value,
+            "label": row.label,
+            "selector": row.selector,
+            "repeat": 1,
+        }
 
         # Schedule debounced export for smooth saving (not on every step immediately)
         self._schedule_export()

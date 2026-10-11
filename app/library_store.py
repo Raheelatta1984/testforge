@@ -31,11 +31,13 @@ from typing import Any
 from app.config import logger
 from app import github_api
 from app.db import (
+    LABEL_LIMIT,
     Project,
     Recording,
     RecordingStep,
     SessionLocal,
     Variable,
+    fit_text,
     generate_uuid,
 )
 
@@ -761,9 +763,11 @@ def compress_steps(steps: list[dict]) -> list[dict]:
             new_step = dict(cur)
             new_step["repeat"] = count
             # Update label to show repeat, without stacking a suffix on a step
-            # the recorder already merged.
+            # the recorder already merged. The base is clipped so that the " ×N"
+            # marker survives a label that already fills the column.
             base_label = strip_repeat_suffix(cur.get("label") or cur.get("action") or "Step")
-            new_step["label"] = f"{base_label} ×{count}"
+            suffix = f" ×{count}"
+            new_step["label"] = fit_text(base_label, max(1, LABEL_LIMIT - len(suffix))) + suffix
             merged.append(new_step)
             i = j
         else:

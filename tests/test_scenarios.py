@@ -25,6 +25,24 @@ class ScenarioTests(unittest.TestCase):
         self.project = library_store.create_project('D365 synthetic scenario fixture', '')
         self.pid = self.project['id']
 
+    def drop_application_keyring(self):
+        """Remove any application key an earlier test in this process provisioned.
+
+        The "nothing is configured" cases below are about a deployment with no
+        keyring at all, and `TF_MANAGED_ENCRYPTION_KEY=0` only stops the
+        application from *creating* a key -- a key already in the database keeps
+        decrypting, deliberately, because it may have sealed existing values. So
+        the precondition is stated here instead of assumed: a unit test that
+        saved a secret variable before this module ran would otherwise leave a
+        managed key behind and make the scenario pass a save that must fail.
+        """
+        from app import secrets_store
+        from app.db import ManagedKey
+        with SessionLocal() as db:
+            db.query(ManagedKey).filter(ManagedKey.purpose == secrets_store.PURPOSE).delete()
+            db.commit()
+        secrets_store.reset_cache()
+
     def recording(self, name, steps=None):
         return library_store.create_recording(self.pid, name, '', steps=steps or [{'action':'navigate','value':'http://fixture.test'}])
 
@@ -61,6 +79,7 @@ class ScenarioTests(unittest.TestCase):
         # No environment key AND no application key is the only way to have no
         # keyring at all now; that state must refuse the save rather than quietly
         # storing the secret in plaintext.
+        self.drop_application_keyring()
         with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS':'','TF_MANAGED_ENCRYPTION_KEY':'0'}), TestClient(app) as client:
             result=client.post('/api/variables',json={'project_id':self.pid,'name':'password','value':'not-allowed','is_secret':True})
             self.assertEqual(result.status_code,422)
@@ -248,6 +267,7 @@ class ScenarioTests(unittest.TestCase):
         live = os.environ['TF_VARIABLE_ENCRYPTION_KEYS']
         # Encryption can only be switched off deliberately now, and when it is,
         # the probe and the save path must blame the same thing.
+        self.drop_application_keyring()
         with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': '', 'TF_MANAGED_ENCRYPTION_KEY': '0'}), TestClient(app) as client:
             report = client.get('/api/health').json()['encryption']
             self.assertEqual((report['configured'], report['ready'], report['keys']), (False, False, 0))

@@ -147,6 +147,12 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-BATCH-10 | Batch holds the browser slot | While a batch replays, the shared browser budget reports exactly one active slot, so a recording session cannot open a second Chromium; the slot is released when the batch ends. |
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
 | UT-IMG-01 | COPY survives .dockerignore | Every local `COPY` source in the Dockerfile (app, library, logs, docs, requirements.txt) is present in the build context. A `docs` entry in `.dockerignore` once broke every deploy with `failed to compute cache key ... "/docs": not found` while the Azure tab needed the guide inside the image. |
+| UT-DB-01 | Labels fit their column | `fit_text` clips to 500 with a visible ellipsis and leaves `NULL` and short text alone; the clip is enforced on `RecordingStep`, so the API editor, the importer and the compressor are covered and not only the recorder. This is the guard against Postgres refusing an over-long label. |
+| UT-DB-02 | A long navigate URL is still replayable | A 600+ character `login.microsoftonline.com` URL (what a D365 staging URL redirects to) is stored whole in `value` while the label is clipped to 500; compressing such a step keeps its ` ×N` marker inside the column. |
+| UT-DB-03 | A narrow legacy column is widened | A `recording_steps.label varchar(300)` from an older revision is repaired to `VARCHAR(500)` on Postgres; a column already matching the model, an unbounded `TEXT` column and SQLite are left untouched. |
+| UT-DB-04 | A rejected step is retried after the repair | An insert refused the way `varchar(300)` refuses it runs `repair_schema()` once and saves the step on the second attempt, producing exactly one row. This is the regression behind `Failed to save step: ... value too long for type character varying(300)`. |
+| UT-DB-05 | A saved step is not read back | A committed step is saved without a `refresh()` SELECT, so a row a concurrent library write replaced cannot raise `Failed to save step: Could not refresh instance '<RecordingStep at 0x...>'`; the id returned is the id stored. |
+| UT-DB-06 | Over-long create fields are refused up front | `POST /api/recordings` answers 422 for a name over 255 or a start URL over 1000 instead of letting the insert fail on a bounded column; a D365 staging URL is still accepted. |
 
 Publishing (`UT-PUB-*`) covers the four ways a save can end: published, saved locally with a retry that really is scheduled, saved locally with publishing disabled and no retry promised, and *refused* — GitHub answered 401/403, so no retry is scheduled and the message names the fix. `UT-PUB-09` keeps a rate-limit 403 out of that last bucket, because it is the same status and a very different outcome. The API publisher is exercised against an in-memory fake transport, so no test touches GitHub.
 
@@ -155,6 +161,8 @@ Pen-test scenarios (`UT-SEC-*`) attack the credential surface rather than the fe
 Queue hygiene (`UT-QUEUE-*`) covers the runs that will never execute: orphans left by a restart, entries stale behind a busy browser, and duplicates of a recording that is already waiting. Batch execution (`UT-BATCH-*`) covers one browser for many recordings, learned step budgets, screenshots only where they are worth the CPU, and the retry rule that distinguishes a transient timeout from a broken recording.
 
 Resource guardrails (`UT-MEM-*`) cover the limits that keep a 512MB instance inside its memory ceiling: one Chromium shared by recording and execution, bounded live frames, bounded run event buffers, a bounded run list, and an artifact export that streams instead of buffering.
+
+Schema drift (`UT-DB-*`) covers a database that disagrees with the model: a label longer than the column it is stored in, a legacy `varchar(300)` that `create_all()` never widens because the table already exists, and the repair-and-retry that saves the user's step instead of failing their recording.
 
 ## Library scenarios
 

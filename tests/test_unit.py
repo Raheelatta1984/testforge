@@ -1248,6 +1248,239 @@ class SaveCrashTests(unittest.TestCase):
         self.assertTrue(any("export failed" in line for line in session._save_logs))
 
 
+class SchemaDriftTests(unittest.TestCase):
+    """A column narrower than the model must not cost the user a recorded step.
+
+    The live failure: recording a D365 staging URL
+    (`https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable`)
+    redirects the browser to a `login.microsoftonline.com/.../oauth2/v2.0/authorize?...`
+    URL of several hundred characters. The recorder labelled the navigate step
+    `Open <url>` and the insert failed with
+    `psycopg2.errors.StringDataRightTruncation: value too long for type character
+    varying(300)`, which the dashboard reported as `Failed to save step`. The
+    deployed database still carried the `varchar(300)` width from an older
+    revision, and `create_all()` never changes a column that already exists.
+    """
+
+    def test_UT_DB_01_long_labels_are_clipped_to_the_column_width(self):
+        from app.db import LABEL_LIMIT, RecordingStep, fit_text
+
+        self.assertEqual(LABEL_LIMIT, 500)
+        self.assertIsNone(fit_text(None), "a nullable column keeps its NULL")
+        self.assertEqual(fit_text("Open the page"), "Open the page")
+        clipped = fit_text("u" * 900)
+        self.assertEqual(len(clipped), LABEL_LIMIT)
+        self.assertTrue(clipped.endswith("…"), "the clip stays visible, not silent")
+        # The guard sits on the model, so the API editor, the library importer and
+        # the compressor are covered as well -- not only the recorder.
+        row = RecordingStep(recording_id="r", order=1, action="navigate",
+                            label="Open " + "u" * 900)
+        self.assertEqual(len(row.label), LABEL_LIMIT)
+
+    def test_UT_DB_02_a_long_navigate_label_keeps_the_whole_url_in_value(self):
+        from app import library_store
+        from app.db import LABEL_LIMIT
+        from app.recorder import RecorderSession
+
+        url = ("https://login.microsoftonline.com/9f/oauth2/v2.0/authorize?client_id=00000007"
+               "&redirect_uri=" + "https%3A%2F%2Fharrisfarm-uat.sandbox.operations.dynamics.com%2F" * 9
+               + "&response_mode=form_post&state=abc")
+        self.assertGreater(len(url), LABEL_LIMIT, "the scenario needs an over-long URL")
+        project = library_store.create_project("Long labels", "")
+        rec = library_store.create_recording(
+            project["id"], "D365_UAT_Login",
+            "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
+        )
+        session = RecorderSession(rec["id"], "", 0)
+        saved = {}
+
+        async def exercise():
+            saved.update(await session._record("navigate", value=url, label=f"Open {url}",
+                                               force_new=True))
+            await session.stop()
+
+        asyncio.run(exercise())
+        self.assertEqual(saved["value"], url, "the URL the replay needs is stored whole")
+        self.assertEqual(len(saved["label"]), LABEL_LIMIT)
+        self.assertTrue(saved["label"].startswith("Open https://login.microsoftonline.com/"))
+        self.assertTrue(saved["label"].endswith("…"))
+        exported = library_store.export_recording(rec["id"])
+        self.assertEqual(exported["steps"][0]["value"], url)
+
+        # Compressing such a step must keep the repeat marker inside the column.
+        clicks = [{"order": order, "action": "click", "label": "c" * 700,
+                   "selector": {"primary": "#next"}} for order in (1, 2)]
+        compressed = library_store.compress_steps(clicks)
+        self.assertEqual(len(compressed), 1)
+        self.assertEqual(compressed[0]["repeat"], 2)
+        self.assertTrue(compressed[0]["label"].endswith(" ×2"))
+        self.assertLessEqual(len(compressed[0]["label"]), LABEL_LIMIT)
+
+    def test_UT_DB_03_a_narrow_legacy_column_is_widened(self):
+        """The repair widens only what is narrower than the model declares."""
+        from sqlalchemy.dialects.postgresql import TEXT, VARCHAR, dialect
+        from app.db import RecordingStep, _widen_narrow_columns
+
+        class Inspector:
+            def __init__(self, columns):
+                self.columns = columns
+
+            def get_columns(self, table):
+                return self.columns
+
+        class Connection:
+            """Records the DDL a real Postgres connection would run."""
+
+            def __init__(self):
+                self.dialect = dialect()
+                self.sql = []
+
+            def execute(self, statement):
+                self.sql.append(str(statement))
+
+        table = RecordingStep.__table__
+        self.assertEqual(table.c.label.type.length, 500)
+        connection = Connection()
+        repairs = []
+        _widen_narrow_columns(
+            Inspector([
+                {"name": "label", "type": VARCHAR(300), "nullable": True},     # legacy width
+                {"name": "action", "type": VARCHAR(100), "nullable": True},    # matches the model
+                {"name": "value", "type": TEXT(), "nullable": True},           # already unbounded
+                {"name": "selector", "type": VARCHAR(500), "nullable": True},  # matches the model
+            ]),
+            connection, table, repairs,
+        )
+        self.assertEqual(connection.sql,
+                         ["ALTER TABLE recording_steps ALTER COLUMN label TYPE VARCHAR(500)"])
+        self.assertEqual(repairs, ["recording_steps.label: widened VARCHAR(300) -> VARCHAR(500)"])
+
+        # SQLite ignores a VARCHAR length, so nothing may be altered there.
+        class SqliteConnection:
+            dialect = type("Dialect", (), {"name": "sqlite"})()
+
+            def execute(self, statement):
+                raise AssertionError("SQLite stores any length; no ALTER is needed")
+
+        _widen_narrow_columns(Inspector([{"name": "label", "type": VARCHAR(300), "nullable": True}]),
+                              SqliteConnection(), table, [])
+
+    def test_UT_DB_04_the_recorder_repairs_the_schema_and_saves_the_step(self):
+        """A rejected insert is retried once after the repair, never dropped."""
+        from sqlalchemy.exc import ProgrammingError
+        from app import library_store, recorder
+        from app.db import RecordingStep, SessionLocal
+
+        project = library_store.create_project("Schema repair", "")
+        rec = library_store.create_recording(project["id"], "retry", "/demo.html")
+        session = recorder.RecorderSession(rec["id"], "", 0)
+        real_session = recorder.SessionLocal
+        original_repair = recorder.repair_schema
+        attempts, repairs = [], []
+
+        class RefusingSession:
+            """A session whose commit is rejected the way the narrow column rejects it."""
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def add(self, row):
+                self.row = row
+
+            def commit(self):
+                raise ProgrammingError(
+                    "INSERT INTO recording_steps (recording_id, \"order\", action, label) VALUES (...)",
+                    {},
+                    Exception("value too long for type character varying(300)"),
+                )
+
+        def flaky_session():
+            attempts.append(1)
+            return RefusingSession() if len(attempts) == 1 else real_session()
+
+        async def exercise():
+            step = await session._record("navigate", value="https://example.com/login",
+                                         label="Open https://example.com/login", force_new=True)
+            await session.stop()
+            return step
+
+        try:
+            recorder.SessionLocal = flaky_session
+            recorder.repair_schema = lambda: repairs.append(True) or True
+            step = asyncio.run(exercise())
+        finally:
+            recorder.SessionLocal = real_session
+            recorder.repair_schema = original_repair
+
+        self.assertEqual(len(attempts), 2, "the rejected insert must be attempted again")
+        self.assertTrue(repairs, "the schema repair must run before the retry")
+        self.assertEqual(step["label"], "Open https://example.com/login")
+        with SessionLocal() as db:
+            rows = db.query(RecordingStep).filter_by(recording_id=rec["id"]).all()
+        self.assertEqual(len(rows), 1, "exactly one row, the retry does not duplicate")
+
+    def test_UT_DB_05_a_saved_step_is_not_read_back(self):
+        """`Could not refresh instance` must not fail a save that committed.
+
+        The recorder used to `refresh()` the row after the commit -- a second
+        SELECT by primary key. A row that a concurrent library write had replaced
+        made that SELECT return nothing, and the dashboard showed
+        `Failed to save step: Could not refresh instance '<RecordingStep at 0x...>'`
+        even though the step was already stored.
+        """
+        from sqlalchemy.orm import Session
+        from app import library_store
+        from app.db import RecordingStep, SessionLocal
+        from app.recorder import RecorderSession
+
+        project = library_store.create_project("No read back", "")
+        rec = library_store.create_recording(project["id"], "no-read-back", "/demo.html")
+        session = RecorderSession(rec["id"], "", 0)
+        original = Session.refresh
+
+        def refuse(*_args, **_kwargs):
+            raise AssertionError("a written step must not be read back to save it")
+
+        async def exercise():
+            step = await session._record("click", label="Click name", selector={"primary": "#name"})
+            await session.stop()
+            return step
+
+        Session.refresh = refuse
+        try:
+            step = asyncio.run(exercise())
+        finally:
+            Session.refresh = original
+        self.assertEqual(step["label"], "Click name")
+        self.assertTrue(step["id"])
+        with SessionLocal() as db:
+            rows = db.query(RecordingStep).filter_by(recording_id=rec["id"]).all()
+        self.assertEqual([row.id for row in rows], [step["id"]], "the id returned is the stored row")
+
+    def test_UT_DB_06_an_over_long_recording_url_is_rejected_before_the_insert(self):
+        """A value the column cannot hold is a 422, not a `value too long` error."""
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.main import app
+
+        project = library_store.create_project("Bounded fields", "")
+        with TestClient(app) as client:
+            response = client.post("/api/recordings", json={
+                "project_id": project["id"], "name": "D365",
+                "start_url": "https://example.com/?q=" + "x" * 1200,
+            })
+            self.assertEqual(response.status_code, 422)
+            self.assertIn("too long", response.json()["detail"])
+            accepted = client.post("/api/recordings", json={
+                "project_id": project["id"], "name": "D365",
+                "start_url": "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
+            })
+            self.assertEqual(accepted.status_code, 201)
+
+
 class PreviewCostTests(unittest.TestCase):
     def test_UT_RUN_03_no_frame_is_rendered_without_a_viewer(self):
         """The live window must not burn CPU for a run nobody is watching."""
