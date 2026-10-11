@@ -18,6 +18,19 @@ function DemoStep({ index, title, children }) {
       children));
 }
 
+function VoiceDemo() {
+  const [text, setText] = useState('');
+  const supported = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
+  return e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2' },
+    e('h3', { className: 'text-sm font-bold text-indigo-300' }, '🎤 Voice input and text cleanup · local helpers'),
+    e('p', { className: 'text-xs text-slate-400' },
+      'The microphone button on this field runs your own browser\u2019s speech recognition — nothing is sent to a server and no paid AI is involved. The sparkle button then applies the deterministic local cleanup (collapse whitespace, capitalise, add a full stop) via /api/ai/rephrase. Tap 🎤, say a sentence, then press ✨.'),
+    !supported && e('p', { role: 'alert', className: 'text-xs text-amber-300' },
+      'This browser does not expose speech recognition (Chrome and Edge do), so the microphone will not work here. You can still type a sentence and try the cleanup button.'),
+    e(AiInput, { value: text, onChange: ev => setText(ev.target.value), placeholder: 'Tap 🎤 and speak, or type here, then press ✨', isArea: true }),
+    text && e('button', { type: 'button', className: 'key-btn', onClick: () => setText('') }, 'CLEAR'));
+}
+
 function DemoFrame({ src, title, height = 320 }) {
   const [nonce, setNonce] = useState(0);
   return e('div', { className: 'browser-shell' },
@@ -150,6 +163,8 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
       e('p', { className: 'text-xs text-slate-400' },
         'This is the page your recordings drive. It is rendered here by your own browser so you can see what the steps are doing; replay drives the identical page in the server browser. Type a name and press Continue.'),
       e(DemoFrame, { src: '/demo.html', title: 'TestForge sample app', height: 300 })),
+
+    e(VoiceDemo, null),
 
     e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3' },
       e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'Synthetic domain fixtures · /domain-demo.html'),
