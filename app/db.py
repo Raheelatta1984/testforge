@@ -140,6 +140,32 @@ class Batch(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
 
+class ManagedKey(Base):
+    """Encryption keyring the application provisions and owns itself.
+
+    Exists so a deployment can encrypt without an operator pasting
+    ``TF_VARIABLE_ENCRYPTION_KEYS`` into the hosting platform. The trade-off is
+    deliberate and not hidden: this key sits in the same database as the
+    ciphertext, so it protects the library tree that gets published to GitHub —
+    the actual leak path for this application — and *not* a dump of the database
+    itself. An operator who wants the key to live outside the data still sets the
+    environment variable, which keeps precedence over every row here.
+
+    Rows are never deleted on rotation. The newest key encrypts; the older ones
+    stay so values sealed before the rotation (including queued run snapshots)
+    still decrypt. Two processes racing to create the first key is harmless:
+    both land in the keyring and both decrypt.
+    """
+
+    __tablename__ = "managed_keys"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    purpose: Mapped[str] = mapped_column(String(50), default="variables", index=True)
+    sequence: Mapped[int] = mapped_column(Integer, default=1)  # highest wins; ties are harmless
+    material: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # Result of the most recent schema check. Exposed by /api/diagnostics so a bad
 # deployment can be diagnosed from the dashboard instead of the server logs.
 SCHEMA_STATUS = {

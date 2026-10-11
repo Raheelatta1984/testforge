@@ -8,7 +8,9 @@
 <script crossorigin src="/vendor/react-dom.production.min.js"></script>
 <style>
   body { background: #020617; color: #f8fafc; font-family: system-ui; overflow: hidden; height: 100vh; width: 100vw; }
-  .nav-btn { flex: 1; padding: 12px; font-size: 11px; font-weight: bold; color: #64748b; border-top: 2px solid transparent; }
+  /* Eleven tabs have to fit a phone, so the horizontal padding gives way first
+     rather than a tab being pushed off the bar. */
+  .nav-btn { flex: 1 1 0; min-width: 0; padding: 12px 2px; font-size: 11px; font-weight: bold; color: #64748b; border-top: 2px solid transparent; }
   .nav-btn.active { color: #818cf8; border-top-color: #818cf8; background: rgba(30, 41, 59, 0.5); }
   .content-area { height: calc(100vh - 75px); overflow-y: auto; padding: 15px; padding-bottom: 90px; }
   .canvas-window { background: #000; border: 2px solid #1e293b; border-radius: 16px; overflow: hidden; aspect-ratio: 16/10; }
@@ -31,6 +33,7 @@
 <div id="root"></div>
 <script src="/import-components.js"></script>
 <script src="/scenario-components.js"></script>
+<script src="/demo-components.js"></script>
 <script>
 const { useState, useEffect, useRef } = React;
 const e = React.createElement;
@@ -84,7 +87,7 @@ function App({ access }) {
     setLiveWindow(next);
     localStorage.setItem("tf_live_window", next ? "1" : "0");
   };
-  const tabs = [["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"], ["azure","☁️"]];
+  const tabs = [["demo","🧪"], ["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"], ["azure","☁️"]];
 
   return e('div', { className: "h-full flex flex-col" },
     e('header', { className: "p-4 border-b border-slate-800 flex justify-between bg-slate-950/80 backdrop-blur" },
@@ -97,6 +100,8 @@ function App({ access }) {
       activeProject && e('span', { className: "text-[10px] bg-indigo-900 px-2 py-1 rounded" }, activeProject.name)
     ),
     e('div', { className: "content-area" },
+      tab === "demo" && e(DemoTab, { project: activeProject, setActiveProject, setTab, liveWindow,
+        onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "projects" && e(Projects, { setActiveProject, activeProject }),
       tab === "variables" && e(Variables, { project: activeProject }),
       tab === "record" && e(Recorder, { project: activeProject }),
@@ -107,7 +112,11 @@ function App({ access }) {
       tab === "azure" && e(Azure)
     ),
     e('nav', { className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex" },
-      tabs.map(([k, icon]) => e('button', { key: k, onClick: () => setTab(k), className: `nav-btn ${tab===k?'active':''}` }, icon))
+      // The bar is icon-only to fit a phone; the name is still reachable by
+      // hover, long-press and screen reader so no tab is a guess.
+      tabs.map(([k, icon]) => e('button', { key: k, onClick: () => setTab(k), title: k.toUpperCase(),
+        'aria-label': k, 'aria-current': tab === k ? 'page' : undefined,
+        className: `nav-btn ${tab===k?'active':''}` }, icon))
     )
   );
 }

@@ -1,0 +1,180 @@
+/* Demo tab: the built-in sample app and the synthetic domain fixtures.
+   Everything here is served by this instance - no external site, no account,
+   no real data, and no extra service. Loaded after index.html's API helpers. */
+
+const DEMO_PACK_BLURB = {
+  commerce: 'Order quantity → line total. Negative row rejects a zero quantity.',
+  banking: 'Transfer amount → remaining balance. Negative row trips insufficient funds.',
+  insurance: 'Applicant age → quote. Negative row rejects an under-18 applicant.',
+  hrms: 'Leave days → remaining balance. Negative row trips insufficient leave.',
+  travel: 'Seats requested → booking total. Negative row runs out of seats.',
+};
+
+function DemoStep({ index, title, children }) {
+  return e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 flex gap-3' },
+    e('span', { className: 'shrink-0 w-6 h-6 rounded-full bg-indigo-600 text-white text-xs font-bold flex items-center justify-center' }, index),
+    e('div', { className: 'space-y-2 min-w-0 flex-1' },
+      e('p', { className: 'text-sm font-bold text-indigo-300' }, title),
+      children));
+}
+
+function DemoFrame({ src, title, height = 320 }) {
+  const [nonce, setNonce] = useState(0);
+  return e('div', { className: 'browser-shell' },
+    e('div', { className: 'browser-bar' },
+      e('span', { className: 'dot red' }), e('span', { className: 'dot yellow' }), e('span', { className: 'dot green' }),
+      e('span', { className: 'browser-url' }, src),
+      e('button', { type: 'button', className: 'key-btn', onClick: () => setNonce(nonce + 1) }, 'RELOAD')),
+    // Same-origin page from this instance, so the browser renders it directly;
+    // no screencast, no server-side browser and no run budget is consumed.
+    e('iframe', { key: nonce, src, title, className: 'w-full bg-white', style: { height: `${height}px`, border: '0' } }));
+}
+
+function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
+  const [projects, setProjects] = useState([]);
+  const [recordings, setRecordings] = useState([]);
+  const [packs, setPacks] = useState([]);
+  const [pack, setPack] = useState('');
+  const [packDetail, setPackDetail] = useState(null);
+  const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState('');
+
+  const sample = projects.find(p => p.id === 'qa-sample-app')
+    || projects.find(p => (p.base_url || '').endsWith('/demo.html'));
+  const sampleActive = !!(project && sample && project.id === sample.id);
+
+  useEffect(() => {
+    API.get('/api/projects?fast=true').then(list => setProjects(Array.isArray(list) ? list : []))
+      .catch(err => setError(err.message));
+    API.get('/api/imports/packs').then(list => setPacks(Array.isArray(list) ? list : [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!sample) { setRecordings([]); return; }
+    API.get(`/api/projects/${sample.id}/recordings?fast=true`)
+      .then(list => setRecordings(Array.isArray(list) ? list : [])).catch(() => setRecordings([]));
+  }, [sample && sample.id]);
+
+  const chooseSample = () => {
+    if (!sample) return;
+    setActiveProject(sample);
+    localStorage.setItem('tf_project', JSON.stringify(sample));
+    setNotice(`“${sample.name}” is now the active project.`);
+  };
+
+  // The sample project ships in library/, but an instance pointed at an empty
+  // TF_LIBRARY_DIR will not have it. Creating it is an ordinary project save and
+  // publishes like one, so it stays an explicit click rather than a side effect.
+  const createSample = async () => {
+    setBusy('project'); setError('');
+    try {
+      const created = await API.post('/api/projects', { name: 'TestForge Sample App', base_url: '/demo.html' });
+      setProjects(prev => [created, ...prev.filter(p => p.id !== created.id)]);
+      setActiveProject(created);
+      localStorage.setItem('tf_project', JSON.stringify(created));
+      setNotice(created.publish_message || `“${created.name}” created and selected.`);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  const replay = async (recording) => {
+    setBusy(recording.id); setError('');
+    try {
+      const result = await API.post('/api/runs', { target_id: recording.id, display_window: liveWindow !== false });
+      onRun(result.run_id);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  const loadPack = async (slug) => {
+    setPack(slug); setPackDetail(null); setError('');
+    if (!slug) return;
+    setBusy('pack');
+    try { setPackDetail(await API.get('/api/imports/packs/' + slug)); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(''); }
+  };
+
+  const dataset = (packDetail && packDetail.execution_plan && packDetail.execution_plan.dataset) || [];
+
+  return e('div', { className: 'space-y-4' },
+    e('div', { className: 'bg-slate-900 border border-indigo-800 rounded-2xl p-4 space-y-2' },
+      e('h2', { className: 'font-bold text-lg text-indigo-300' }, '🧪 Demo · try TestForge without a real application'),
+      e('p', { className: 'text-xs text-slate-400' },
+        'Both pages below are static files served by this instance. Nothing here signs in anywhere, reaches an external site, or touches a real account, payment, policy, employee or booking. Use this tab to prove recording, replay and evidence work before you point TestForge at your own application.'),
+      !sample && e('p', { role: 'alert', className: 'text-xs text-amber-300' },
+        'No sample project found in this library. Create it below to follow the walkthrough.')),
+
+    error && e('p', { role: 'alert', className: 'text-sm text-red-300' }, error),
+    notice && e('p', { role: 'status', className: 'text-sm text-emerald-300' }, notice),
+
+    e(DemoStep, { index: 1, title: 'Select the sample project' },
+      e('p', { className: 'text-xs text-slate-400' },
+        sample ? `“${sample.name}” points at the built-in page /demo.html and already holds the variable {{user}} = Ada.`
+               : 'The sample project is missing from this library. Creating it saves and publishes exactly like any other project.'),
+      sample
+        ? e('button', { type: 'button', className: 'key-btn', onClick: chooseSample, disabled: sampleActive },
+            sampleActive ? '✓ ACTIVE PROJECT' : 'USE THE SAMPLE PROJECT')
+        : e('button', { type: 'button', className: 'key-btn', onClick: createSample, disabled: busy === 'project' },
+            busy === 'project' ? 'CREATING…' : 'CREATE SAMPLE PROJECT')),
+
+    e(DemoStep, { index: 2, title: 'Replay a ready-made test' },
+      e('p', { className: 'text-xs text-slate-400' },
+        'These two recordings ship with the repository. “Hello literal” types a fixed name; “Hello variable” types {{user}}, so it shows how a variable is substituted at replay time. Each run opens the single server-side Chromium, captures one low-quality JPEG per step, and lands in Runs and Artifacts.'),
+      !sampleActive && e('p', { className: 'text-xs text-amber-300' }, 'Select the sample project first.'),
+      sampleActive && recordings.length === 0 && e('p', { className: 'text-xs text-slate-500' }, 'No recordings in this project yet — record one in step 3.'),
+      sampleActive && recordings.map(r => e('div', { key: r.id, className: 'flex items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-lg p-2' },
+        e('div', { className: 'min-w-0' },
+          e('div', { className: 'text-xs font-bold text-indigo-300 truncate' }, r.name),
+          e('div', { className: 'text-[10px] text-slate-500 truncate' }, `${r.step_count != null ? r.step_count + ' steps · ' : ''}${r.start_url || '/demo.html'}`)),
+        e('button', { type: 'button', className: 'key-btn shrink-0', disabled: !!busy, onClick: () => replay(r) },
+          busy === r.id ? 'QUEUEING…' : 'RUN')))),
+
+    e(DemoStep, { index: 3, title: 'Record your own against the sample app' },
+      e('p', { className: 'text-xs text-slate-400' },
+        'Open the Record tab and press START with the URL left blank — a blank URL opens /demo.html on the server browser. Click the picture to click, type into the text box, then SAVE.'),
+      e('div', { className: 'flex flex-wrap gap-2' },
+        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('record') }, 'OPEN RECORD TAB'),
+        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('library') }, 'OPEN LIBRARY TAB'))),
+
+    e(DemoStep, { index: 4, title: 'Check the evidence' },
+      e('p', { className: 'text-xs text-slate-400' },
+        'Runs shows each step with its status and live picture; Artifacts collects the screenshots and any video; Comparison diffs the step logs of recent runs. A PDF report is available per run.'),
+      e('div', { className: 'flex flex-wrap gap-2' },
+        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('runs') }, 'OPEN RUNS TAB'),
+        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('artifacts') }, 'OPEN ARTIFACTS TAB'))),
+
+    e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2' },
+      e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'The sample app · /demo.html'),
+      e('p', { className: 'text-xs text-slate-400' },
+        'This is the page your recordings drive. It is rendered here by your own browser so you can see what the steps are doing; replay drives the identical page in the server browser. Type a name and press Continue.'),
+      e(DemoFrame, { src: '/demo.html', title: 'TestForge sample app', height: 300 })),
+
+    e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3' },
+      e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'Synthetic domain fixtures · /domain-demo.html'),
+      e('p', { className: 'text-xs text-slate-400' },
+        'One local page simulating five business domains, each with a positive and a negative dataset row and a teardown that resets the form. Simulation only: no real transaction is performed and no domain certification is implied.'),
+      e('label', { className: 'block text-xs text-slate-400' }, 'Choose a domain',
+        e('select', {
+          'aria-label': 'Demo domain fixture', value: pack, disabled: busy === 'pack',
+          className: 'block mt-1 bg-slate-800 p-2 rounded text-xs',
+          onChange: ev => loadPack(ev.target.value)
+        }, e('option', { value: '' }, 'Choose an example…'),
+           packs.map(p => e('option', { key: p.id, value: p.id }, p.name)))),
+      pack && e('p', { className: 'text-xs text-slate-400' }, DEMO_PACK_BLURB[pack] || ''),
+      pack && e(DemoFrame, { src: `/domain-demo.html?pack=${encodeURIComponent(pack)}`, title: `Domain fixture ${pack}`, height: 340 }),
+      dataset.length > 0 && e('div', { className: 'space-y-1' },
+        e('p', { className: 'text-xs font-bold text-slate-300' }, 'Dataset rows this example asserts'),
+        e('div', { className: 'overflow-x-auto border border-slate-800 rounded-lg' },
+          e('table', { className: 'w-full text-[10px]' },
+            e('thead', {}, e('tr', { className: 'bg-slate-950 text-slate-400' },
+              e('th', { className: 'text-left p-2' }, 'Input'), e('th', { className: 'text-left p-2' }, 'Expected result'))),
+            e('tbody', {}, dataset.map((row, i) => e('tr', { key: i, className: 'border-t border-slate-800' },
+              e('td', { className: 'p-2 font-mono' }, row.amount),
+              e('td', { className: 'p-2' }, row.expected))))))),
+      packDetail && e('p', { className: 'text-xs text-slate-400' },
+        `To save this as a real test: Library tab → UPLOAD TEST SCRIPTS → “Or start with a synthetic domain pack” → ${packDetail.name}, then TEST BEFORE PUBLISHING and SAVE TO LIBRARY.`),
+      packDetail && e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('library') }, 'OPEN LIBRARY TAB'),
+      packDetail && packDetail.notice && e('p', { className: 'text-[10px] text-amber-300' }, packDetail.notice)));
+}

@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import guardrails, logs_local, run_queue
+from app import guardrails, logs_local, run_queue, secrets_store
 from app.config import ARTIFACTS
 from app.errors import redact
 from app.db import (
@@ -276,6 +276,10 @@ def health():
         "optimized": True,
         "library_publish_enabled": library_store.publish_enabled(),
         "library_publish_mode": library_store.publish_mode(),
+        # Whether an encrypted variable can be saved at all. Reported here so the
+        # Variables tab can say so before the operator types a password into a
+        # field that is going to reject it. Carries no key material.
+        "encryption": secrets_store.status(),
         # Cheap, allocation-free, and it is what Render's health check hits.
         "guardrails": guardrails.report(),
     }
@@ -494,6 +498,23 @@ def get_project_vars(project_id: str):
             "variables": vars_list,
             "count": len(vars_list),
         }
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+
+
+@app.get("/api/encryption")
+def encryption_status():
+    """Where the keyring comes from and whether it works. Never key material."""
+    return secrets_store.status()
+
+
+@app.post("/api/encryption/rotate")
+def encryption_rotate():
+    """Mint a new application key and re-seal every stored value with it."""
+    try:
+        return secrets_store.rotate()
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     except LibraryError as exc:
         raise _library_http(exc) from exc
 

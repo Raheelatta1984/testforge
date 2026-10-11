@@ -58,11 +58,17 @@ class ScenarioTests(unittest.TestCase):
             self.assertNotIn(value,text); self.assertNotIn('rotated-synthetic',text)
 
     def test_UT_SCENE_02_missing_wrong_keys_and_ciphertext_injection_fail_closed(self):
-        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS':''}), TestClient(app) as client:
+        # No environment key AND no application key is the only way to have no
+        # keyring at all now; that state must refuse the save rather than quietly
+        # storing the secret in plaintext.
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS':'','TF_MANAGED_ENCRYPTION_KEY':'0'}), TestClient(app) as client:
             result=client.post('/api/variables',json={'project_id':self.pid,'name':'password','value':'not-allowed','is_secret':True})
             self.assertEqual(result.status_code,422)
         sealed=encrypt('private')
-        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS':Fernet.generate_key().decode()}), self.assertRaises(ValueError):
+        # A ring holding only an unrelated key must not open this ciphertext. The
+        # application keys are excluded here precisely because they *would* open it.
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS':Fernet.generate_key().decode(),
+                                     'TF_MANAGED_ENCRYPTION_KEY':'0'}), self.assertRaises(ValueError):
             decrypt(sealed)
         with self.assertRaises(ValueError): library_store.create_variable(self.pid,'foo',sealed)
         self.assertEqual(scrub_entry({'status':'passed','action':'fill','value':'passed'},['passed']),
@@ -230,3 +236,210 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn('[redacted]',json.dumps(events))
         with SessionLocal() as db:
             self.assertNotIn(secret[:100],json.dumps(db.get(Run,rid).execution_log))
+
+    def test_UT_SCENE_14_unconfigured_keyring_is_reported_before_a_save_is_attempted(self):
+        """A missing keyring must be discoverable, not only discovered by failing.
+
+        The dashboard disables "Encrypt at rest" from this report, so it has to
+        say which variable to set and how to produce a key - and it must never
+        carry key material itself.
+        """
+        from app import secrets_store
+        live = os.environ['TF_VARIABLE_ENCRYPTION_KEYS']
+        # Encryption can only be switched off deliberately now, and when it is,
+        # the probe and the save path must blame the same thing.
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': '', 'TF_MANAGED_ENCRYPTION_KEY': '0'}), TestClient(app) as client:
+            report = client.get('/api/health').json()['encryption']
+            self.assertEqual((report['configured'], report['ready'], report['keys']), (False, False, 0))
+            self.assertEqual(report['variable'], 'TF_VARIABLE_ENCRYPTION_KEYS')
+            self.assertIn('Fernet.generate_key()', report['generate_command'])
+            refused = client.post('/api/variables', json={'project_id': self.pid, 'name': 'password',
+                                                          'value': 'not-allowed', 'is_secret': True})
+            self.assertEqual(refused.status_code, 422)
+            for message in (report['reason'], refused.json()['detail']):
+                self.assertIn('TF_VARIABLE_ENCRYPTION_KEYS', message)
+                self.assertIn('Fernet.generate_key()', message)
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': 'not-a-fernet-key'}):
+            broken = secrets_store.status()
+            self.assertEqual((broken['configured'], broken['ready']), (True, False))
+            self.assertIn('not a usable keyring', broken['reason'])
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': f'{Fernet.generate_key().decode()},{live}'}):
+            rotating = secrets_store.status()
+            self.assertEqual((rotating['configured'], rotating['ready'], rotating['keys']), (True, True, 2))
+            self.assertIsNone(rotating['reason'])
+            self.assertNotIn(live, json.dumps(rotating))
+
+    def test_UT_SCENE_15_demo_tab_is_registered_and_its_fixtures_are_served(self):
+        """The Demo tab must exist in the nav and everything it points at must resolve.
+
+        It is the only route a new user has to recording and replay without a
+        real application, so a stale script tag or a renamed fixture silently
+        removes that route.
+        """
+        static = Path(library_store.__file__).resolve().parent / 'static'
+        dashboard = (static / 'index.html').read_text()
+        self.assertIn('/demo-components.js', dashboard)
+        self.assertIn('["demo","🧪"]', dashboard)
+        self.assertIn('tab === "demo" && e(DemoTab', dashboard)
+        # Every tab needs a hover/assistive name: the bar is icon-only.
+        self.assertIn("title: k.toUpperCase()", dashboard)
+        component = (static / 'demo-components.js').read_text()
+        self.assertIn('function DemoTab', component)
+        for fixture in ('/demo.html', '/domain-demo.html'):
+            self.assertTrue((static / fixture.lstrip('/')).is_file(), fixture)
+            self.assertIn(fixture, component)
+        with TestClient(app) as client:
+            for path in ('/demo-components.js', '/demo.html', '/domain-demo.html'):
+                self.assertEqual(client.get(path).status_code, 200, path)
+            packs = client.get('/api/imports/packs').json()
+            self.assertEqual({p['id'] for p in packs},
+                             {'commerce', 'banking', 'insurance', 'hrms', 'travel'})
+            # The tab prints a one-line blurb per pack; an unexplained pack is a bug.
+            for pack in packs:
+                self.assertIn(f"  {pack['id']}:", component)
+                self.assertEqual(client.get(f"/api/imports/packs/{pack['id']}").status_code, 200)
+
+    def test_UT_SCENE_16_encryption_works_with_nothing_configured_in_the_environment(self):
+        """A deployment with no secret configuration must still encrypt at rest.
+
+        This is the whole point of the application-managed key: the operator sets
+        nothing, yet a value marked secret is sealed before it reaches the
+        database and the library files pushed to GitHub, and it survives the
+        restart that would strand a key invented in memory at boot.
+        """
+        from app import secrets_store
+        value = 'zero-setup-password-that-must-not-leak'
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': ''}):
+            secrets_store.reset_cache(); self.addCleanup(secrets_store.reset_cache)
+            with TestClient(app) as client:
+                report = client.get('/api/encryption').json()
+                # Configured without anything in the environment: that is the point.
+                self.assertEqual((report['source'], report['ready'], report['configured']),
+                                 ('app-managed', True, True))
+                self.assertGreaterEqual(report['managed_keys'], 1)
+                self.assertEqual(report['env_keys'], 0)
+                # It must not oversell itself: the key sits beside the ciphertext.
+                self.assertIn('database', report['note'])
+                self.assertIn('TF_VARIABLE_ENCRYPTION_KEYS', report['note'])
+                self.assertNotIn('Encrypt at rest', json.dumps(report.get('reason') or ''))
+
+                created = client.post('/api/variables', json={'project_id': self.pid, 'name': 'password',
+                                                              'value': value, 'is_secret': True})
+                self.assertEqual(created.status_code, 201, created.text)
+                self.assertEqual(created.json()['value'], '')
+
+            with SessionLocal() as db:
+                stored = db.get(Variable, created.json()['id']).value
+            self.assertTrue(protected(stored)); self.assertNotIn(value, stored)
+            # Decryption happens on demand from the same stored key, so the value
+            # is recoverable without the operator ever supplying anything.
+            self.assertEqual(decrypt(stored), value)
+            # A restart drops every cache; the key is in the database, not memory.
+            secrets_store.reset_cache()
+            self.assertEqual(decrypt(stored), value)
+            published = (library_store.library_dir() / 'projects' / self.pid)
+            self.assertNotIn(value, json.dumps([p.read_text() for p in published.rglob('*.json')]))
+
+    def test_UT_SCENE_17_rotation_reseals_in_place_and_defers_to_the_environment(self):
+        """Rotation must re-seal what it can and strand nothing it cannot.
+
+        Superseded keys stay in the ring so queued runs and old snapshots keep
+        decrypting, and an operator-provisioned key outranks the managed one, so
+        the in-app rotate button must refuse rather than fight it.
+        """
+        from app import secrets_store
+        value = 'rotate-me-without-losing-me'
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': ''}):
+            secrets_store.reset_cache(); self.addCleanup(secrets_store.reset_cache)
+            with TestClient(app) as client:
+                vid = client.post('/api/variables', json={'project_id': self.pid, 'name': 'password',
+                                                          'value': value, 'is_secret': True}).json()['id']
+                # A value whose key is gone for good: rotation must count it and
+                # leave it alone, never overwrite it with something unopenable.
+                with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': Fernet.generate_key().decode()}):
+                    secrets_store.reset_cache()
+                    orphan = client.post('/api/variables', json={'project_id': self.pid, 'name': 'stranded',
+                                                                 'value': 'lost', 'is_secret': True}).json()['id']
+                secrets_store.reset_cache()
+                with SessionLocal() as db:
+                    before = db.get(Variable, vid).value
+                    stranded = db.get(Variable, orphan).value
+                keys_before = secrets_store.status()['keys']
+
+                result = client.post('/api/encryption/rotate', json={})
+                self.assertEqual(result.status_code, 200, result.text)
+                self.assertGreaterEqual(result.json()['variables'], 1)
+                self.assertGreaterEqual(result.json()['unreadable'], 1)
+
+                with SessionLocal() as db:
+                    after = db.get(Variable, vid).value
+                    self.assertEqual(db.get(Variable, orphan).value, stranded)
+                self.assertNotEqual(before, after)           # genuinely re-encrypted
+                self.assertTrue(protected(after))
+                self.assertEqual(decrypt(after), value)      # and still readable
+                self.assertEqual(secrets_store.status()['keys'], keys_before + 1)
+                self.assertEqual(decrypt(before), value)     # old key retained
+
+        # With the environment in charge, rotation is the operator's job.
+        with patch.dict(os.environ, {'TF_VARIABLE_ENCRYPTION_KEYS': Fernet.generate_key().decode()}):
+            secrets_store.reset_cache()
+            with TestClient(app) as client:
+                refused = client.post('/api/encryption/rotate', json={})
+                self.assertEqual(refused.status_code, 422)
+                self.assertIn('TF_VARIABLE_ENCRYPTION_KEYS', refused.json()['detail'])
+                self.assertEqual(client.get('/api/encryption').json()['source'], 'environment')
+            # The environment key did not evict the managed one, so the value
+            # sealed a moment ago is still readable.
+            self.assertEqual(decrypt(after), value)
+
+    def test_UT_SCENE_18_every_execution_commits_a_report_without_extra_configuration(self):
+        """Reports reach the repository on their own, and a batch is one commit.
+
+        TF_REPORTS_GITHUB only ever governed the release-asset upload; the
+        committed summary must not depend on it, or a default deployment finishes
+        runs and publishes nothing. One push per batch, not one per recording.
+        """
+        rec = self.recording('Committed report fixture')
+        with SessionLocal() as db:
+            run = Run(recording_id=rec['id'], status='failed', finished_at=datetime.utcnow(),
+                      execution_log=[{'order': 1, 'action': 'fill', 'status': 'failed',
+                                      'label': 'Password', 'value': 'secret-typed-value',
+                                      'selector': '#pw', 'error': 'boom'}])
+            db.add(run); db.commit(); rid = run.id
+        with patch.object(library_store, '_finish', return_value=True) as finish:
+            pdf_reports.finalize('run', rid)            # TF_REPORTS_GITHUB='0' from setUp
+        self.assertEqual(finish.call_count, 1)
+        summary = library_store.library_dir() / 'reports' / f'run-{rid}.json'
+        self.assertTrue(summary.is_file(), 'a finished run must leave a committed report')
+        data = json.loads(summary.read_text())
+        self.assertEqual((data['kind'], data['status'], data['steps']), ('run', 'failed', 1))
+        self.assertTrue(pdf_reports.metadata('run', rid)['summary_published'])
+        # Outcomes and counts only: typed input, selectors and PDFs stay out.
+        blob = json.dumps(data)
+        for leak in ('secret-typed-value', '#pw', 'Password', 'boom'):
+            self.assertNotIn(leak, blob, leak)
+        self.assertEqual(list(summary.parent.glob('*.pdf')), [])
+
+        index = (summary.parent / 'index.md').read_text()
+        self.assertIn(rid, index)
+        self.assertIn('| Finished (UTC) |', index)
+
+        with SessionLocal() as db:
+            batch = Batch(status='passed', total=3, done=3, finished_at=datetime.utcnow())
+            db.add(batch); db.commit(); bid = batch.id
+            for i in range(3):
+                db.add(Run(recording_id=rec['id'], batch_id=bid, sequence=i, status='passed',
+                           finished_at=datetime.utcnow(), execution_log=[{'order': 1, 'action': 'click', 'status': 'passed'}]))
+            db.commit()
+            children = [r.id for r in db.query(Run).filter_by(batch_id=bid)]
+        with patch.object(library_store, '_finish', return_value=True) as finish:
+            pdf_reports.finalize('batch', bid)
+        self.assertEqual(finish.call_count, 1, 'a batch must publish once, not once per recording')
+        for child in children:
+            self.assertTrue((summary.parent / f'run-{child}.json').is_file())
+            self.assertTrue(pdf_reports.metadata('run', child)['summary_published'])
+        self.assertTrue((summary.parent / f'batch-{bid}.json').is_file())
+
+        with TestClient(app) as client:
+            meta = client.get(f'/api/reports/run/{rid}').json()
+        self.assertEqual(meta['repository_path'], f'library/reports/run-{rid}.json')
