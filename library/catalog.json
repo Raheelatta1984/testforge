@@ -126,7 +126,8 @@
       ],
       "variables": [
         "D365_Login_ID",
-        "D365_login_Pass"
+        "D365_login_Pass",
+        "filterfield_gridheader_num"
       ]
     },
     {

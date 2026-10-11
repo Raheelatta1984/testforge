@@ -12,5 +12,12 @@
     "is_secret": true,
     "name": "D365_login_Pass",
     "value": "enc:v1:gAAAAABqy6HKq8Zq2-XrMRE-3WJUU6QmFkTXx8iIsaRen2QI-WejYdg9OW-xsu_0YyhzqUxscXekUtInXIh5by5y32f-1rWhuUtJQmyQp8o0xmYZjrfX_mQ="
+  },
+  {
+    "category": "General",
+    "id": "44f4cf48-9347-43e5-a3a2-e074f0869df3",
+    "is_secret": false,
+    "name": "filterfield_gridheader_num",
+    "value": "91020262"
   }
 ]
