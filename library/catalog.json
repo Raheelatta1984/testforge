@@ -41,7 +41,9 @@
       "name": "D365_UAT_Store_Replen",
       "path": "library/projects/a8107955-5370-4125-bfc0-813060e10786/project.json",
       "recordings": [],
-      "variables": []
+      "variables": [
+        "D365_Login_ID"
+      ]
     },
     {
       "id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",

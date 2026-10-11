@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "category": "General",
+    "id": "618ed3f7-06e6-4ace-8ef8-2bff1abde2bc",
+    "is_secret": true,
+    "name": "D365_Login_ID",
+    "value": "enc:v1:gAAAAABqy6GhD9FqO61KDQHg3H0_ZPkh7rVofrR0ju8iOGhO1u2xcbEqAkLTj3-RnOmdvs4JlOVqxkfmdqeFWTHvAg05sD8IXVZSYhQCzpuOvIPeF64Re8k="
+  }
+]
