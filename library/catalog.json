@@ -91,7 +91,6 @@
         }
       ],
       "variables": [
-        "Extranet_pass",
         "HFM_Ext_pass"
       ]
     }
