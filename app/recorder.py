@@ -24,6 +24,7 @@ from app.config import ARTIFACTS, logger
 from app.guardrails import browser_budget
 from app.db import RecordingStep, SessionLocal, resolve_variables, interpolate, Variable, VAR_REGEX
 from app import library_store
+from app.step_runtime import StepRuntime, normalize_step
 
 # Element under the click, plus a CSS selector stable enough to replay.
 _ELEMENT_JS = """
@@ -90,7 +91,7 @@ _FOCUSED_JS = """
     }
     selector = parts.join(" > ");
   }
-  return { selector, tag: el.tagName.toLowerCase() };
+  return { selector, tag: el.tagName.toLowerCase(), type: el.type };
 }
 """
 
@@ -182,7 +183,9 @@ class RecorderSession:
                 reduced_motion="reduce",
             )
             self.page = await self.context.new_page()
-            self.preview = Preview(self.page, on_jpeg=self._on_jpeg)
+            self._last_viewed_at = time.monotonic()
+            self.preview = Preview(self.page, on_jpeg=self._on_jpeg,
+                                   should_capture=lambda: bool(self.listeners) or time.monotonic() - self._last_viewed_at < 3)
             if self.start_url:
                 await self.page.goto(self.start_url, wait_until="domcontentloaded", timeout=30000)
                 self.current_url = self.page.url
@@ -250,9 +253,11 @@ class RecorderSession:
                     from app.db import Recording
                     recording = db.get(Recording, self.recording_id)
                     variables = resolve_variables(db, recording.project_id)
+                variables.update(getattr(self, "_action_variables", {}))
                 missing = [name for name in VAR_REGEX.findall(text) if name not in variables]
                 if missing:
                     raise ValueError("Unknown variable: " + ", ".join(missing))
+                variables.update(getattr(self, "_action_variables", {}))
                 resolved = interpolate(text, variables)
                 await self.page.keyboard.type(resolved, delay=0)
                 selector = {"primary": (focused or {}).get("selector")} if focused else None
@@ -283,10 +288,29 @@ class RecorderSession:
                         raise ValueError(f"Variable {name} does not exist")
                     variable_id = row.id if row else None
                 if variable_id:
-                    await asyncio.to_thread(library_store.update_variable, variable_id, value=str(actual))
+                    await asyncio.to_thread(library_store.update_variable, variable_id, value=str(actual), is_secret=True if (focused or {}).get("type") == "password" else None)
                 else:
-                    await asyncio.to_thread(library_store.create_variable, project_id, name, str(actual))
+                    await asyncio.to_thread(library_store.create_variable, project_id, name, str(actual), is_secret=(focused or {}).get("type") == "password")
                 step = await self._record("save_variable", value=name, selector={"primary": selector}, label=f"Save input into {name}")
+            elif kind == "action":
+                authored = normalize_step(msg.get("step"), self.seq + 1)
+                if authored["repeat_count"] != 1:
+                    raise ValueError("Record one action at a time; set repeats after recording")
+                if self.seq >= 500:
+                    raise ValueError("Save this recording before adding more than 500 steps")
+                with SessionLocal() as db:
+                    from app.db import Recording
+                    recording = db.get(Recording, self.recording_id)
+                    variables = resolve_variables(db, recording.project_id)
+                variables.update(getattr(self, "_action_variables", {}))
+                if not hasattr(self, "_action_runtime"):
+                    self._action_runtime = StepRuntime(self.page, os.path.join(ARTIFACTS, "rec", self.recording_id))
+                await self._action_runtime.perform(authored, variables)
+                self._action_variables = variables
+                self.page = self._action_runtime.page
+                self.preview.page = self.page
+                step = await self._record(authored["action"], value=authored["value"],
+                                          selector=authored["selector"], label=authored["label"], force_new=True)
             else:
                 raise ValueError(f"Unknown input type: {kind}")
             try:
@@ -434,7 +458,7 @@ class RecorderSession:
                     self._pending_export = False
                     try:
                         # Run in thread to avoid blocking event loop
-                        await asyncio.to_thread(library_store.export_recording, self.recording_id, publish=False)
+                        await asyncio.to_thread(library_store.export_recording, self.recording_id, publish=False, include_exports=False)
                         logger.info("RECORDER EXPORT OK %s seq=%s", self.recording_id, self.seq)
                     except Exception as e:
                         logger.warning("RECORDER EXPORT FAILED %s %s", self.recording_id, e)

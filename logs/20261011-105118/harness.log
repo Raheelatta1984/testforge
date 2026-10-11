@@ -1,0 +1,29 @@
+2026-10-11T10:51:18+00:00 harness: start 20261011-105118 revision a00f569
+2026-10-11T10:51:18+00:00 harness: python 3.11.2 Linux-6.1.158+-x86_64-with-glibc2.36
+2026-10-11T10:51:18+00:00 unit: starting unittest suite
+2026-10-11T10:51:18+00:00 harness: aborted
+Traceback (most recent call last):
+  File "/home/user/testforge/tests/harness.py", line 300, in main
+    rows.extend(run_unit_tests(log, run_dir / "unit.log"))
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/testforge/tests/harness.py", line 105, in run_unit_tests
+    suite = loader.loadTestsFromNames(["tests.test_unit", "tests.test_imports", "tests.test_plans"])
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/unittest/loader.py", line 220, in loadTestsFromNames
+    suites = [self.loadTestsFromName(name, module) for name in names]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/unittest/loader.py", line 220, in <listcomp>
+    suites = [self.loadTestsFromName(name, module) for name in names]
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.11/unittest/loader.py", line 154, in loadTestsFromName
+    module = __import__(module_name)
+             ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/testforge/tests/test_unit.py", line 2509, in <module>
+    class BatchExecutionTests(unittest.TestCase):
+  File "/home/user/testforge/tests/test_unit.py", line 2556, in BatchExecutionTests
+    @patch.dict(os.environ, {"TF_BROWSER_SINGLE_PROCESS": "0"})
+     ^^^^^
+NameError: name 'patch' is not defined
+
+2026-10-11T10:51:18+00:00 harness: FAIL 0 passed, 1 failed, 0 skipped
+2026-10-11T10:51:18+00:00 harness: report /home/user/testforge/logs/20261011-105118/results.md

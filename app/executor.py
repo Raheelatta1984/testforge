@@ -22,6 +22,7 @@ from app.browser import Preview, explain_launch_error, launch_kwargs, video_ok
 from app.config import ARTIFACTS, logger
 from app.db import Recording, Run, SessionLocal, interpolate, resolve_variables
 from app.guardrails import browser_budget, live_frames
+from app.step_runtime import audit_selector, StepRuntime, BASIC, normalize_step, interpolate as strict_interpolate
 from app.library_store import playback_url
 
 # Per-step body-text excerpt kept for the run audit and the library scenarios.
@@ -33,18 +34,7 @@ RUN_EXCERPT = os.environ.get("TF_RUN_EXCERPT", "1").strip().lower() in {"1", "tr
 # Timeouts for one replayed step. The single-run path uses these defaults; the
 # batch path passes budgets learned from previous runs (see app.batch_runner), so
 # a step that always lands in 120ms is not given three seconds to fail in.
-DEFAULT_BUDGETS = {"navigate_ms": 20000, "action_ms": 3000, "type_delay_ms": 5}
-
-
-async def _persist_shot(directory, name, data):
-    """Palette-compress and write a step screenshot off the replay path."""
-    try:
-        from app.images import compact_png
-
-        optimized = await asyncio.to_thread(compact_png, data)
-        await asyncio.to_thread(Path(os.path.join(directory, name)).write_bytes, optimized)
-    except Exception as exc:
-        logger.warning("RUN SCREENSHOT FAILED %s %s", name, exc)
+DEFAULT_BUDGETS = {"navigate_ms": 20000, "action_ms": 3000, "type_delay_ms": 0}
 
 
 def live_frame(run_id):
@@ -115,7 +105,7 @@ async def _focus(page, selector, action_ms: int | None = None):
             await page.mouse.click(float(selector["x"]), float(selector["y"]))
 
 
-async def replay_step(page, step, variables, budgets=None):
+async def replay_step(page, step, variables, budgets=None, runtime=None):
     """Replay one recorded step.
 
     ``budgets`` optionally overrides the per-action timeouts. Anything missing
@@ -123,7 +113,17 @@ async def replay_step(page, step, variables, budgets=None):
     """
     action = (step.get("action") or "").lower()
     raw = step.get("value")
-    value = interpolate(raw, variables) if raw else None
+    value = strict_interpolate(raw, variables) if raw else None
+    if (step.get("selector") or {}).get("strict") or action not in BASIC | {"text", "key", "key_press", "loop", "repeat"}:
+        try:
+            checked = normalize_step(step)
+        except ValueError as exc:
+            raise RuntimeError(str(exc)) from exc
+        if budgets and "timeout_ms" not in checked["selector"]:
+            key = "navigate_ms" if action == "navigate" else "action_ms"
+            checked["selector"]["timeout_ms"] = max(1, min(30000, int(budgets.get(key, 3000))))
+        runner = runtime or StepRuntime(page)
+        return await runner.perform(checked, variables)
     selector = step.get("selector") or {}
     budget = dict(DEFAULT_BUDGETS)
     if isinstance(budgets, dict):
@@ -207,6 +207,9 @@ async def _expand_steps_with_repeat(steps):
                     if (prev.get("action") or "").lower() not in ("loop", "repeat"):
                         block.insert(0, prev)
                     j -= 1
+                # Bound expansion before allocating or replaying any action.
+                if len(expanded) + len(block) * repeat_times + 1 > 2000:
+                    raise ValueError("Execution exceeds 2,000 expanded steps")
                 # Repeat block
                 for _ in range(repeat_times):
                     expanded.extend(block)
@@ -232,6 +235,8 @@ async def _expand_steps_with_repeat(steps):
             repeat = 1
         repeat = max(1, min(repeat, 100))  # cap at 100 to avoid abuse
 
+        if len(expanded) + repeat > 2000:
+            raise ValueError("Execution exceeds 2,000 expanded steps")
         for r in range(repeat):
             # For repeated identical steps, keep same step but add repeat index to label if >1
             if repeat > 1 and r > 0:
@@ -244,13 +249,45 @@ async def _expand_steps_with_repeat(steps):
     return expanded
 
 
-async def execute_run(run_id, on_event, on_frame=None, display_window=True, viewer_count=None):
+async def execute_run(run_id, on_event, on_frame=None, display_window=True, viewer_count=None, screenshots="all"):
     """Replay one recording.
 
     `display_window=False` skips the live screencast entirely: no preview loop,
     no frames, no per-frame CPU. `viewer_count` is a callable returning how many
     clients are watching; while it reports zero the preview renders nothing.
     """
+    # Plans have their own sequential contexts, but share the SAME global slot.
+    with SessionLocal() as db:
+        row = db.get(Run, run_id)
+        recording = db.get(Recording, row.recording_id) if row else None
+        plan = recording.execution_plan if recording else None
+        project_id = recording.project_id if recording else None
+        from app.secrets_store import sensitive_values
+        plan_sensitive = sensitive_values(db, [project_id]) if plan else []
+        variable_snapshot = row.variable_snapshot if row else None
+        overrides = (row.input_overrides if row.input_overrides is not None else recording.input_defaults or {}) if recording and row else {}
+    if plan:
+        from app.import_drafts import environment
+        from app.plan_runtime import normalize_plan, run_plan
+        from app.evidence import callback
+        logs = []
+        async def progress(done, total, case):
+            for attempt in case['attempts']:
+                for step in attempt['steps']:
+                    logs.append({**step, 'order': len(logs) + 1, 'label': f"Case {done}, row {case['row']}, {case['browser']}/{case['device']}, attempt {attempt['attempt']}", 'error': step.get('error_type'), 'result': {'case_status': case['status']}})
+            _save(run_id, progress_pct=int(done / total * 100), execution_log=list(logs))
+            await on_event({'type': 'status', 'status': 'running', 'percent': int(done / total * 100)})
+        async with browser_budget.slot('plan:' + run_id):
+            plan = normalize_plan(plan)
+            from app.secrets_store import reveal_map
+            values, _ = environment(project_id, plan, reveal_map(variable_snapshot) if variable_snapshot is not None else None)
+            _save(run_id, status='running', started_at=datetime.datetime.utcnow())
+            result = await run_plan(plan, values, Path(ARTIFACTS) / 'runs' / run_id,
+                                    chromium_options=launch_kwargs(), on_progress=progress,
+                                    input_overrides=reveal_map(overrides), evidence=callback(Path(ARTIFACTS) / 'runs' / run_id, plan_sensitive))
+            _save(run_id, status=result['status'], progress_pct=100, finished_at=datetime.datetime.utcnow(), execution_log=logs)
+            await on_event({'type': 'done', 'status': result['status'], 'percent': 100})
+        return
     display_window = bool(display_window)
     # Immediate queue display - broadcast queued status right away
     await on_event({"type": "status", "status": "queued", "percent": 0, "message": "Queued, starting immediately..."})
@@ -276,7 +313,11 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             # Expand repeats for execution
             steps = await _expand_steps_with_repeat(raw_steps)
             start_url = recording.start_url
-            variables = resolve_variables(db, recording.project_id)
+            from app.secrets_store import reveal_map, sensitive_values, SecretValue, scrub, scrub_entry
+            variables = reveal_map(variable_snapshot) if variable_snapshot is not None else resolve_variables(db, recording.project_id)
+            variables.update(reveal_map(overrides))
+            sensitive = sensitive_values(db, [recording.project_id])
+            sensitive.extend(v for v in variables.values() if isinstance(v, SecretValue))
             run.status = "running"
             run.progress_pct = 1
             if getattr(run, "started_at", None) is None:
@@ -358,10 +399,10 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                     on_jpeg=publish if display_window else None,
                     should_capture=viewers_present,
                 )
-                if display_window:
-                    preview.start()
+                # Live execution views reuse step JPEGs; no second screencast loop.
                 shot_tasks = set()
                 video = page.video
+                runtime = StepRuntime(page, run_dir)
                 try:
                     total = len(steps)
                     for index, step in enumerate(steps, 1):
@@ -371,11 +412,12 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                             "action": step.get("action"),
                             "label": step.get("label") or step.get("action"),
                             "value": step.get("value"),
-                            "selector": step.get("selector"),
+                            "selector": audit_selector(step.get("selector")),
                             "status": "running",
                             "percent": percent,
                         }
                         # Immediate broadcast for queue display
+                        entry = scrub_entry(entry, sensitive)
                         await on_event(entry)
                         try:
                             async with preview.lock:
@@ -384,45 +426,60 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                                     entry["status"] = "passed"
                                     entry["percent"] = int(index / total * 100)
                                 else:
-                                    await replay_step(page, step, variables)
-                                    shot_name = f"step-{index}.png"
-                                    try:
-                                        # The capture must happen now, while the page
-                                        # still shows this step's result. Encoding and
-                                        # writing it does not, so they run detached.
-                                        png = await page.screenshot(type="png", animations="disabled")
-                                        task = asyncio.create_task(_persist_shot(run_dir, shot_name, png))
-                                        shot_tasks.add(task)
-                                        task.add_done_callback(shot_tasks.discard)
-                                        entry["screenshot"] = f"/api/runs/screenshot/{run_id}/{shot_name}"
-                                    except Exception:
-                                        pass
+                                    result = await replay_step(page, step, variables, runtime=runtime)
+                                    page = runtime.page
+                                    preview.page = page
+                                    if result:
+                                        entry["result"] = result
+                                    if screenshots == "all":
+                                        try:
+                                            from app.evidence import capture_once
+                                            shot_name = await capture_once(page, run_dir, index, sensitive)
+                                            entry['screenshot'] = f'/api/runs/screenshot/{run_id}/{shot_name}'
+                                            if viewers_present():
+                                                publish((Path(run_dir) / shot_name).read_bytes())
+                                        except Exception as evidence_error:
+                                            entry['evidence_error'] = type(evidence_error).__name__
                                     if RUN_EXCERPT:
                                         try:
-                                            entry["excerpt"] = (await page.inner_text("body"))[:300]
+                                            entry["excerpt"] = scrub(await page.inner_text("body"), sensitive)[:300]
                                         except Exception:
                                             pass
                                     entry["status"] = "passed"
                                     entry["percent"] = int(index / total * 100)
                         except Exception as exc:
                             entry["status"] = "failed"
-                            entry["error"] = str(exc).splitlines()[0][:500]
+                            entry["error"] = scrub(str(exc), sensitive).splitlines()[0][:500]
+                            if screenshots in {"all", "failure"}:
+                                try:
+                                    from app.evidence import capture_once
+                                    shot_name = await capture_once(page, run_dir, index, sensitive)
+                                    entry['screenshot'] = f'/api/runs/screenshot/{run_id}/{shot_name}'
+                                    if viewers_present():
+                                        publish((Path(run_dir) / shot_name).read_bytes())
+                                except Exception as evidence_error:
+                                    entry['evidence_error'] = type(evidence_error).__name__
                             entry["percent"] = percent
+                            entry = scrub_entry(entry, sensitive)
                             log_entries.append(entry)
                             await on_event(entry)
                             status = "failed"
                             error_text = entry["error"]
                             _save(run_id, status="failed", progress_pct=percent, execution_log=list(log_entries))
                             break
+                        entry = scrub_entry(entry, sensitive)
                         log_entries.append(entry)
                         await on_event(entry)
                         _save(run_id, progress_pct=entry["percent"], execution_log=list(log_entries))
                 finally:
-                    # Screenshots still being written must land before the browser
-                    # closes, or the audit shows links to files that do not exist.
+                    # Evidence is already persisted; no second encode/capture pass.
                     if shot_tasks:
                         await asyncio.gather(*list(shot_tasks), return_exceptions=True)
                     await preview.stop()
+                    try:
+                        await runtime.close()
+                    except Exception as exc:
+                        logger.warning("RUN ACTION CLEANUP %s (%s)", run_id, type(exc).__name__)
                     video_path = None
                     try:
                         await context.close()
@@ -438,8 +495,8 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                         _save(run_id, video_path=video_path)
         except Exception as exc:
             status = "error"
-            error_text = explain_launch_error(exc)
-            logger.exception("RUN FAILED %s", run_id)
+            error_text = scrub(explain_launch_error(exc), sensitive)
+            logger.warning("RUN FAILED %s (%s)", run_id, type(exc).__name__)
 
         elapsed = time.time() - start_time
         fields = {

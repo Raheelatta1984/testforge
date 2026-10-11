@@ -309,6 +309,7 @@ def _recording_payload(data: dict, *, with_steps: bool, published: bool | None =
         payload["published"] = published
     if with_steps:
         payload["steps"] = [_step_payload(step) for step in steps]
+        payload["execution_plan"] = data.get("execution_plan")
     return payload
 
 
@@ -569,8 +570,8 @@ def list_variables(project_id: str) -> list[dict]:
         result.append({
             "id": variable.get("id"),
             "name": name,
-            "value": variable.get("value") or "",
-            "is_secret": bool(variable.get("is_secret")),
+            "value": "" if variable.get("is_secret") or str(variable.get("value", "")).startswith("enc:v1:") else variable.get("value") or "",
+            "is_secret": bool(variable.get("is_secret")) or str(variable.get("value", "")).startswith("enc:v1:"),
             "category": variable.get("category") or "General",
             "tags": tags,
             "source": "repository",
@@ -605,6 +606,10 @@ def _write_catalog() -> None:
                     recordings.append({
                         "id": rdata["id"],
                         "name": rdata.get("name") or "",
+                        "start_url": rdata.get("start_url") or "",
+                        "tags": rdata.get("tags") or "",
+                        "parent_id": rdata.get("parent_id"),
+                        "created_at": rdata.get("created_at"),
                         "step_count": len(rdata.get("steps") or []),
                         "resources": _resource_names(project_id, rdata["id"]),
                         "path": recording_repo_path(project_id, rdata["id"]),
@@ -818,7 +823,7 @@ def compress_steps(steps: list[dict]) -> list[dict]:
     return compressed
 
 
-def _write_recording_files(recording_id: str) -> dict:
+def _write_recording_files(recording_id: str, *, include_exports: bool = True) -> dict:
     with SessionLocal() as db:
         recording = db.get(Recording, recording_id)
         if recording is None:
@@ -837,6 +842,8 @@ def _write_recording_files(recording_id: str) -> dict:
             "status": recording.status or "active",
             "created_at": _iso(recording.created_at),
             "steps": compressed,
+            "execution_plan": recording.execution_plan,
+            "input_defaults": recording.input_defaults or {},
         }
     folder = _recording_dir(project_id, recording_id)
     resources = folder / "resources"
@@ -858,8 +865,10 @@ def _write_recording_files(recording_id: str) -> dict:
     for leftover in list(resources.glob("step-*.jpg")) + list(resources.glob("step-*.png")):
         if leftover.name not in referenced:
             leftover.unlink()
-    from app.export_formats import write_exports
-    write_exports(resources, data)
+    if include_exports:
+        from app.export_formats import write_exports
+        write_exports(resources, data)
+    data["exports_pending"] = not include_exports
     _dump(folder / "recording.json", data)
     data["resources"] = _resource_names(project_id, recording_id)
     # Invalidate cache
@@ -1218,8 +1227,14 @@ def create_project(name: str, base_url: str) -> dict:
             raise
 
 
-def create_recording(project_id: str, name: str, start_url: str, parent_id: str | None = None) -> dict:
+def create_recording(project_id: str, name: str, start_url: str, parent_id: str | None = None, *, steps: list | None = None, tags: str = "", execution_plan: dict | None = None) -> dict:
     require_id(project_id, "project id")
+    if execution_plan is not None:
+        from app.plan_runtime import normalize_plan
+        normalize_plan(execution_plan)  # validate, retain editable flow definitions in source
+    if steps is not None:
+        from app.step_runtime import normalize_steps
+        steps = normalize_steps(steps)
     with LOCK:
         if _read_project(project_id) is None:
             raise NotFound("Project not found")
@@ -1232,11 +1247,16 @@ def create_recording(project_id: str, name: str, start_url: str, parent_id: str 
                 recording = Recording(
                     project_id=project_id,
                     parent_id=parent_id or None,
+                    execution_plan=execution_plan,
+                    tags=tags[:500],
                     name=name.strip()[:255],
                     start_url=start_url,
                     created_at=datetime.utcnow().replace(microsecond=0),
                 )
                 db.add(recording)
+                db.flush()
+                for step in steps or []:
+                    db.add(RecordingStep(recording_id=recording.id, **step))
                 db.commit()
                 db.refresh(recording)
                 recording_id = recording.id
@@ -1268,7 +1288,15 @@ def _delete_recording_files(recording_id: str) -> None:
     _CACHE["recordings"].pop(found["project_id"], None)
 
 
-def create_variable(project_id: str, name: str, value: str) -> dict:
+def create_variable(project_id: str, name: str, value: str, *, is_secret=False, category="General") -> dict:
+    from app.secrets_store import encrypt, validate_name, PREFIX
+    validate_name(name)
+    if len(value) > 4096:
+        raise ValueError("Input values are limited to 4096 characters")
+    if value.startswith(PREFIX):
+        raise ValueError("Cannot submit ciphertext as a new value")
+    if is_secret:
+        value = encrypt(value)
     require_id(project_id, "project id")
     with LOCK:
         if _read_project(project_id) is None:
@@ -1283,7 +1311,9 @@ def create_variable(project_id: str, name: str, value: str) -> dict:
             with SessionLocal() as db:
                 if db.get(Project, project_id) is None:
                     raise NotFound("Project not found")
-                variable = Variable(project_id=project_id, name=name, value=value or "")
+                if db.query(Variable).filter_by(project_id=project_id, name=name).first():
+                    raise ValueError("Variable/parameter name already exists in this project")
+                variable = Variable(project_id=project_id, name=name, value=value or "", is_secret=bool(is_secret), category="Parameter" if category == "Parameter" else "General")
                 db.add(variable)
                 db.commit()
                 db.refresh(variable)
@@ -1308,7 +1338,14 @@ def create_variable(project_id: str, name: str, value: str) -> dict:
             raise
 
 
-def update_variable(variable_id: str, *, name: str | None = None, value: str | None = None) -> dict:
+def update_variable(variable_id: str, *, name: str | None = None, value: str | None = None, is_secret=None, category=None) -> dict:
+    from app.secrets_store import encrypt, protected, validate_name, PREFIX
+    if name:
+        validate_name(name)
+    if value is not None and len(value) > 4096:
+        raise ValueError("Input values are limited to 4096 characters")
+    if value is not None and value.startswith(PREFIX):
+        raise ValueError("Ciphertexts cannot be supplied through value fields")
     require_id(variable_id, "variable id")
     with LOCK:
         with SessionLocal() as db:
@@ -1319,12 +1356,23 @@ def update_variable(variable_id: str, *, name: str | None = None, value: str | N
             variable = db.get(Variable, variable_id)
             if variable is None:
                 raise NotFound("Variable not found")
-            previous = (variable.name, variable.value)
+            previous = (variable.name, variable.value, variable.is_secret, variable.category)
             project_id = variable.project_id
             if name:
+                conflict = db.query(Variable).filter(Variable.project_id == project_id, Variable.name == name, Variable.id != variable_id).first()
+                if conflict:
+                    raise ValueError('Variable/parameter name already exists')
                 variable.name = name
+            if is_secret is False and (variable.is_secret or protected(variable.value)):
+                raise ValueError('Encrypted values cannot be downgraded to plaintext')
+            secret = bool(variable.is_secret or is_secret or str(variable.value).startswith(PREFIX))
             if value is not None:
-                variable.value = value
+                variable.value = encrypt(value) if secret else value
+            elif secret and not str(variable.value).startswith(PREFIX):
+                variable.value = encrypt(variable.value)
+            variable.is_secret = secret
+            if category is not None:
+                variable.category = 'Parameter' if category == 'Parameter' else 'General'
             db.commit()
         try:
             _write_project_files(project_id)
@@ -1333,7 +1381,7 @@ def update_variable(variable_id: str, *, name: str | None = None, value: str | N
             with SessionLocal() as db:
                 variable = db.get(Variable, variable_id)
                 if variable is not None:
-                    variable.name, variable.value = previous
+                    variable.name, variable.value, variable.is_secret, variable.category = previous
                     db.commit()
                     _write_project_files(project_id)
                     _write_catalog()
@@ -1375,14 +1423,14 @@ def delete_variable(variable_id: str) -> None:
             raise
 
 
-def export_recording(recording_id: str, *, publish: bool = False) -> dict | None:
+def export_recording(recording_id: str, *, publish: bool = False, include_exports: bool = True) -> dict | None:
     """Write the recording that is already in the database into the repository."""
     with LOCK:
         with SessionLocal() as db:
             if db.get(Recording, recording_id) is None:
                 return None
         try:
-            payload = _write_recording_files(recording_id)
+            payload = _write_recording_files(recording_id, include_exports=include_exports or publish)
         except Exception as e:
             logger.exception("EXPORT RECORDING FAILED %s %s", recording_id, e)
             raise LibraryError(f"Failed to save recording: {e}") from e
@@ -1520,6 +1568,8 @@ def _upsert_recording(db, data: dict) -> None:
     row.name = data.get("name") or "Recording"
     row.start_url = data.get("start_url") or ""
     row.tags = data.get("tags") or ""
+    row.execution_plan = data.get("execution_plan")
+    row.input_defaults = data.get("input_defaults") or {}
     row.status = data.get("status") or "active"
     row.created_at = _parse_dt(data.get("created_at"))
     db.flush()
@@ -1866,6 +1916,9 @@ def list_all_recordings_fast() -> list[dict]:
                 "project_id": pid,
                 "project_name": pname,
                 "name": rec.get("name") or "",
+                "start_url": rec.get("start_url") or "",
+                "tags": rec.get("tags") or "",
+                "parent_id": rec.get("parent_id"),
                 "step_count": rec.get("step_count") or 0,
                 "resources": rec.get("resources") or [],
                 "repository_path": rec.get("path") or "",

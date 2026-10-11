@@ -146,10 +146,10 @@
         {"action": "input", "recording": "$rec", "body": {"type": "text", "text": "Quinn"}},
         {"action": "input", "recording": "$rec", "body": {"type": "tap", "x": 80, "y": 200}},
         {"action": "stop_session", "recording": "$rec"},
-        {"action": "queue_run", "recording": "$rec", "save": "run"},
+        {"action": "queue_run", "recording": "$rec", "save": "run", "watch": true},
         {"action": "wait_run", "run": "$run", "expect_status": "passed", "excerpt_contains": "Hello, Quinn"},
         {"action": "assert_live_frame", "run": "$run", "min_bytes": 4000},
-        {"action": "jenkins_contains", "recording": "$rec", "text": "navigate"}
+        {"action": "jenkins_contains", "recording": "$rec", "text": "python playwright_test.py"}
       ]
     },
     {
@@ -234,7 +234,7 @@
       "title": "One browser replays both committed recordings in a batch",
       "requires": "browser",
       "steps": [
-        {"action": "start_batch", "recording_ids": ["qa-hello-literal", "qa-hello-variable"], "screenshots": "failure", "name": "Harness batch", "save": "batch"},
+        {"action": "start_batch", "recording_ids": ["qa-hello-literal", "qa-hello-variable"], "screenshots": "all", "name": "Harness batch", "save": "batch"},
         {"action": "wait_batch", "batch": "$batch", "expect_status": "passed", "expect_browsers": 1}
       ]
     }

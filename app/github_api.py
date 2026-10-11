@@ -555,7 +555,15 @@ def collect_local_files(root: Path) -> dict[str, dict]:
     if not root.is_dir():
         return {"files": {}, "skipped": skipped, "bytes": 0}
     total = 0
-    for path in sorted(root.rglob("*")):
+    # Prune generated dependency/artifact directories before traversal/hashing.
+    candidates = []
+    excluded = {'__pycache__', 'node_modules', 'run-artifacts', 'test-results', 'playwright-report', '.git'}
+    for directory, dirs, names in os.walk(root, followlinks=False):
+        dirs[:] = [d for d in dirs if d not in excluded and not (Path(directory)/d).is_symlink()]
+        candidates.extend(Path(directory)/n for n in names if n != 'plan-result.json')
+    for path in sorted(candidates):
+        if path.is_symlink():
+            continue
         if not path.is_file():
             continue
         if "__pycache__" in path.parts or path.name.endswith(".pyc"):

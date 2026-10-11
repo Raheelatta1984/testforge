@@ -1,0 +1,23 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>TestForge synthetic domain fixture</title>
+<style>body{font:16px system-ui;max-width:650px;margin:4rem auto;padding:1rem;background:#0f172a;color:#e2e8f0}input,button{font:inherit;padding:.65rem;margin:.5rem 0}button{cursor:pointer}#result{padding:1rem;border:1px solid #64748b}small{color:#fbbf24}</style>
+<h1 id="title">Synthetic test fixture</h1><p><small>Local simulation only. No account, money, policy, employee or booking is real.</small></p>
+<form id="form"><label id="label" for="amount">Amount</label><br><input id="amount" type="text" autocomplete="off"><br><button id="submit">Submit simulation</button><button id="reset" type="button">Reset</button></form><p id="result" role="status">Ready</p>
+<script>
+const pack=new URLSearchParams(location.search).get('pack');
+const specs={commerce:['E-commerce order','Quantity'],banking:['Bank transfer','Amount (AUD)'],insurance:['Insurance quote','Applicant age'],hrms:['Leave request','Days requested'],travel:['Travel booking','Seats requested']};
+const spec=specs[pack] || ['Unknown example','Amount'];
+document.querySelector('#title').textContent=spec[0];document.querySelector('#label').textContent=spec[1];
+const result=document.querySelector('#result'), input=document.querySelector('#amount');
+document.querySelector('#form').addEventListener('submit',event=>{
+ event.preventDefault();const n=Number(input.value);let message='Invalid amount';
+ if(Number.isFinite(n) && Number.isInteger(n) && input.value.trim()) {
+  if(pack==='commerce') message=n>0 && n<=100 ? `Total AUD ${(n*25).toFixed(2)}` : 'Invalid quantity';
+  if(pack==='banking') message=n>1000 ? 'Insufficient funds' : n>0 ? `Balance AUD ${(1000-n).toFixed(2)}` : 'Invalid amount';
+  if(pack==='insurance') message=n<18 ? 'Applicant must be 18 or older' : n<=100 ? 'Quote AUD 120.00' : 'Invalid age';
+  if(pack==='hrms') message=n>20 ? 'Insufficient leave' : n>0 ? `Remaining leave ${20-n} days` : 'Invalid amount';
+  if(pack==='travel') message=n>4 ? 'Not enough seats' : n>0 ? `Booking AUD ${(n*100).toFixed(2)}` : 'Invalid amount';
+ }
+ result.textContent=message;
+});
+document.querySelector('#reset').onclick=()=>{input.value='';result.textContent='Ready';};
+</script></html>

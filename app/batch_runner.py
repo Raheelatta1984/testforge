@@ -36,6 +36,8 @@ Nothing here imports a second automation stack: steps are replayed by
 
 from __future__ import annotations
 
+from app.step_runtime import audit_selector, StepRuntime
+
 import asyncio
 import datetime
 import json
@@ -48,7 +50,7 @@ from app import guardrails
 from app.config import ARTIFACTS, logger
 from app.db import Batch, Recording, Run, SessionLocal, resolve_variables
 from app.errors import redact
-from app.executor import _expand_steps_with_repeat, _persist_shot, _step_dict, replay_step
+from app.executor import _expand_steps_with_repeat, _step_dict, replay_step
 from app.browser import explain_launch_error, launch_kwargs
 from app.guardrails import browser_budget
 from app.library_store import playback_url
@@ -59,13 +61,13 @@ DEFAULT_SCREENSHOTS = os.environ.get("TF_BATCH_SCREENSHOTS", "failure").strip().
 if DEFAULT_SCREENSHOTS not in SCREENSHOT_MODES:
     DEFAULT_SCREENSHOTS = "failure"
 MAX_BATCH_RECORDINGS = guardrails.MAX_BATCH_RECORDINGS
-MAX_LOG_ENTRIES = guardrails.BATCH_LOG_ENTRIES
+MAX_LOG_ENTRIES = max(2000, guardrails.BATCH_LOG_ENTRIES)  # retain every bounded evidence step
 MAX_RSS_MB = float(os.environ.get("TF_BATCH_MAX_RSS_MB", "420") or 420)
 BATCH_DIR = os.path.join(ARTIFACTS, "batches")
 PACING_FILE = os.path.join(BATCH_DIR, "pacing.json")
 PROFILE_MAX_KEYS = 400
 
-DEFAULT_BUDGETS = {"navigate_ms": 20000, "action_ms": 3000, "type_delay_ms": 5}
+DEFAULT_BUDGETS = {"navigate_ms": 20000, "action_ms": 3000, "type_delay_ms": 0}
 CEILINGS = {"navigate_ms": 30000, "action_ms": 10000}
 FLOORS = {"navigate_ms": 1500, "action_ms": 350}
 
@@ -191,7 +193,7 @@ class AdaptivePacer:
             ceiling = CEILINGS.get(name, DEFAULT_BUDGETS[name] * 3)
             relaxed[name] = int(min(ceiling, max(int(budgets.get(name, 0)) * 3,
                                                  DEFAULT_BUDGETS[name])))
-        relaxed["type_delay_ms"] = max(int(budgets.get("type_delay_ms", 5)), 15)
+        relaxed["type_delay_ms"] = 0
         relaxed["escalated"] = True
         return relaxed
 
@@ -265,9 +267,9 @@ def plan_order(items: list[dict]) -> list[dict]:
     Grouping keeps one warm context per host; shortest-first means the first
     results land quickly instead of after the longest recording in the batch.
     """
-    groups: dict[str, list[dict]] = {}
+    groups: dict[tuple[str, str], list[dict]] = {}
     for item in items:
-        key = origin_of(item.get("start_url") or "")
+        key = (str(item.get("project_id") or ""), origin_of(item.get("start_url") or ""))
         groups.setdefault(key, []).append(item)
     ordered: list[dict] = []
     for key in sorted(groups, key=lambda name: (-len(groups[name]), name)):
@@ -336,8 +338,9 @@ def cancel_requested(batch_id: str) -> bool:
 
 def load_batch_runs(batch_id: str) -> list[dict]:
     """The runs of a batch with everything the replay needs, in one database pass."""
+    from app.secrets_store import reveal_map
     with SessionLocal() as db:
-        runs = db.query(Run).filter(Run.batch_id == batch_id).all()
+        runs = db.query(Run).filter(Run.batch_id == batch_id).order_by(Run.sequence, Run.created_at).all()
         items = []
         for run in runs:
             recording = db.get(Recording, run.recording_id)
@@ -353,8 +356,11 @@ def load_batch_runs(batch_id: str) -> list[dict]:
                 "name": recording.name,
                 "start_url": recording.start_url,
                 "project_id": recording.project_id,
-                "steps": [_step_dict(step) for step in recording.steps],
-                "variables": resolve_variables(db, recording.project_id),
+                "steps": run.snapshot_steps if run.snapshot_steps is not None else [_step_dict(step) for step in recording.steps],
+                "input_overrides": run.input_overrides if run.input_overrides is not None else recording.input_defaults or {},
+                "execution_plan": recording.execution_plan if run.snapshot_steps is None else None,
+                "variables": reveal_map(run.variable_snapshot) if run.variable_snapshot is not None else resolve_variables(db, recording.project_id),
+                "input_snapshot": run.variable_snapshot is not None,
                 "missing": False,
             })
         return items
@@ -426,6 +432,12 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
     with SessionLocal() as db:
         row = db.get(Batch, batch_id)
         options = dict(row.options or {}) if row is not None else {}
+    if options.get('ordered'):
+        plan = items
+    scenario_meta = options.get('scenario') or {}
+    if scenario_meta:
+        share, retry, mode = True, False, 'all'
+    scenario_failed = False
     options.update({"screenshots": mode, "share_session": share,
                     "retry_transient": retry, "display_window": bool(display_window),
                     "pacing_path": pacer.path})
@@ -463,17 +475,17 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                 viewport = {"width": int(os.environ.get("TF_VIEWPORT_WIDTH", "1024")),
                             "height": int(os.environ.get("TF_VIEWPORT_HEIGHT", "640"))}
                 for position, item in enumerate(plan, 1):
-                    if cancel_requested(batch_id):
+                    if cancel_requested(batch_id) or scenario_failed:
                         counters["skipped"] += len(plan) - position + 1
                         for remaining in plan[position - 1:]:
                             _save_run(remaining["run_id"], status="cancelled",
-                                      cancel_reason="Batch cancelled before this recording started.",
+                                      cancel_reason="Previous scenario recording failed." if scenario_failed else "Batch cancelled before this recording started.",
                                       finished_at=_now())
                             results.append({"run_id": remaining["run_id"], "recording_id": remaining["recording_id"],
                                             "name": remaining.get("name"), "status": "cancelled",
                                             "steps": 0, "seconds": 0.0})
-                        batch_status = "cancelled"
-                        await emit({"type": "batch", "batch_id": batch_id, "status": "cancelled",
+                        batch_status = "failed" if scenario_failed else "cancelled"
+                        await emit({"type": "batch", "batch_id": batch_id, "status": batch_status,
                                     "message": "Batch cancelled; the remaining recordings were not started."})
                         break
 
@@ -497,6 +509,8 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                     # the platform decides for us.
                     sample = sample_resources()
                     if sample.get("rss_mb") and MAX_RSS_MB and sample["rss_mb"] > MAX_RSS_MB:
+                        if scenario_meta and context is not None:
+                            raise RuntimeError("Ordered plan stopped at the memory limit; authenticated session cannot be silently replaced")
                         try:
                             if context is not None:
                                 await context.close()
@@ -513,7 +527,57 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                         except Exception as exc:
                             logger.warning("BATCH MEMORY GUARD FAILED %s", redact(exc))
 
-                    origin = origin_of(item.get("start_url") or "")
+                    if item.get('execution_plan'):
+                        from app.plan_runtime import run_plan
+                        from app.evidence import callback
+                        from app.secrets_store import reveal_map, sensitive_values
+                        with SessionLocal() as plan_db:
+                            plan_sensitive = sensitive_values(plan_db, [item['project_id']])
+                        from app.import_drafts import environment
+                        if context is not None:
+                            await context.close()
+                        context = page = context_origin = None
+                        plan_started = time.time()
+                        plan_logs = []
+                        async def relaunch_plan_browser():
+                            nonlocal browser, launches, relaunches
+                            if browser is not None:
+                                await browser.close()
+                            browser = await playwright.chromium.launch(**launch_kwargs())
+                            launches += 1
+                            relaunches += 1
+                            return browser
+                        async def plan_progress(done, total, case):
+                            for attempt in case['attempts']:
+                                for step in attempt['steps']:
+                                    plan_logs.append({**step, 'order': len(plan_logs)+1, 'label': f"Case {done}, row {case['row']}, {case['device']}, attempt {attempt['attempt']}", 'error': step.get('error_type'), 'result': {'case_status': case['status']}})
+                            _save_run(run_id, progress_pct=int(done/total*100), execution_log=list(plan_logs))
+                        _save_run(run_id, status='running', started_at=_now(), execution_log=[])
+                        try:
+                            values, _ = environment(item['project_id'], item['execution_plan'], item.get('variables'))
+                            plan_result = await run_plan(item['execution_plan'], values, Path(ARTIFACTS)/'runs'/run_id,
+                                borrowed_browser=browser, playwright=playwright, on_progress=plan_progress,
+                                chromium_options=launch_kwargs(), relaunch=relaunch_plan_browser,
+                                input_overrides=reveal_map(item.get('input_overrides') or {}),
+                                evidence=callback(Path(ARTIFACTS) / 'runs' / run_id, plan_sensitive))
+                            plan_status = plan_result['status']
+                            contexts_opened += sum(len(c['attempts']) for c in plan_result['cases'])
+                            retries += sum(max(0, len(c['attempts'])-1) for c in plan_result['cases'])
+                            plan_error = None
+                        except Exception as exc:
+                            plan_status, plan_error = 'error', type(exc).__name__
+                        if '--single-process' in launch_kwargs().get('args', []):
+                            await relaunch_plan_browser()
+                        counters['done'] += 1
+                        counters['passed' if plan_status == 'passed' else 'failed'] += 1
+                        steps_executed += len(plan_logs)
+                        _save_run(run_id, status=plan_status, progress_pct=100, execution_log=plan_logs, finished_at=_now(), rog_monitor_log=plan_error)
+                        results.append({'run_id':run_id,'recording_id':item['recording_id'],'name':name,'status':plan_status,'error':plan_error,'steps':len(plan_logs),'seconds':round(time.time()-plan_started,3)})
+                        _save_batch(batch_id,done=counters['done'],passed=counters['passed'],failed=counters['failed'],progress_pct=progress())
+                        await emit({'type':'run','batch_id':batch_id,'run_id':run_id,'name':name,'status':plan_status,'percent':progress()})
+                        continue
+
+                    origin = (scenario_meta['project_id'], 'scenario-session') if scenario_meta else (item.get("project_id"), origin_of(item.get("start_url") or ""))
                     need_context = context is None or (not share and True) or (share and context_origin != origin)
                     if need_context:
                         if context is not None:
@@ -521,6 +585,13 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                                 await context.close()
                             except Exception:
                                 pass
+                            if '--single-process' in launch_kwargs().get('args', []):
+                                # Chromium cannot reliably replace isolated contexts
+                                # in this mode. Close first: never two live browsers.
+                                await browser.close()
+                                browser = await playwright.chromium.launch(**launch_kwargs())
+                                launches += 1
+                                relaunches += 1
                         context = await browser.new_context(viewport=viewport, device_scale_factor=1)
                         contexts_opened += 1
                         context_origin = origin
@@ -530,7 +601,17 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
 
                     recording_started = time.time()
                     steps = await _expand_steps_with_repeat(item["steps"])
+                    from app.secrets_store import reveal_map, sensitive_values, SecretValue, scrub, scrub_entry
                     variables = dict(item.get("variables") or {})
+                    project_ids = [item['project_id']]
+                    with SessionLocal() as variable_db:
+                        if scenario_meta:
+                            project_ids.append(scenario_meta['project_id'])
+                            if not item.get("input_snapshot"):
+                                variables.update(resolve_variables(variable_db, scenario_meta['project_id']))
+                        sensitive = sensitive_values(variable_db, project_ids)
+                    variables.update(reveal_map(item.get('input_overrides') or {}))
+                    sensitive.extend(v for v in variables.values() if isinstance(v, SecretValue))
                     log_entries: list[dict] = []
                     status = "passed"
                     error_text = None
@@ -545,6 +626,7 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                         error_text = "This recording has no steps."
                     run_dir = os.path.join(ARTIFACTS, "runs", run_id)
                     os.makedirs(run_dir, exist_ok=True)
+                    runtime = StepRuntime(page, run_dir)
                     last_signature = None
                     total_steps = len(steps)
                     for index, step in enumerate(steps, 1):
@@ -557,7 +639,7 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                             "action": step.get("action"),
                             "label": step.get("label") or step.get("action"),
                             "value": step.get("value"),
-                            "selector": step.get("selector"),
+                            "selector": audit_selector(step.get("selector")),
                             "status": "running",
                             "percent": int((index - 1) / total_steps * 100) if total_steps else 100,
                         }
@@ -565,7 +647,10 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                             if action == "log":
                                 entry["status"] = "passed"
                             else:
-                                await replay_step(page, step, variables, budgets=budgets)
+                                result = await replay_step(page, step, variables, budgets=budgets, runtime=runtime)
+                                page = runtime.page
+                                if result:
+                                    entry["result"] = result
                                 steps_executed += 1
                             elapsed_ms = (time.time() - attempt_started) * 1000
                             pacer.observe(action, selector, elapsed_ms, True)
@@ -577,8 +662,8 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                                 changed = signature != last_signature
                                 last_signature = signature
                                 if changed or mode == "all":
-                                    await _capture(page, run_dir, index, entry, shot_tasks)
-                                    screenshots_taken += 1
+                                    await _capture(page, run_dir, index, entry, shot_tasks, sensitive)
+                                    screenshots_taken += int(bool(entry.get("screenshot")))
                                 else:
                                     screenshots_skipped += 1
                         except Exception as exc:
@@ -586,42 +671,53 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                             kind = classify_failure(str(exc))
                             pacer.observe(action, selector, elapsed_ms, False)
                             retried = False
-                            if retry and kind in TRANSIENT_KINDS and not budgets.get("escalated"):
+                            if retry and action in {"navigate", "click", "fill", "type", "press"} and not isinstance(exc, AssertionError) and kind in TRANSIENT_KINDS and not budgets.get("escalated"):
                                 retries += 1
                                 pacer.escalations += 1
                                 relaxed = pacer.escalate(budgets)
                                 retry_started = time.time()
                                 try:
-                                    await replay_step(page, step, variables, budgets=relaxed)
+                                    await replay_step(page, step, variables, budgets=relaxed, runtime=runtime)
+                                    page = runtime.page
                                     steps_executed += 1
                                     pacer.observe(action, selector, (time.time() - retry_started) * 1000, True)
                                     entry["status"] = "passed"
                                     entry["ms"] = round((time.time() - attempt_started) * 1000, 1)
                                     entry["retried"] = True
                                     retried = True
+                                    if mode in {'all', 'changes'}:
+                                        await _capture(page, run_dir, index, entry, shot_tasks, sensitive)
+                                        screenshots_taken += int(bool(entry.get('screenshot')))
                                 except Exception as retry_exc:
-                                    error_text = str(retry_exc).splitlines()[0][:500]
+                                    error_text = scrub(str(retry_exc), sensitive).splitlines()[0][:500]
                             if not retried:
                                 entry["status"] = "failed"
                                 entry["kind"] = kind
-                                entry["error"] = error_text or str(exc).splitlines()[0][:500]
+                                entry["error"] = error_text or scrub(str(exc), sensitive).splitlines()[0][:500]
                                 entry["ms"] = round(elapsed_ms, 1)
                                 status = "failed"
                                 error_text = entry["error"]
                                 if mode in ("failure", "changes", "all"):
                                     try:
-                                        await _capture(page, run_dir, index, entry, shot_tasks)
-                                        screenshots_taken += 1
+                                        await _capture(page, run_dir, index, entry, shot_tasks, sensitive)
+                                        screenshots_taken += int(bool(entry.get("screenshot")))
                                     except Exception:
                                         pass
+                                entry = scrub_entry(entry, sensitive)
+                                error_text = scrub(error_text, sensitive)
                                 log_entries.append(entry)
                                 break
+                        entry = scrub_entry(entry, sensitive)
                         log_entries.append(entry)
                         if len(log_entries) > MAX_LOG_ENTRIES:
                             del log_entries[: len(log_entries) - MAX_LOG_ENTRIES]
                         _save_run(run_id, progress_pct=entry.get("percent"), execution_log=list(log_entries))
 
+                    await runtime.close()
+                    page = runtime.page
                     elapsed = time.time() - recording_started
+                    if scenario_meta and status != 'passed':
+                        scenario_failed = True
                     if status == "passed":
                         counters["passed"] += 1
                     else:
@@ -676,8 +772,8 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                         pass
         except Exception as exc:
             batch_status = "error"
-            failure_text = explain_launch_error(exc)
-            logger.exception("BATCH FAILED %s", batch_id)
+            failure_text = type(exc).__name__ + ": batch execution stopped; review the redacted step log"
+            logger.warning("BATCH FAILED %s (%s)", batch_id, type(exc).__name__)
             for item in plan:
                 with SessionLocal() as db:
                     row = db.get(Run, item["run_id"])
@@ -687,7 +783,9 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                         row.finished_at = _now()
                         db.commit()
 
-    if batch_status not in ("cancelled", "error"):
+    if scenario_failed:
+        batch_status = "failed"
+    elif batch_status not in ("cancelled", "error"):
         if counters["failed"] and counters["passed"]:
             batch_status = "partial"
         elif counters["failed"]:
@@ -737,7 +835,7 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
         # cost times the recordings that did not have to pay it.
         "savings": {
             "browser_launches_avoided": max(0, len(plan) - launches),
-            "note": "A batch launches Chromium once instead of once per recording.",
+            "note": "Reuses Chromium where compatible; isolated context changes in single-process mode require sequential relaunches.",
         },
     }
     _save_batch(batch_id, status=batch_status, done=counters["done"], passed=counters["passed"],
@@ -754,11 +852,10 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
     return report
 
 
-async def _capture(page, run_dir: str, index: int, entry: dict, shot_tasks: set) -> None:
-    """Take the step PNG now and encode/write it off the replay path."""
-    name = f"step-{index}.png"
-    png = await page.screenshot(type="png", animations="disabled")
-    task = asyncio.create_task(_persist_shot(run_dir, name, png))
-    shot_tasks.add(task)
-    task.add_done_callback(shot_tasks.discard)
-    entry["screenshot"] = f"/api/runs/screenshot/{os.path.basename(run_dir)}/{name}"
+async def _capture(page, run_dir: str, index: int, entry: dict, shot_tasks: set, sensitive=()) -> None:
+    from app.evidence import capture_once
+    try:
+        name = await capture_once(page, run_dir, index, sensitive)
+        entry['screenshot'] = f"/api/runs/screenshot/{os.path.basename(run_dir)}/{name}"
+    except Exception as exc:
+        entry['evidence_error'] = type(exc).__name__
