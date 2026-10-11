@@ -1,27 +1,40 @@
 {
-  "source": "repository",
   "projects": [
     {
       "id": "qa-sample-app",
       "name": "TestForge Sample App",
       "path": "library/projects/qa-sample-app/project.json",
-      "variables": ["user"],
       "recordings": [
         {
           "id": "qa-hello-literal",
           "name": "Hello literal",
-          "step_count": 4,
-          "resources": ["Jenkinsfile"],
-          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json"
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json",
+          "resources": [
+            "Jenkinsfile"
+          ],
+          "step_count": 4
         },
         {
           "id": "qa-hello-variable",
           "name": "Hello variable",
-          "step_count": 4,
-          "resources": ["Jenkinsfile"],
-          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json"
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json",
+          "resources": [
+            "Jenkinsfile"
+          ],
+          "step_count": 4
         }
+      ],
+      "variables": [
+        "user"
       ]
+    },
+    {
+      "id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
+      "name": "Harris Farm Website",
+      "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/project.json",
+      "recordings": [],
+      "variables": []
     }
-  ]
+  ],
+  "source": "repository"
 }
