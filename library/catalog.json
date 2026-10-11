@@ -100,7 +100,6 @@
         }
       ],
       "variables": [
-        "Extranet_pass",
         "Extranet_pass"
       ]
     }
