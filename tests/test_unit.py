@@ -2835,6 +2835,26 @@ class AzureGuideTests(unittest.TestCase):
         self.assertEqual(caught.exception.status_code, 404)
         self.assertIn("github.com", caught.exception.detail, "the error must point at the guide in the repository")
 
+    def test_AZ_04_the_guide_is_azure_only(self):
+        """Nothing in the Azure tab may describe a different hosting platform.
+
+        The guide used to run a side-by-side comparison with the free demo, which
+        made the tab unreadable on its own and meant any change to that other
+        deployment was a change to the Azure document. The one permitted match is
+        the environment variable the app itself reads for its revision
+        (`os.environ["RENDER_GIT_COMMIT"]` in app/main.py) — that name is code, not
+        a platform reference, and renaming it is an app change.
+        """
+        from app import main as app_main
+        markdown = app_main.azure_deployment_guide()["markdown"]
+        stray = [line.strip() for line in markdown.splitlines()
+                 if "render" in line.lower() and "RENDER_GIT_COMMIT" not in line]
+        self.assertFalse(stray, "the Azure guide must stay about Azure; found: " + " | ".join(stray[:3]))
+        lowered = markdown.lower()
+        for topic in ("azure database for postgresql", "azure-pipelines.yml", "docker compose",
+                      "azure repos", "key vault"):
+            self.assertIn(topic, lowered, "the guide must actually cover " + topic)
+
 
 def AdaptivePacerForTest():
     """A pacer with no profile file, so tests never touch artifacts/batches."""

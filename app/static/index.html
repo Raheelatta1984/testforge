@@ -1546,8 +1546,9 @@ function MdBlocks({ blocks }) {
 
 const DOCS_BASE_URL = "https://github.com/Raheelatta1984/testforge/blob/main/docs/";
 const AZURE_GUIDE_URL = DOCS_BASE_URL + "azure-devops-deployment-guide.md";
+// Runbooks this Azure guide tells you to read (§2, §8). Deliberately NOT a link to
+// docs/deployment-guide.md: the Azure tab is a self-contained Azure story.
 const RUNBOOK_URLS = {
-  deployment: DOCS_BASE_URL + "deployment-guide.md",
   security: DOCS_BASE_URL + "github-publishing-security-runbook.md",
   acceptance: DOCS_BASE_URL + "qa-automation-acceptance.md",
 };
@@ -1632,7 +1633,9 @@ function Azure() {
         e("div", {},
           e("h2", { className: "font-bold text-lg text-indigo-300" }, "Azure deployment guide ☁️"),
           e("p", { className: "text-[11px] text-slate-400 mt-1" },
-            "Deploy TestForge to Azure (VM + PostgreSQL + Azure DevOps) by following the steps below, in order. " +
+            "Deploy TestForge on Azure — the VM runtime, Azure Database for PostgreSQL and the Azure " +
+            "DevOps pipeline — by following the steps below, in order. This tab is self-contained: every " +
+            "step is an Azure step. " +
             "Tick each step off as you finish it — progress is kept on this device."),
           data && e("p", { className: "text-[9px] font-mono text-slate-500 mt-1 break-all" },
             `${data.source} · ${Math.round((data.bytes || 0) / 1024)} KB`)),
@@ -1686,14 +1689,14 @@ function Azure() {
     e("div", { className: "flex flex-wrap justify-center gap-2 pt-1" },
       e("a", { href: AZURE_GUIDE_URL, target: "_blank", rel: "noopener noreferrer",
                className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "📖 THIS GUIDE ON GITHUB"),
-      e("a", { href: RUNBOOK_URLS.deployment, target: "_blank", rel: "noopener noreferrer",
-               className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "🚀 DEPLOYMENT GUIDE"),
       e("a", { href: RUNBOOK_URLS.security, target: "_blank", rel: "noopener noreferrer",
                className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "🔐 SECURITY RUNBOOK"),
       e("a", { href: RUNBOOK_URLS.acceptance, target: "_blank", rel: "noopener noreferrer",
                className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "✅ QA ACCEPTANCE")),
     e("p", { className: "text-[10px] text-slate-500 text-center" },
-      "Rendered from docs/azure-devops-deployment-guide.md in this deployment. The [verify] marks in the guide flag platform quotas that change - check them against your Azure subscription.")
+      "Served from docs/azure-devops-deployment-guide.md in this deployment. This guide covers Azure only " +
+      "(VM runtime, Azure Database for PostgreSQL, Azure DevOps); the [verify] marks flag Azure quotas " +
+      "that change - check them against your subscription.")
   );
 }
 
