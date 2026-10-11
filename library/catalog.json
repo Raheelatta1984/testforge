@@ -99,9 +99,7 @@
           "tags": "AI_PENDING"
         }
       ],
-      "variables": [
-        "Extranet_pass"
-      ]
+      "variables": []
     }
   ],
   "source": "repository"
