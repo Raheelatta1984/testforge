@@ -78,7 +78,7 @@ function App() {
     setLiveWindow(next);
     localStorage.setItem("tf_live_window", next ? "1" : "0");
   };
-  const tabs = [["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"]];
+  const tabs = [["projects","📁"], ["variables","🔤"], ["record","⏺"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"], ["azure","☁️"]];
 
   return e('div', { className: "h-full flex flex-col" },
     e('header', { className: "p-4 border-b border-slate-800 flex justify-between bg-slate-950/80 backdrop-blur" },
@@ -95,7 +95,8 @@ function App() {
       tab === "library" && e(Library, { project: activeProject, liveWindow, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId, liveWindow, setLiveWindow: toggleLiveWindow }),
       tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts),
-      tab === "logs" && e(Logs), tab === "github" && e(Github)
+      tab === "logs" && e(Logs), tab === "github" && e(Github),
+      tab === "azure" && e(Azure)
     ),
     e('nav', { className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex" },
       tabs.map(([k, icon]) => e('button', { key: k, onClick: () => setTab(k), className: `nav-btn ${tab===k?'active':''}` }, icon))
@@ -1349,6 +1350,350 @@ function Github() {
       (info && info.publish_enabled)
         ? "Every publish is verified by reading the remote branch back. A push that fails is retried once a minute; a push GitHub refuses (401/403) is not, because no wait changes the answer — fix the token and publish again. The local library is never rolled back."
         : "Publishing is disabled here, so saves stay on this instance and no retry is scheduled. Configure TF_GITHUB_REPO with TF_GITHUB_TOKEN (or mount a checkout) to enable it.")
+  );
+}
+
+// --- Azure deployment guide tab ---------------------------------------------
+// The guide (docs/azure-devops-deployment-guide.md) is served by
+// GET /api/docs/azure-guide and rendered here as follow-along steps: each `##`
+// heading becomes a collapsible, checkable step with progress kept on this
+// device. The renderer below covers exactly what the guide uses - headings,
+// paragraphs, nested lists, tables, fenced code, quotes and task boxes - and
+// nothing fancier.
+
+function inlineMd(text, keyBase) {
+  // **bold**, *italic*, `code` and [text](url) into elements; the rest stays text.
+  const out = [];
+  const pattern = /(\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[[^\]]+\]\([^)\s]+\))/g;
+  let last = 0, m, k = 0;
+  const plain = (t) => out.push(t);
+  while ((m = pattern.exec(text)) !== null) {
+    if (m.index > last) plain(text.slice(last, m.index));
+    const token = m[0], key = keyBase + "-" + (k++);
+    if (token.startsWith("**")) out.push(e("strong", { key, className: "text-slate-100" }, token.slice(2, -2)));
+    else if (token.startsWith("`")) out.push(e("code", { key, className: "bg-slate-800 text-indigo-200 rounded px-1 py-0.5 text-[0.85em] font-mono break-all" }, token.slice(1, -1)));
+    else if (token.startsWith("[")) {
+      const link = /^\[([^\]]+)\]\(([^)\s]+)\)$/.exec(token);
+      out.push(e("a", { key, href: link[2], target: "_blank", rel: "noopener noreferrer", className: "text-indigo-300 underline break-all" }, link[1]));
+    }
+    else out.push(e("em", { key, className: "text-slate-200" }, token.slice(1, -1)));
+    last = m.index + token.length;
+  }
+  if (last < text.length) plain(text.slice(last));
+  return out;
+}
+
+function CopyBtn({ text, label }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(text);
+      else {
+        const ta = document.createElement("textarea");
+        ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+        document.body.appendChild(ta); ta.select(); document.execCommand("copy"); document.body.removeChild(ta);
+      }
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch (_) { /* clipboard blocked; the text is still selectable */ }
+  };
+  return e("button", { onClick: copy, title: "Copy to clipboard",
+    className: "text-[9px] font-bold px-2 py-0.5 rounded bg-slate-700 hover:bg-indigo-600 text-slate-200 whitespace-nowrap" },
+    copied ? "COPIED ✓" : (label || "COPY ⧉"));
+}
+
+function CodeBlock({ lang, text }) {
+  return e("div", { className: "my-1" },
+    e("div", { className: "flex items-center justify-between bg-slate-800/80 border border-slate-700 border-b-0 rounded-t-lg px-3 py-1" },
+      e("span", { className: "text-[9px] font-mono uppercase tracking-wide text-slate-400" }, lang || "code"),
+      e(CopyBtn, { text })),
+    e("pre", { className: "bg-slate-950 border border-slate-700 rounded-b-lg p-3 overflow-x-auto text-[10px] leading-relaxed font-mono text-emerald-100/90 whitespace-pre" }, text)
+  );
+}
+
+// Long quotes in this guide are the P1-P8 AI prompts: keep their line shape
+// and give them a one-tap copy.
+function QuoteBlock({ text, keyBase }) {
+  return e("div", { className: "relative my-1" },
+    e("div", { className: "absolute right-2 top-2" }, e(CopyBtn, { text, label: "COPY ⧉" })),
+    e("blockquote", { className: "border-l-2 border-amber-500/60 bg-amber-950/20 text-amber-100 pl-3 pr-24 py-2 rounded-r-lg text-xs leading-relaxed whitespace-pre-wrap" },
+      inlineMd(text, keyBase)));
+}
+
+function splitTableRow(line) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map(cell => cell.trim());
+}
+
+function parseMdBlocks(md) {
+  const lines = md.split("\n");
+  const blocks = [];
+  let i = 0;
+  const isFence = (l) => /^\s*```/.test(l);
+  while (i < lines.length) {
+    const line = lines[i];
+    if (isFence(line)) {
+      const lang = line.replace(/^\s*```/, "").trim();
+      const buf = [];
+      i++;
+      while (i < lines.length && !isFence(lines[i])) { buf.push(lines[i]); i++; }
+      i++; // consume the closing fence; a missing one still ends the block
+      blocks.push({ type: "code", lang, text: buf.join("\n") });
+      continue;
+    }
+    const heading = /^(#{1,4})\s+(.*)$/.exec(line);
+    if (heading) { blocks.push({ type: "heading", level: heading[1].length, text: heading[2] }); i++; continue; }
+    if (/^\s*(-{3,}|\*{3,})\s*$/.test(line)) { blocks.push({ type: "hr" }); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
+      const header = splitTableRow(line);
+      i += 2;
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) { rows.push(splitTableRow(lines[i])); i++; }
+      blocks.push({ type: "table", header, rows });
+      continue;
+    }
+    if (/^\s*>\s?/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*>\s?/.test(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
+      blocks.push({ type: "quote", text: buf.join("\n") });
+      continue;
+    }
+    if (/^\s*([-*]|\d+\.)\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length) {
+        const l = lines[i];
+        if (/^\s*([-*]|\d+\.)\s+/.test(l)) {
+          const indent = (/^(\s*)/.exec(l)[1] || "").replace(/\t/g, "  ").length;
+          items.push({ indent, ordered: /^\s*\d+\./.test(l), task: /^\s*[-*]\s+\[( |x)\]\s+/.test(l),
+                       taskDone: /^\s*[-*]\s+\[x\]\s+/.test(l),
+                       text: l.replace(/^\s*([-*]|\d+\.)\s+(?:\[( |x)\]\s+)?/, "") });
+          i++;
+        } else if (l.trim() && /^\s{2,}/.test(l) && items.length) {
+          // A wrapped continuation of the previous list item.
+          items[items.length - 1].text += " " + l.trim();
+          i++;
+        } else break;
+      }
+      blocks.push({ type: "list", items });
+      continue;
+    }
+    if (!line.trim()) { i++; continue; }
+    const buf = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() &&
+           !/^\s*(```|#{1,4}\s|>|-{3,}\s*$|\*{3,}\s*$)/.test(lines[i]) &&
+           !/^\s*\|.*\|\s*$/.test(lines[i]) &&
+           !/^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
+      buf.push(lines[i].trim()); i++;
+    }
+    blocks.push({ type: "p", text: buf.join(" ") });
+  }
+  return blocks;
+}
+
+function MdList({ items, keyBase }) {
+  // Nest by indentation, then render each run of same-flavoured items as one
+  // ul/ol so mixed nesting keeps its markers.
+  const root = { children: [] };
+  const stack = [{ level: -1, node: root }];
+  items.forEach((item) => {
+    const node = { item, children: [] };
+    const level = Math.floor(item.indent / 2);
+    while (stack.length && stack[stack.length - 1].level >= level) stack.pop();
+    stack[stack.length - 1].node.children.push(node);
+    stack.push({ level, node });
+  });
+  const render = (node, key, depth) => {
+    const groups = [];
+    node.children.forEach((child) => {
+      const last = groups[groups.length - 1];
+      if (last && last.ordered === child.item.ordered) last.nodes.push(child);
+      else groups.push({ ordered: child.item.ordered, nodes: [child] });
+    });
+    return groups.map((g, gi) => e(g.ordered ? "ol" : "ul", {
+      key: key + "-" + gi,
+      className: (g.ordered ? "list-decimal" : "list-disc") + " pl-5 space-y-1.5 text-xs text-slate-300 leading-relaxed"
+    }, g.nodes.map((n, ni) => e("li", { key: ni, className: n.item.task ? "list-none -ml-5" : "" },
+      n.item.task && e("span", { className: "mr-1.5" }, "☐"),
+      inlineMd(n.item.text, key + gi + "i" + ni),
+      n.children.length ? render(n, key + gi + "n" + ni, depth + 1) : null))));
+  };
+  return e("div", { className: "space-y-2" }, render(root, keyBase, 0));
+}
+
+function MdBlocks({ blocks }) {
+  return e("div", { className: "space-y-3" }, blocks.map((b, i) => {
+    switch (b.type) {
+      case "heading": {
+        const sizes = ["text-lg font-bold text-indigo-200", "text-base font-bold text-indigo-300",
+                       "text-sm font-bold text-slate-100", "text-xs font-bold text-slate-200"];
+        return e("div", { key: i, className: (sizes[b.level - 1] || sizes[2]) + " pt-1" }, inlineMd(b.text, "h" + i));
+      }
+      case "p": return e("p", { key: i, className: "text-xs text-slate-300 leading-relaxed" }, inlineMd(b.text, "p" + i));
+      case "hr": return e("hr", { key: i, className: "border-slate-800" });
+      case "quote": return e(QuoteBlock, { key: i, text: b.text, keyBase: "q" + i });
+      case "code": return e(CodeBlock, { key: i, lang: b.lang, text: b.text });
+      case "table": return e("div", { key: i, className: "overflow-x-auto border border-slate-800 rounded-xl" },
+        e("table", { className: "w-full text-[10px]" },
+          e("thead", {}, e("tr", { className: "bg-slate-800/70" },
+            b.header.map((cell, j) => e("th", { key: j, className: "text-left px-2 py-1.5 font-bold text-slate-200" }, inlineMd(cell, "th" + i + "-" + j))))),
+          e("tbody", {}, b.rows.map((row, r) => e("tr", { key: r, className: "border-t border-slate-800" + (r % 2 ? " bg-slate-900/40" : "") },
+            row.map((cell, c) => e("td", { key: c, className: "px-2 py-1.5 text-slate-300 align-top" }, inlineMd(cell, "td" + i + "-" + r + "-" + c))))))));
+      case "list": return e(MdList, { key: i, items: b.items, keyBase: "l" + i });
+      default: return null;
+    }
+  }));
+}
+
+const DOCS_BASE_URL = "https://github.com/Raheelatta1984/testforge/blob/main/docs/";
+const AZURE_GUIDE_URL = DOCS_BASE_URL + "azure-devops-deployment-guide.md";
+const RUNBOOK_URLS = {
+  deployment: DOCS_BASE_URL + "deployment-guide.md",
+  security: DOCS_BASE_URL + "github-publishing-security-runbook.md",
+  acceptance: DOCS_BASE_URL + "qa-automation-acceptance.md",
+};
+
+function Azure() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(() => ({ 0: true }));   // first step starts open
+  const [allOpen, setAllOpen] = useState(false);
+  // Follow-along progress lives on this device only.
+  const [done, setDone] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("tf_azure_steps") || "{}"); } catch (_) { return {}; }
+  });
+  const sectionRefs = useRef({});
+
+  useEffect(() => {
+    let stop = false;
+    API.get("/api/docs/azure-guide")
+      .then(res => { if (!stop) { setData(res); setError(""); } })
+      .catch(err => { if (!stop) setError(err.message); })
+      .finally(() => { if (!stop) setLoading(false); });
+    return () => { stop = true; };
+  }, []);
+
+  // Split the guide into: document title, an intro (before the first `##`) and
+  // one step per `##` heading. Code fences are respected - some code blocks
+  // contain lines that look like headings.
+  let title = "", intro = [], sections = [];
+  if (data && data.markdown) {
+    let current = null, inFence = false;
+    for (const line of data.markdown.split("\n")) {
+      if (/^\s*```/.test(line)) {
+        inFence = !inFence;
+        (current ? current.lines : intro).push(line);
+        continue;
+      }
+      if (!inFence) {
+        const h2 = /^##\s+(.*)$/.exec(line);
+        const h1 = /^#\s+(.*)$/.exec(line);
+        if (h2) { current = { title: h2[1].trim(), lines: [] }; sections.push(current); continue; }
+        if (h1 && !title) { title = h1[1].trim(); continue; }
+      }
+      (current ? current.lines : intro).push(line);
+    }
+  }
+  sections = sections.map(s => ({ title: s.title, markdown: s.lines.join("\n") }));
+  const introMd = intro.join("\n");
+
+  const toggleDone = (key) => {
+    setDone(prev => {
+      const next = { ...prev };
+      if (next[key]) delete next[key]; else next[key] = true;
+      try { localStorage.setItem("tf_azure_steps", JSON.stringify(next)); } catch (_) {}
+      return next;
+    });
+  };
+  const resetProgress = () => {
+    setDone({});
+    try { localStorage.removeItem("tf_azure_steps"); } catch (_) {}
+  };
+  const jumpTo = (idx) => {
+    setOpen(prev => ({ ...prev, [idx]: true }));
+    setTimeout(() => {
+      const node = sectionRefs.current[idx];
+      if (node && node.scrollIntoView) node.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  };
+  const toggleAll = () => {
+    const next = {};
+    sections.forEach((_, idx) => { next[idx] = !allOpen; });
+    setOpen(next);
+    setAllOpen(!allOpen);
+  };
+  const stepKey = (idx, s) => idx + "::" + s.title;
+  const doneCount = sections.filter((s, idx) => done[stepKey(idx, s)]).length;
+  const pct = sections.length ? Math.round((doneCount / sections.length) * 100) : 0;
+
+  return e("div", { className: "space-y-4" },
+    e("div", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-2" },
+      e("div", { className: "flex justify-between items-start gap-2" },
+        e("div", {},
+          e("h2", { className: "font-bold text-lg text-indigo-300" }, "Azure deployment guide ☁️"),
+          e("p", { className: "text-[11px] text-slate-400 mt-1" },
+            "Deploy TestForge to Azure (VM + PostgreSQL + Azure DevOps) by following the steps below, in order. " +
+            "Tick each step off as you finish it — progress is kept on this device."),
+          data && e("p", { className: "text-[9px] font-mono text-slate-500 mt-1 break-all" },
+            `${data.source} · ${Math.round((data.bytes || 0) / 1024)} KB`)),
+        e("span", { className: "fast-badge whitespace-nowrap" }, sections.length ? (sections.length + " STEPS") : "GUIDE")
+      ),
+      sections.length > 0 && e("div", { className: "space-y-1 pt-1" },
+        e("div", { className: "h-2 bg-slate-800 rounded-full overflow-hidden" },
+          e("div", { className: "h-full bg-indigo-500 transition-all", style: { width: pct + "%" } })),
+        e("div", { className: "flex justify-between items-center" },
+          e("span", { className: "text-[10px] text-slate-400" }, `${doneCount} of ${sections.length} steps complete`),
+          e("div", { className: "flex gap-2" },
+            e("button", { onClick: toggleAll, className: "text-[9px] font-bold px-2 py-1 rounded bg-slate-700 hover:bg-indigo-600" },
+              allOpen ? "COLLAPSE ALL" : "EXPAND ALL"),
+            e("button", { onClick: resetProgress, className: "text-[9px] font-bold px-2 py-1 rounded bg-slate-700 hover:bg-red-700" }, "RESET PROGRESS"))))
+    ),
+    loading && e("p", { className: "text-sm text-slate-400" }, "Loading the guide…"),
+    error && e("div", { role: "alert", className: "bg-red-950/40 border border-red-800/40 text-red-200 p-4 rounded-2xl space-y-2" },
+      e("p", { className: "text-sm font-bold" }, "The guide could not be loaded."),
+      e("p", { className: "text-xs" }, error),
+      e("a", { href: AZURE_GUIDE_URL, target: "_blank", rel: "noopener noreferrer",
+               className: "block text-center bg-slate-800 text-indigo-300 text-xs font-bold px-4 py-2 rounded-xl underline" },
+        "Read it on GitHub instead")),
+    data && data.truncated && e("p", { role: "status", className: "text-xs text-amber-300" },
+      "The guide is larger than the server is willing to serve and was cut short. Read the full file on GitHub."),
+    sections.length > 0 && e("div", { className: "flex flex-wrap gap-1.5" },
+      sections.map((s, idx) => e("button", { key: idx, onClick: () => jumpTo(idx),
+        className: "text-[9px] font-mono px-2 py-1 rounded-full border " +
+          (done[stepKey(idx, s)] ? "bg-emerald-900/60 border-emerald-700 text-emerald-200"
+                                 : "bg-slate-900 border-slate-700 text-slate-300 hover:border-indigo-500") },
+        (done[stepKey(idx, s)] ? "✓ " : "") + s.title.split(/[.:]/)[0].slice(0, 28)))),
+    data && introMd.trim() && e("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2" },
+      title && e("div", { className: "text-sm font-bold text-indigo-200" }, title),
+      e(MdBlocks, { blocks: parseMdBlocks(introMd) })),
+    sections.map((s, idx) => {
+      const key = stepKey(idx, s);
+      const isOpen = !!open[idx];
+      const isDone = !!done[key];
+      return e("div", { key: key, ref: (node) => { sectionRefs.current[idx] = node; }, className: "scroll-mt-3" },
+        e("div", { className: "bg-slate-900 border rounded-2xl overflow-hidden " + (isDone ? "border-emerald-800/60" : "border-slate-800") },
+          e("div", { className: "flex items-stretch" },
+            e("button", { title: isDone ? "Mark step as not done" : "Mark step as done",
+              onClick: () => toggleDone(key),
+              className: "px-3 text-lg " + (isDone ? "text-emerald-400" : "text-slate-600 hover:text-slate-400") }, isDone ? "✅" : "⬜"),
+            e("button", { className: "flex-1 text-left p-3 pl-1", onClick: () => setOpen(prev => ({ ...prev, [idx]: !isOpen })) },
+              e("div", { className: "flex justify-between items-center gap-2" },
+                e("span", { className: "font-bold text-xs " + (isDone ? "text-emerald-300 line-through" : "text-slate-200") }, s.title),
+                e("span", { className: "text-slate-500 text-xs" }, isOpen ? "▲" : "▼")))),
+          isOpen && e("div", { className: "p-4 pt-1 border-t border-slate-800/70" },
+            e(MdBlocks, { blocks: parseMdBlocks(s.markdown) }))));
+    }),
+    e("div", { className: "flex flex-wrap justify-center gap-2 pt-1" },
+      e("a", { href: AZURE_GUIDE_URL, target: "_blank", rel: "noopener noreferrer",
+               className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "📖 THIS GUIDE ON GITHUB"),
+      e("a", { href: RUNBOOK_URLS.deployment, target: "_blank", rel: "noopener noreferrer",
+               className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "🚀 DEPLOYMENT GUIDE"),
+      e("a", { href: RUNBOOK_URLS.security, target: "_blank", rel: "noopener noreferrer",
+               className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "🔐 SECURITY RUNBOOK"),
+      e("a", { href: RUNBOOK_URLS.acceptance, target: "_blank", rel: "noopener noreferrer",
+               className: "text-[9px] font-bold px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300 hover:border-indigo-500" }, "✅ QA ACCEPTANCE")),
+    e("p", { className: "text-[10px] text-slate-500 text-center" },
+      "Rendered from docs/azure-devops-deployment-guide.md in this deployment. The [verify] marks in the guide flag platform quotas that change - check them against your Azure subscription.")
   );
 }
 

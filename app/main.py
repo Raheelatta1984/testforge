@@ -1842,5 +1842,54 @@ async def ai_rephrase(body: dict):
     return {"rephrased": cleaned}
 
 
+# --- In-app deployment guide ------------------------------------------------
+#
+# The dashboard's Azure tab renders docs/azure-devops-deployment-guide.md so an
+# end user can follow the deployment from inside the app. This is one static
+# file, so the endpoint is a size-capped, mtime-cached file read - the same
+# guardrail shape as the local log reader, minus the directory walk.
+
+DOCS_GUIDE_MAX_BYTES = 512 * 1024
+_GUIDE_CACHE: dict = {}
+
+
+def _guide_path() -> str:
+    """docs/ sits next to the app package, in a checkout and in the image."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "docs", "azure-devops-deployment-guide.md",
+    )
+
+
+@app.get("/api/docs/azure-guide")
+def azure_deployment_guide():
+    """The Azure deployment guide as markdown, for the dashboard's Azure tab."""
+    path = _guide_path()
+    try:
+        stat = os.stat(path)
+    except OSError:
+        raise HTTPException(
+            status_code=404,
+            detail="docs/azure-devops-deployment-guide.md is not part of this deployment. "
+                   "Read the guide in the repository instead: "
+                   "https://github.com/Raheelatta1984/testforge/blob/main/docs/azure-devops-deployment-guide.md",
+        )
+    cached = _GUIDE_CACHE.get("payload")
+    if cached and _GUIDE_CACHE.get("mtime") == stat.st_mtime and _GUIDE_CACHE.get("size") == stat.st_size:
+        return cached
+    with open(path, "r", encoding="utf-8", errors="replace") as handle:
+        markdown = handle.read(DOCS_GUIDE_MAX_BYTES)
+    payload = {
+        "source": "docs/azure-devops-deployment-guide.md",
+        "bytes": stat.st_size,
+        "truncated": stat.st_size > DOCS_GUIDE_MAX_BYTES,
+        "markdown": markdown,
+    }
+    _GUIDE_CACHE["payload"] = payload
+    _GUIDE_CACHE["mtime"] = stat.st_mtime
+    _GUIDE_CACHE["size"] = stat.st_size
+    return payload
+
+
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
