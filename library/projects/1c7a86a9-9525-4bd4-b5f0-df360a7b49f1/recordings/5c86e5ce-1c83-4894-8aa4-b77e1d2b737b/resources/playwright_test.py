@@ -1,63 +1,49 @@
-"""Sequential TestForge replay. pip install playwright; playwright install chromium.
-Run from this resource directory. Supply variables as TF_VAR_<name>.
-"""
-import asyncio
-import json
+"""Generated TestForge Playwright replay. Install playwright and chromium first."""
 import os
-from pathlib import Path
-from playwright.async_api import async_playwright
-from testforge_runtime import StepRuntime, interpolate
+import re
+from playwright.sync_api import sync_playwright
 
-async def main():
-    here = Path(__file__).resolve().parent
-    steps = json.loads((here / "steps.json").read_text())
-    variables = {k[7:]: v for k, v in os.environ.items() if k.startswith("TF_VAR_")}
-    if (here / 'execution-plan.json').exists():
-        from testforge_plan import run_plan
-        plan = json.loads((here / 'execution-plan.json').read_text())
-        opts = {'headless': True, 'args': ['--no-sandbox', '--disable-dev-shm-usage']}
-        if os.environ.get('TF_CHROMIUM_PATH'):
-            opts['executable_path'] = os.environ['TF_CHROMIUM_PATH']
-        if os.environ.get('TF_CHROMIUM_LIBS'):
-            opts['env'] = {**os.environ, 'LD_LIBRARY_PATH': os.environ['TF_CHROMIUM_LIBS']}
-        result = await run_plan(plan, variables, here / 'run-artifacts', chromium_options=opts)
-        (here / 'plan-result.json').write_text(json.dumps(result, indent=2))
-        if result['status'] != 'passed':
-            raise RuntimeError('Execution plan failed or was flaky; inspect plan-result.json')
-        return
-    async with async_playwright() as pw:
-        launch = {"headless": True, "args": ["--no-sandbox", "--disable-dev-shm-usage"]}
-        if os.environ.get("TF_CHROMIUM_PATH"):
-            launch["executable_path"] = os.environ["TF_CHROMIUM_PATH"]
-        if os.environ.get("TF_CHROMIUM_LIBS"):
-            launch["env"] = {**os.environ, "LD_LIBRARY_PATH": os.environ["TF_CHROMIUM_LIBS"]}
-        browser = await pw.chromium.launch(**launch)
-        context = await browser.new_context(viewport={"width": 1024, "height": 640})
-        page = await context.new_page()
-        output = here / "run-artifacts"
-        output.mkdir(exist_ok=True)
-        runtime = StepRuntime(page, output)
-        try:
-            total = 0
-            for step in steps:
-                repeat = step.get("repeat_count", step.get("repeat", 1)) or 1
-                if not isinstance(repeat, int) or not 1 <= repeat <= 100:
-                    raise ValueError("Invalid repeat count")
-                for _ in range(repeat):
-                    total += 1
-                    if total > 2000:
-                        raise ValueError("Expanded action limit exceeded")
-                    selector = step.get("selector") or {}
-                    if not selector.get("strict") and step["action"] == "click" and not selector.get("primary"):
-                        await runtime.page.mouse.click(selector["x"], selector["y"])
-                    elif not selector.get("strict") and step["action"] in ("type", "fill") and not selector.get("primary"):
-                        await runtime.page.keyboard.type(interpolate(step.get("value"), variables), delay=0)
-                    else:
-                        await runtime.perform(step, variables)
-        finally:
-            await runtime.close()
-            await context.close()
-            await browser.close()
+STEPS = [{'id': 'bb15b6dc-b592-47f8-908b-eb5156b8b122', 'order': 1, 'action': 'navigate', 'value': 'https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08', 'label': 'Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08', 'selector': None}, {'id': 'ed15d2b4-eebf-4173-9f5d-daa5dbc7b5d0', 'order': 2, 'action': 'click', 'value': None, 'label': 'Click 123,322', 'selector': {'primary': 'div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)', 'x': 123, 'y': 322, 'text': '', 'tag': 'input'}, 'screenshot': 'step-002.png'}, {'id': '1646ff6f-e63f-4cb7-b097-9bc7b8e19431', 'order': 3, 'action': 'type', 'value': 'Ratta', 'label': 'Type: Ratta', 'selector': {'primary': 'div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)'}, 'screenshot': 'step-003.png'}, {'id': '34480860-9401-4fee-a0b8-155abb94183b', 'order': 4, 'action': 'click', 'value': None, 'label': 'Click 115,416', 'selector': {'primary': 'div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)', 'x': 115, 'y': 416, 'text': '', 'tag': 'input'}, 'screenshot': 'step-004.png'}]
 
-if __name__ == "__main__":
-    asyncio.run(main())
+def value(text):
+    def replace(match):
+        name = match.group(1)
+        env = "TF_VAR_" + name
+        if env not in os.environ:
+            raise KeyError("Missing variable: " + env)
+        return os.environ[env]
+    return re.sub(r"\{\{\s*([\w.\-]+)\s*\}\}", replace, text or "")
+
+with sync_playwright() as playwright:
+    browser = playwright.chromium.launch()
+    page = browser.new_page(viewport={"width": 1024, "height": 640})
+    variables = {}
+    try:
+        for step in STEPS:
+            action = step["action"]
+            target = step.get("selector") or {}
+            selector = target.get("primary")
+            text = value(step.get("value"))
+            if action == "navigate":
+                page.goto(text)
+            elif action == "click":
+                if selector:
+                    page.locator(selector).first.click()
+                else:
+                    page.mouse.click(target["x"], target["y"])
+            elif action in ("type", "fill"):
+                if selector:
+                    page.locator(selector).first.click()
+                if action == "fill" and selector:
+                    page.locator(selector).first.fill(text)
+                else:
+                    page.keyboard.type(text)
+            elif action == "press":
+                page.keyboard.press(text)
+            elif action == "save_variable":
+                variables[text] = page.locator(selector).first.input_value()
+                os.environ["TF_VAR_" + text] = variables[text]
+            else:
+                raise ValueError("Unsupported action: " + action)
+    finally:
+        browser.close()
