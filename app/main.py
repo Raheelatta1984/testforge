@@ -576,6 +576,10 @@ def create_rec(body: dict, request: Request):
         raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if len(name.strip()) > 255 or len(start_url) > 1000:
+        # `recordings.name` and `recordings.start_url` are bounded; a value the
+        # column cannot hold is a clear 422 here instead of a failed insert.
+        raise HTTPException(status_code=422, detail="Recording name or start URL is too long")
     try:
         return library_store.create_recording(
             project_id,

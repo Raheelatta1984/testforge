@@ -33,12 +33,26 @@ Do not upload literal passwords, personal data or production files: canonical st
 | Input | Supported contract |
 | --- | --- |
 | CSV / TSV | One recording, one action per row. Required `action`; optional `selector`, `value`/`input`, `label`/`description`, `repeat_count`. Selected vendor metadata columns are accepted, but natural-language actions are not inferred. Multiple different `test_case`/`summary` values are rejected. |
-| Excel `.xlsx` | The same step table in one worksheet. Literal cells only. Formulas, macros, external links and multi-sheet workbooks are rejected. Legacy `.xls` requires conversion. |
+| Excel `.xlsx` / `.xlsm` | The same step table in one worksheet. Literal cells only. Formulas, macros, external links and multi-sheet workbooks are rejected. |
+| Legacy Excel `.xls` | The same step table read with `xlrd` (`.xlsm` also accepted). One worksheet, ≤12 columns, literal cells only. |
 | JSON | A canonical step array, `{ "name": "…", "steps": [...] }`, or `{ "name": "…", "execution_plan": {...} }`. Array order is execution order. Use this format for a lossless re-import of supported canonical steps. |
 | Playwright Python `.py` | Static straight-line `page` actions/expect assertions, simple literal constants/locator aliases, and one undecorated `test_*` function taking a `page` fixture. Sync/async action syntax is supported. Arbitrary imports, helpers, loops, branches, browser-bootstrap code and evaluated expressions are rejected. |
 | Playwright JavaScript / TypeScript | One standard `test('name', async ({ page }) => { ... })` wrapper or straight-line actions; one supported action/assertion per line. Literal role `name` or `exact` options are supported. Arbitrary JS/TS, POM imports, hooks and general TypeScript syntax are not executed or inferred. |
 | BDD / Cucumber `.feature` / `.bdd` | One scenario using the concrete phrases below. Custom step-definition code, outlines, data tables and arbitrary business-language phrases require explicit conversion. A feature file alone cannot define unknown business actions. |
 | Jenkinsfile / `.jenkins` / `.groovy` bundle | A restricted declarative wrapper using `pipeline`, `agent any`, `stages`, `stage`, `steps` and exactly one literal `sh` test command. Supply its referenced Python/JS/TS file. Accepted commands: `python`, `python3`, `pytest`, `node`, or `npx playwright test` followed by a simple filename. No installer, checkout, credential block, shell pipeline or post hook runs. |
+| Plain text / log / Markdown / RTF (`.txt`, `.md`, `.log`, `.rst`, `.rtf`) | Numbered, bulleted or `Gherkin`-style step lines in English: open/enter/type/click/check/hover/select/press, wait-for-element, capture text, expected results (`Expected result:` pairs mark the previous step's check). A `Test case:`/`Scenario:` line names the recording; preconditions become notes. Lines that are not steps are errors unless they are comments, notes or headings. |
+| Any delimited or pipe table (`.csv`, `.tsv`, `.psv`, `.tab`, clipboard tables) | Aliased headers (`Step`/`Action`/`Test Step`/`Input`/`Expected Result`/`Locator`/`Object`/`Priority`…). The delimiter and header row are detected; metadata columns become non-blocking notes. More than one distinct `test_case` in a file is refused rather than merged. |
+| Word `.docx` | The document's step tables (same header rules) or its paragraph step lines. A macro-enabled file (`vbaProject.bin`) is rejected; `.doc` must be re-saved as `.docx`. |
+| PDF | The text layer of up to 30 pages, parsed as a step table or step lines. Scanned/image-only PDFs are refused with that reason; nothing is OCR'd. |
+| Selenium IDE `.side` | `open/click/type/select/check/mouseOver/doubleClick/waitForElementVisible/assert*` commands. Fixed `pause` is refused (this project runs without fixed sleeps), `echo`/`comment`/`setWindowSize` are notes, unknown commands are errors. |
+| Postman collection (v2 JSON) | Each request becomes an `api_request` step; `pm.response.to.have.status(...)`, `pm.response.to.have.jsonBody`/`pm.expect(pm.response.json()...)` become status/json assertions. Environment files and pre-request scripts are not read. |
+| Robot Framework `.robot` / `.resource` | `*** Test Cases ***` keyword subset (Open Browser, Go To, Input Text, Click (Button/Element), Select From List, Checkbox, Press Key, Wait Until Element Is Visible, Page Should/Element Text Should Be, Mouse Over, Get Text). `*** Variables ***` become variable suggestions; arbitrary Python keywords are errors. |
+| Cypress spec `.js`/`.ts` | `cy.visit`, `cy.get`/`cy.contains`, `.type`/`.click`/`.check`/`.select`/`.trigger`, `cy.url()`, `cy.title()`, `should('include'|'be.visible'|'have.text'|'have.value')`. `cy.intercept`, `cy.request`, aliases and hooks are errors. |
+| Selenium Java / C# | A straight-line subset: `driver.get`, `findElement(By.*).click/sendKeys`, `Select`, `clear`, `getText`, `isDisplayed`, `Assert.assert*`/`NUnit`/`MSTest` assertions. `Thread.sleep` is refused, loops/branches/Page Objects are errors. |
+| XML `.xml` / YAML `.yaml` | Canonical `<step action="…" selector="…" value="…"/>` elements or a `steps:`/`test:` list (or a full canonical YAML `execution_plan`), JUnit/TestNG `<testcase name="…">` case names, and step-text English lines. `safe_load` only: no Python object tags are constructed. |
+| HAR capture `.har` | Browser network capture converted to one `navigate` step plus **deduplicated** `api_request` steps for the captured calls (≤100). `Cookie`/`Authorization` headers are stripped, not stored. |
+| HTML page / legacy Selenium HTML suite `.html` | A `<table>` with Selenium command columns is read as a `.side` suite; otherwise the page's text is read as step lines. Headings become notes; scripts/styles are never executed. |
+| Any other extension | The content is sniffed (JSON, XML, YAML, HTML, PDF/Word/Excel signatures, step text). Nothing is guessed about binary payloads that match no known shape. |
 | Other formats / unsupported code | Rejected with diagnostics. There is no safe universal converter for arbitrary executable programs. No AI service guesses what omitted code was supposed to do. |
 
 The generated Python/JS runners are executable artifacts, not input-language promises: **re-import their `steps.json` (ordinary recordings) or `execution-plan-source.json` (advanced plans)**, rather than their generic interpreter code. Vendor CSV/XLSX files remain mapping templates; they are not proprietary native test projects.
@@ -91,6 +105,40 @@ Other supported phrases include `I navigate to`, `I check/uncheck/hover`, `I typ
 - Download acceptance and API JSON processing are capped at 512 KiB. **These checks do not guarantee the browser/network never receives a larger response before rejection.** Restrict targets and monitor bandwidth/storage at the infrastructure layer.
 - Up to four pages in an explicitly authored multi-page flow and ten mock routes per recording. Additional pages are closed and mocks removed between batch recordings.
 - Action/expect timeouts are bounded to 30 seconds maximum. This is a ceiling, not a sleep: successful actions continue immediately.
+
+## Input values become variables
+
+An imported script and a recorded session both end in the same onboarding step: the
+literal values that were typed are listed, grouped by value, named after the field
+they went into (`Ada.Lovelace` in `Username` → `{{username}}`), marked secret when
+the field or value looks like a password/token (`Auth` category, encrypted at rest
+when the keyring is configured) and shown with the exact before → after change.
+
+- **Uploads:** after **VALIDATE & PREVIEW**, use **REVIEW INPUT VALUES → VARIABLES**.
+  The review calls `POST /api/imports/variable-plan` and then
+  `POST /api/imports/variables`, which creates the confirmed variables in the
+  project and hands back the rewritten steps; the preview now holds
+  `{{variables}}`, so the draft test and the saved recording carry parameters, not
+  one person's data.
+- **Recordings:** after **SAVE**, `POST /api/recordings/{id}/variable-plan` proposes
+  the same list from the stored steps and `POST /api/recordings/{id}/variables`
+  rewrites them and creates the variables. **KEEP LITERALS** skips the whole step;
+  applying twice is a no-op, so a retry cannot duplicate a variable.
+- Query strings are parameterised per key (`…?storeNo=426` → `…?storeNo={{storeno}}`),
+  one literal becomes one variable no matter how many steps use it, expectations that
+  embed a typed value follow that variable (`Welcome {{username}}`), and values that
+  already contain a `{{placeholder}}` are never rewritten.
+
+## Execution-plan tab
+
+**🧭 plan** sits directly next to the AI-recording tab. It loads
+`GET /api/plans/catalog` once — recordings, their saved input defaults and every
+project's variables in a single cached read — so linking or selecting a recording
+renders its variables and parameters without another request (the tab shows the
+catalog's age). From there: link recordings in order, move them up/down, review each
+one's inputs, optionally **SAVE AS RECORDING DEFAULTS**, and queue the ordered plan
+with `POST /api/runs/batch` (`share_session: true`). High-level scenarios with
+datasets, flows and profiles remain in **Library → Execution plans**.
 
 ## Shared action model and authoring
 
@@ -343,18 +391,22 @@ Passing tests establish local behavior, not production deployment, vendor billin
 
 The latest full gate passed:
 
-- **177 harness checks passed; 0 failed, 0 skipped.**
-- **9 real-browser feature/plan checks passed**, including all three generated
-  runner languages, wrong-assertion failures, profile/data/fixture behavior,
-  mixed-project batches and every synthetic domain pack.
-- **1 dashboard end-to-end check passed**, covering both CSV and advanced-plan
-  testing before saving, followed by execution/reporting.
+- **215 harness checks passed; 0 failed, 7 skipped.** The skips are the Chromium
+  scenarios: this sandbox cannot reach the browser mirrors, so no real-browser
+  check ran here.
+- **44 import/onboarding checks** (`tests/test_imports.py`, `UT-IMP-01…44`) cover
+  every newly accepted format, the variable proposal/rewrite path and the
+  Execution-plan catalog, including the refusals (fixed sleeps, macros,
+  multi-case sheets, unsupported statements).
+- A live-server smoke test exercised the same endpoints the dashboard calls:
+  preview of a `.txt` script, `variable-plan` → `variables` (steps rewritten to
+  `{{username}}`, one variable created), and `plans/catalog` returning the new
+  project and variable immediately.
 
-Evidence: [harness report](../logs/20261011-105724/results.md) and
-[complete sequential gate log](../logs/20261011-105724/quality-gate.log).
-The report revision is the base Git HEAD; these checks exercised this modified,
-uncommitted working tree. Python/JavaScript syntax, the CSS build and
-`git diff --check` also passed.
+Evidence: [harness report](../logs/20261011-153237/results.md). The report
+revision is the base Git HEAD; these checks exercised this modified, uncommitted
+working tree. Python/JavaScript syntax checks (`node --check` on all three
+served scripts, `python -m compileall`) and `git diff --check` also passed.
 
 **No live GitHub write or production rollout was performed.** Tests use isolated
 storage and disabled/stubbed publication. No external browser matrix or provider

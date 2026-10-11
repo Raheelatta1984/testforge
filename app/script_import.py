@@ -11,12 +11,21 @@ import re
 import zipfile
 from pathlib import PurePosixPath
 
+from app.db import fit_text
 from app.step_runtime import MAX_STEPS, normalize_step
 
 MAX_BYTES = 1024 * 1024
 MAX_UNPACKED = 8 * 1024 * 1024
 MAX_FILES = 8
-FORMATS = [".csv", ".tsv", ".xlsx", ".json", ".py", ".js", ".ts", ".feature", ".bdd", ".jenkins", "Jenkinsfile"]
+# Everything the onboarding understands. app.import_formats adds the market
+# formats (plain text, Word, PDF, legacy .xls, Selenium IDE, Postman, Robot,
+# Cypress, YAML, Java/C# Selenium, JUnit/TestNG XML) and sniffs the content when
+# the extension is unknown, so a team can upload what they already have.
+FORMATS = [".csv", ".tsv", ".psv", ".tab", ".xlsx", ".xlsm", ".xls", ".json", ".jsonc", ".py",
+           ".js", ".ts", ".mjs", ".jsx", ".tsx", ".feature", ".bdd", ".gherkin", ".robot",
+           ".resource", ".java", ".cs", ".side", ".har", ".xml", ".yaml", ".yml", ".txt",
+           ".text", ".md", ".markdown", ".log", ".docx", ".doc", ".rtf", ".pdf", ".html",
+           ".htm", ".rst", ".step", ".steps", ".jenkins", ".groovy", "Jenkinsfile"]
 ALIASES = {"goto": "navigate", "navigate": "navigate", "click": "click", "fill": "fill", "type": "type",
            "press": "press", "check": "check", "uncheck": "uncheck", "select_option": "select_option",
            "selectOption": "select_option", "hover": "hover", "dblclick": "dblclick", "inner_text": "capture_text"}
@@ -37,21 +46,42 @@ class ImportProblem(ValueError):
 
 
 class Preview:
+    """One import in progress: supported steps, diagnostics and what was detected.
+
+    Errors block saving. Notes and assumptions are recorded and shown but do not
+    block, because a real team's spreadsheet always carries metadata columns and
+    a precondition line, and refusing the upload over those helps nobody.
+    """
+
     def __init__(self, filename):
         self.filename = filename
         self.steps = []
         self.diagnostics = []
         self.name = PurePosixPath(filename).stem[:200]
         self.start_url = ""
+        self.detected = None
+        self.execution_plan = None
+        self.variables = {}
 
     def error(self, line, message):
         self.diagnostics.append({"file": self.filename, "line": line, "severity": "error", "message": str(message)[:400]})
+
+    def note(self, line, message):
+        self.diagnostics.append({"file": self.filename, "line": line, "severity": "note", "message": str(message)[:400]})
+
+    def suggest_variables(self, mapping):
+        """Variable values found in the file (Robot *** Variables ***, YAML, JSON)."""
+        for name, value in (mapping or {}).items():
+            key = str(name).strip()
+            if re.fullmatch(r"[\w.\-]{1,100}", key):
+                self.variables[key] = str(value)
 
     def add(self, row, line):
         if len(self.steps) >= MAX_STEPS:
             raise ImportProblem("At most 500 steps are allowed")
         try:
             step = normalize_step(row, len(self.steps) + 1)
+            step["label"] = fit_text(step.get("label"))
             self.steps.append(step)
             if step["action"] == "navigate" and not self.start_url:
                 self.start_url = step["value"]
@@ -59,14 +89,21 @@ class Preview:
             self.error(line, exc)
 
     def result(self):
-        if not self.steps and not self.diagnostics:
+        errors = [item for item in self.diagnostics if item["severity"] == "error"]
+        if not self.steps and not errors:
             self.error(1, "No supported test steps found")
         if sum(s["repeat_count"] for s in self.steps) > 2000:
             self.error(1, "Expanded recording exceeds 2000 actions")
-        return {"filename": self.filename, "name": self.name, "start_url": self.start_url,
-                "steps": self.steps, "diagnostics": self.diagnostics,
-                "can_save": bool(self.steps) and not self.diagnostics,
-                "execution": "sequential", "source_executed": False}
+        result = {"filename": self.filename, "name": self.name, "start_url": self.start_url,
+                  "steps": self.steps, "diagnostics": self.diagnostics,
+                  "can_save": bool(self.steps) and not any(
+                      item["severity"] == "error" for item in self.diagnostics),
+                  "execution": "sequential", "source_executed": False}
+        if self.detected:
+            result["detected"] = self.detected
+        if self.variables:
+            result["variable_suggestions"] = self.variables
+        return result
 
 
 def parse_table(rows, preview):
@@ -350,6 +387,19 @@ def parse_bdd(source, preview):
             preview.error(line_no, "Unknown BDD phrase; use a supported phrase or canonical CSV/JSON action")
 
 
+def _parse_delimited(source, suffix, preview):
+    """A delimited table, strict template first, then the market headers."""
+    from app.import_formats import parse_table_smart
+    delimiter = "\t" if suffix == ".tsv" else ("|" if suffix == ".psv" else ("," if suffix == ".csv" else "\t"))
+    rows = list(csv.reader(io.StringIO(source), delimiter=delimiter))
+    try:
+        parse_table(iter(rows), preview)
+    except ImportProblem:
+        if not rows or not parse_table_smart(rows, preview, "table"):
+            raise
+    return True
+
+
 def parse_file(filename, data):
     preview = Preview(PurePosixPath(filename.replace("\\", "/")).name)
     execution_plan = None
@@ -357,41 +407,79 @@ def parse_file(filename, data):
         if not data or len(data) > MAX_BYTES:
             raise ImportProblem("Upload must be nonempty and at most 1 MiB")
         suffix = PurePosixPath(filename).suffix.lower()
-        if suffix == ".xlsx":
+        stem = PurePosixPath(filename).stem.lower()
+        # Formats the strict parser does not own: plain text and the market
+        # formats, plus content sniffing for an extension nobody listed.
+        from app import import_formats
+        if import_formats.parse_extra(preview, filename, data) is not None:
+            pass
+        elif suffix == ".xlsx":
+            parse_excel(data, preview)
+        elif suffix == ".xlsm":
             parse_excel(data, preview)
         else:
+            if stem == "jenkinsfile":
+                raise ImportProblem("A Jenkinsfile needs the script it references: upload both files together")
             source = data.decode("utf-8-sig")
-            if suffix in {".csv", ".tsv"}:
-                parse_table(csv.reader(io.StringIO(source), delimiter="\t" if suffix == ".tsv" else ","), preview)
+            if suffix in {".csv", ".tsv", ".psv", ".tab"}:
+                _parse_delimited(source, suffix, preview)
             elif suffix == ".json":
                 obj = json.loads(source)
                 if isinstance(obj, dict) and 'execution_plan' in obj:
                     from app.plan_runtime import normalize_plan
                     execution_plan = normalize_plan(obj['execution_plan'])
                     steps = execution_plan['steps']
+                elif isinstance(obj, dict) and (obj.get('tests') or obj.get('commands')):
+                    from app.import_formats import parse_selenium_side
+                    parse_selenium_side(preview, obj)
+                    steps = None
+                elif isinstance(obj, dict) and isinstance(obj.get('item'), list):
+                    from app.import_formats import parse_postman
+                    parse_postman(preview, obj)
+                    steps = None
                 else:
                     steps = obj.get("steps") if isinstance(obj, dict) else obj
-                if not isinstance(steps, list):
-                    raise ImportProblem("JSON must be a step array or an object containing steps")
                 if isinstance(obj, dict):
                     preview.name = str(obj.get("name") or preview.name)[:200]
-                for i, step in enumerate(steps, 1):
-                    preview.add(step, i)
+                    variables = obj.get("variables")
+                    if isinstance(variables, dict):
+                        preview.suggest_variables(variables)
+                if steps is not None:
+                    if not isinstance(steps, list):
+                        raise ImportProblem("JSON must be a step array or an object containing steps")
+                    for i, step in enumerate(steps, 1):
+                        preview.add(step, i)
             elif suffix == ".py":
                 PythonParser(preview).parse(source)
-            elif suffix in {".js", ".ts"}:
-                parse_javascript(source, preview)
+            elif suffix in {".js", ".ts", ".mjs", ".jsx", ".tsx"}:
+                # A Cypress spec is JavaScript too: read it with the Cypress
+                # grammar instead of reporting every cy.* call as Playwright.
+                if import_formats.CYPRESS_HINT.search(source):
+                    import_formats.parse_cypress(preview, source)
+                    preview.detected = {"format": "js", "why": "Cypress spec (cy.* commands)"}
+                else:
+                    parse_javascript(source, preview)
             elif suffix in {".feature", ".bdd"}:
                 parse_bdd(source, preview)
             elif suffix in {".groovy", ".jenkins"} or preview.filename.lower() == "jenkinsfile":
                 raise ImportProblem("Jenkins is an orchestration file, not browser steps. Upload it together with its referenced Python/Playwright script using bundle import; shell commands are never executed.")
             else:
-                raise ImportProblem("Unsupported format. Use CSV, TSV, XLSX, canonical JSON, supported Playwright Python/JS/TS, or Gherkin .feature/.bdd. Legacy XLS and arbitrary code require conversion.")
+                # An extension nobody listed: read the content and decide.
+                detected = import_formats.sniff(source)
+                preview.detected = {"format": detected["format"], "why": detected["why"],
+                                    "extension": suffix or "(none)"}
+                import_formats._parse_by_sniff(preview, source, detected["format"], filename)
+    except ImportProblem as exc:
+        preview.error(getattr(exc, "lineno", 1), exc)
     except (ValueError, TypeError, SyntaxError, RecursionError, zipfile.BadZipFile, KeyError, OverflowError) as exc:
         preview.error(getattr(exc, "lineno", 1), exc)
     result = preview.result()
     if execution_plan is not None:
         result['execution_plan'] = execution_plan
+    elif preview.execution_plan is not None:
+        result['execution_plan'] = preview.execution_plan
+    if preview.detected:
+        result['detected'] = preview.detected
     return result
 
 

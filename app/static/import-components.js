@@ -10,6 +10,32 @@ function ActionComposer({ onSave, label = 'ADD STEP' }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   useEffect(() => { API.get('/api/imports/formats').then(d => setActions(d.actions)).catch(err => setError(err.message)); }, []);
+  const reviewVariables = async () => {
+    setBusy(true); setError(''); const version=generation.current;
+    try {
+      const result=await API.post('/api/imports/variable-plan',{project_id:project.id,steps:preview.steps});
+      if(version!==generation.current) return;
+      setVariablePlan(result); setExistingVars(result.existing || []);
+      if(!result.count) setNotice('No literal input values found — every value already uses a variable.');
+    } catch(err){if(version===generation.current)setError(err.message);}
+    finally {setBusy(false);}
+  };
+  const adoptVariables = async () => {
+    if(!variablePlan) return;
+    setBusy(true); setError(''); const version=generation.current;
+    try {
+      const chosen=(variablePlan.candidates||[]).filter(item=>item.selected!==false);
+      if(!chosen.length) throw new Error('Keep at least one value, or cancel the review.');
+      const result=await API.post('/api/imports/variables',{project_id:project.id,steps:preview.steps,
+        assignments:chosen.map(item=>({name:item.name,value:item.value,is_secret:!!item.is_secret,category:item.category,create:!!item.create}))});
+      if(version!==generation.current) return;
+      setPreview({...preview,steps:result.steps}); setAdopted(result.created_variables || []);
+      setVariablePlan(null); setDraft(null); setSaved(null);
+      setNotice(`${result.counts.variables_created} variable(s) created, ${result.counts.variables_reused} reused. Steps now reference the variables — test before publishing.`);
+    } catch(err){if(version===generation.current)setError(err.message);}
+    finally {setBusy(false);}
+  };
+  const edits=(item,change)=>setVariablePlan(plan=>({...plan,candidates:(plan.candidates||[]).map(entry=>entry.value===item.value?{...entry,...change}:entry)}));
   const save = async () => {
     setBusy(true); setError('');
     try {
@@ -81,13 +107,13 @@ function ImportScripts({ project, onSaved, onRun }) {
     catch(err) {if(version===generation.current) setError(err.message);}
     finally {setBusy(false);}
   };
-  useEffect(() => { generation.current++; setPreview(null); setSaved(null); setFiles([]); setNotice(''); setError(''); setDraft(null);setPlanOptions('{}'); }, [project.id]);
+  useEffect(() => { generation.current++; setPreview(null); setSaved(null); setFiles([]); setNotice(''); setError(''); setDraft(null);setPlanOptions('{}');setVariablePlan(null);setAdopted([]); }, [project.id]);
   const readBase64 = file => new Promise((resolve,reject) => {
     const reader=new FileReader(); reader.onerror=()=>reject(new Error('Unable to read '+file.name));
     reader.onload=()=>resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(file);
   });
   const inspect = async () => {
-    setBusy(true); setError(''); setPreview(null); setSaved(null); setNotice('');setDraft(null);
+    setBusy(true); setError(''); setPreview(null); setSaved(null); setNotice('');setDraft(null);setVariablePlan(null);setAdopted([]);
     const version=generation.current;
     try {
       if(!files.length || files.length>8 || files.reduce((n,f)=>n+f.size,0)>1048576) throw new Error('Choose 1–8 files totalling at most 1 MiB. One test per recording; Jenkins bundles include the referenced script.');
@@ -95,7 +121,10 @@ function ImportScripts({ project, onSaved, onRun }) {
         ? await apiRequest('/api/imports/preview?filename='+encodeURIComponent(files[0].name),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:files[0]})
         : await API.post('/api/imports/preview-bundle',{files:await Promise.all(files.map(async f=>({name:f.name,base64:await readBase64(f)})))});
       if(version!==generation.current) return;
-      setPreview(result); setPlanOptions(JSON.stringify(result.execution_plan || {},null,2)); setName(result.name); setNotice(result.notice || 'Preview only: no browser launched, no source code executed, nothing saved or published.');
+      setPreview(result); setPlanOptions(JSON.stringify(result.execution_plan || {},null,2)); setName(result.name);
+      setNotice(result.notice || 'Preview only: no browser launched, no source code executed, nothing saved or published.');
+      if(result.can_save && result.variable_suggestions && Object.keys(result.variable_suggestions).length)
+        setNotice((result.notice || 'Preview ready.')+` Detected ${Object.keys(result.variable_suggestions).length} declared variable(s) — review input values below.`);
     } catch(err) { if(version===generation.current) setError(err.message); }
     finally {setBusy(false);}
   };
@@ -106,13 +135,14 @@ function ImportScripts({ project, onSaved, onRun }) {
       const result=await API.post('/api/imports/save',{...payload(), draft_id:draft?.id,require_test:true});
       if(version!==generation.current) return;
       setSaved(result); setNotice(result.publish_message || 'Saved locally. Check GitHub publishing status.');
+      setVariablePlan(null); setAdopted([]);
       onSaved(result);
     } catch(err) {if(version===generation.current) setError(err.message);}
     finally {setBusy(false);}
   };
   return e('details',{className:'border border-indigo-800 bg-slate-900 p-4 rounded-xl space-y-3'},
     e('summary',{className:'font-bold text-indigo-300 cursor-pointer'},'UPLOAD TEST SCRIPTS'),
-    e('p',{className:'text-xs text-slate-300'},'CSV/TSV, Excel (.xlsx), JSON, supported Playwright Python/JS/TS, BDD/Cucumber (.feature), or a restricted Jenkinsfile + its test script. Preview reports unsupported syntax; arbitrary code, shell commands, macros and custom step definitions never run.'),
+    e('p',{className:'text-xs text-slate-300'},'Any format you already have: plain text/Markdown/logs, CSV/TSV/PSV or any smart table, Excel (.xlsx/.xls), Word (.docx), PDF text layers, XML/YAML, JUnit-style case lists, Selenium IDE (.side) or legacy HTML suites, Postman collections, Robot Framework, Cypress, supported Playwright Python/JS/TS, restricted Java/C# Selenium, HAR captures, BDD/Cucumber (.feature), or a restricted Jenkinsfile + its test script. The file is sniffed when the extension is unknown; preview reports unsupported syntax. Arbitrary code, shell commands, macros and custom step definitions never run.'),
     e('p',{className:'text-xs text-amber-300'},'Use {{variables}} instead of passwords. Saving uses the existing GitHub publication settings. Unsupported source is never silently treated as tested. No paid parser or AI service is used.'),
     e('label',{className:'block text-xs'},'Or start with a synthetic domain pack',
       e('select',{'aria-label':'Synthetic domain pack',defaultValue:'',disabled:busy || ['queued','running'].includes(draft?.status),className:'block bg-slate-800 p-2 rounded',onChange:async ev=>{
@@ -124,13 +154,36 @@ function ImportScripts({ project, onSaved, onRun }) {
         } catch(err){if(version===generation.current)setError(err.message);} finally{setBusy(false);}
       }},e('option',{value:''},'Choose an example…'),packs.map(pack=>e('option',{key:pack.id,value:pack.id},pack.name)))),
     e('a',{href:'/api/imports/template.csv',className:'text-indigo-300 underline text-xs'},'Download CSV template'),
-    e('input',{key:project.id,type:'file',multiple:true,accept:'.csv,.tsv,.xlsx,.json,.py,.js,.ts,.feature,.bdd,.jenkins,.groovy,Jenkinsfile','aria-label':'Upload test scripts',disabled:busy || ['queued','running'].includes(draft?.status),onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);},className:'block w-full text-xs'}),
+    e('input',{key:project.id,type:'file',multiple:true,accept:'.csv,.tsv,.psv,.tab,.txt,.md,.markdown,.log,.rst,.rtf,.xlsx,.xls,.xlsm,.json,.jsonc,.xml,.yaml,.yml,.har,.html,.htm,.docx,.doc,.pdf,.py,.js,.ts,.mjs,.jsx,.tsx,.cs,.java,.feature,.bdd,.gherkin,.robot,.resource,.side,.jenkins,.groovy,Jenkinsfile','aria-label':'Upload test scripts',disabled:busy || ['queued','running'].includes(draft?.status),onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);},className:'block w-full text-xs'}),
     e('button',{disabled:busy || !files.length || ['queued','running'].includes(draft?.status),onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'),
     error && e('p',{role:'alert',className:'text-red-300 text-xs'},error),
     notice && e('p',{role:'status',className:'text-emerald-300 text-xs'},notice),
     preview && e('div',{className:'space-y-2'},
       e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?'ready to save':'corrections required'} · sequential execution`),
-      preview.diagnostics.map((d,i)=>e('p',{key:i,role:'alert',className:'text-xs text-red-300'},`${d.file}:${d.line} — ${d.message}`)),
+      preview.detected && e('p',{className:'text-xs text-indigo-300'},`Detected as ${preview.detected.format} — ${preview.detected.why}`),
+      e('button',{onClick:reviewVariables,disabled:busy || !preview.steps.length,className:'bg-amber-700 px-3 py-2 rounded text-xs disabled:opacity-50'},'REVIEW INPUT VALUES → VARIABLES'),
+      adopted.length>0 && e('p',{role:'status',className:'text-xs text-emerald-300'},`Variables created: ${adopted.map(v=>v.name).join(', ')}`),
+      variablePlan && e('div',{className:'border border-amber-700 bg-slate-950 p-3 rounded space-y-2'},
+        e('p',{className:'text-xs font-bold text-amber-300'},`${variablePlan.summary}. Values already typed stay working; names become reusable variables/parameters.`),
+        (variablePlan.candidates||[]).map((item,i)=>e('div',{key:i,className:'space-y-1 border-b border-slate-800 pb-2'},
+          e('label',{className:'flex items-center gap-2 text-xs'},
+            e('input',{type:'checkbox',checked:item.selected!==false,onChange:ev=>edits(item,{selected:ev.target.checked})}),
+            e('span',{className:'text-slate-400'},`${item.usages_count}× `),
+            e('input',{'aria-label':'Variable name',value:item.name,onChange:ev=>edits(item,{name:ev.target.value}),className:'bg-slate-800 p-1 rounded w-40'}),
+            e('span',{className:'text-slate-300 break-all'},`= ${item.is_secret?'••••••':item.value}`),
+            e('label',{className:'flex items-center gap-1 text-slate-400'},e('input',{type:'checkbox',checked:!!item.is_secret,onChange:ev=>edits(item,{is_secret:ev.target.checked})}),'secret'),
+            e('select',{'aria-label':'Variable category',value:item.category,onChange:ev=>edits(item,{category:ev.target.value}),className:'bg-slate-800 rounded'},
+              ['General','Parameter','Auth'].map(name=>e('option',{key:name,value:name},name))),
+            item.reuse && e('span',{className:'text-emerald-300'},'already a variable'),
+            existingVars.some(v=>v.name===item.name) && !item.reuse && e('span',{className:'text-amber-300'},'name exists — pick another')),
+          (item.preview||[]).map((row,j)=>e('p',{key:j,className:'text-xs text-slate-500 break-all'},`#${row.order} ${row.before} → ${row.after}`)) )),
+        e('div',{className:'space-x-2'},
+          e('button',{onClick:adoptVariables,disabled:busy,className:'bg-emerald-700 px-3 py-2 rounded text-xs disabled:opacity-50'},'CREATE VARIABLES & REWRITE STEPS'),
+          e('button',{onClick:()=>setVariablePlan(null),className:'bg-slate-700 px-3 py-2 rounded text-xs'},'CANCEL'))),
+      (preview.diagnostics||[]).filter(d=>d.severity!=='note').map((d,i)=>e('p',{key:i,role:'alert',className:'text-xs text-red-300'},`${d.file}:${d.line} — ${d.message}`)),
+      (preview.diagnostics||[]).some(d=>d.severity==='note') && e('details',{className:'border border-slate-700 p-2 rounded'},
+        e('summary',{className:'text-xs cursor-pointer text-slate-400'},'Import notes (non-blocking)'),
+        (preview.diagnostics||[]).filter(d=>d.severity==='note').map((d,i)=>e('p',{key:i,className:'text-xs text-slate-400'},`${d.file}:${d.line} — ${d.message}`))),
       e('div',{className:'max-h-64 overflow-auto space-y-1'},preview.steps.map(s=>e('div',{key:s.order,className:'bg-slate-950 p-2 rounded text-xs break-all'},`#${s.order} ${s.action} · ${s.selector.primary || ''} · ${s.action==='upload_file'?'[fixture]':s.value}`))),
       e('input',{'aria-label':'Imported recording name',value:name,onChange:ev=>setName(ev.target.value),placeholder:'Recording name',className:'w-full bg-slate-800 p-2 rounded text-xs'}),
       e('input',{'aria-label':'Imported test tags',value:tags,onChange:ev=>setTags(ev.target.value),placeholder:'Comma-separated tags',className:'w-full bg-slate-800 p-2 rounded text-xs'}),

@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, func, Column)
 from sqlalchemy import inspect, text, types as sqltypes
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, validates
 from sqlalchemy.pool import StaticPool, QueuePool
 from app.config import DATABASE_URL
 from app.errors import redact
@@ -33,6 +33,28 @@ else:
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
 def generate_uuid(): return str(uuid.uuid4())
+
+# Width of the display text stored on a step, matching `RecordingStep.label`.
+# Postgres refuses a value that is too long for the column instead of cutting it,
+# and a D365 staging URL redirects to a login URL of several hundred characters,
+# so the recorder's `Open <url>` label used to fail the whole insert with
+# `StringDataRightTruncation: value too long for type character varying(300)`.
+LABEL_LIMIT = 500
+
+
+def fit_text(value, limit=LABEL_LIMIT):
+    """Clip display text to what a `String(limit)` column can store.
+
+    Only labels are clipped this way: the authoritative data (the URL, the
+    locator, the typed value) lives in `value`/`selector`, so an ellipsis costs
+    the replay nothing. `None` stays `None` because the column is nullable.
+    """
+    if value is None:
+        return None
+    text = str(value)
+    if limit is None or limit < 1 or len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
 
 class Base(DeclarativeBase): pass
 
@@ -85,6 +107,16 @@ class RecordingStep(Base):
     screenshot_path: Mapped[str] = mapped_column(String(1000), nullable=True)
     repeat_count: Mapped[int] = mapped_column(Integer, default=1)  # how many times to repeat this step
     recording: Mapped["Recording"] = relationship(back_populates="steps")
+
+    @validates("label")
+    def _fit_label(self, _key, value):
+        """Keep every label at or below the width the column declares.
+
+        The recorder, the step editor, the library importer and the compressor
+        all write labels; a writer that forgets the limit would otherwise lose
+        the whole row to a Postgres `value too long` error.
+        """
+        return fit_text(value)
 
 class Run(Base):
     __tablename__ = "runs"
@@ -271,6 +303,44 @@ def _relax_legacy_columns(inspector, connection, table, repairs):
             repairs.append(f"{table.name}.{name}: NOT NULL not relaxed ({redact(exc)})")
 
 
+def _widen_narrow_columns(inspector, connection, table, repairs):
+    """Widen a legacy VARCHAR that the models declare wider, or as TEXT.
+
+    `create_all()` only creates missing *tables*, so a database created by an
+    earlier revision keeps its original widths: `recording_steps.label` was
+    `varchar(300)` in a database whose model now says 500. Postgres refuses an
+    over-long value rather than cutting it, so a long label -- the
+    `login.microsoftonline.com` URL a D365 staging URL redirects to -- failed the
+    insert and the dashboard showed
+    `Failed to save step: ... value too long for type character varying(300)`.
+    SQLite ignores a VARCHAR length, so this only runs on Postgres.
+    """
+    if connection.dialect.name != "postgresql":
+        return
+    model_columns = {column.name: column for column in table.columns}
+    quote = connection.dialect.identifier_preparer.quote
+    for info in inspector.get_columns(table.name):
+        name = info["name"]
+        column = model_columns.get(name)
+        if column is None or not isinstance(column.type, sqltypes.String):
+            continue
+        current = info["type"]
+        limit = getattr(current, "length", None)
+        if limit is None:
+            continue  # TEXT or a varchar with no length: already holds anything.
+        wanted = getattr(column.type, "length", None)
+        if wanted is not None and wanted <= limit:
+            continue  # As wide as the model asks for: leave it alone.
+        target = column.type.compile(connection.dialect)
+        try:
+            connection.execute(
+                text(f"ALTER TABLE {quote(table.name)} ALTER COLUMN {quote(name)} TYPE {target}")
+            )
+            repairs.append(f"{table.name}.{name}: widened {current} -> {target}")
+        except Exception as exc:
+            repairs.append(f"{table.name}.{name}: not widened ({redact(exc)})")
+
+
 def _ensure_schema():
     Base.metadata.create_all(bind=engine)
     with engine.begin() as connection:
@@ -283,6 +353,7 @@ def _ensure_schema():
                 continue
             _add_missing_columns(inspector, connection, table, SCHEMA_STATUS["repairs"])
             _relax_legacy_columns(inspector, connection, table, SCHEMA_STATUS["repairs"])
+            _widen_narrow_columns(inspector, connection, table, SCHEMA_STATUS["repairs"])
             SCHEMA_STATUS["tables"][table.name] = "ok"
 
 

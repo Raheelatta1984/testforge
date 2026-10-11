@@ -147,6 +147,13 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-BATCH-10 | Batch holds the browser slot | While a batch replays, the shared browser budget reports exactly one active slot, so a recording session cannot open a second Chromium; the slot is released when the batch ends. |
 | UT-DOC-01 | Catalog matches this file | Every executable ID in `tests/test_unit.py` and `tests/scenarios.json` appears in this document. |
 | UT-IMG-01 | COPY survives .dockerignore | Every local `COPY` source in the Dockerfile (app, library, logs, docs, requirements.txt) is present in the build context. A `docs` entry in `.dockerignore` once broke every deploy with `failed to compute cache key ... "/docs": not found` while the Azure tab needed the guide inside the image. |
+| UT-DB-01 | Labels fit their column | `fit_text` clips to 500 with a visible ellipsis and leaves `NULL` and short text alone; the clip is enforced on `RecordingStep`, so the API editor, the importer and the compressor are covered and not only the recorder. This is the guard against Postgres refusing an over-long label. |
+| UT-DB-02 | A long navigate URL is still replayable | A 600+ character `login.microsoftonline.com` URL (what a D365 staging URL redirects to) is stored whole in `value` while the label is clipped to 500; compressing such a step keeps its ` ×N` marker inside the column. |
+| UT-DB-03 | A narrow legacy column is widened | A `recording_steps.label varchar(300)` from an older revision is repaired to `VARCHAR(500)` on Postgres; a column already matching the model, an unbounded `TEXT` column and SQLite are left untouched. |
+| UT-DB-04 | A rejected step is retried after the repair | An insert refused the way `varchar(300)` refuses it runs `repair_schema()` once and saves the step on the second attempt, producing exactly one row. This is the regression behind `Failed to save step: ... value too long for type character varying(300)`. |
+| UT-DB-05 | A saved step is not read back | A committed step is saved without a `refresh()` SELECT, so a row a concurrent library write replaced cannot raise `Failed to save step: Could not refresh instance '<RecordingStep at 0x...>'`; the id returned is the id stored. |
+| UT-DB-06 | Over-long create fields are refused up front | `POST /api/recordings` answers 422 for a name over 255 or a start URL over 1000 instead of letting the insert fail on a bounded column; a D365 staging URL is still accepted. |
+| UT-DB-07 | A step survives a column nobody widened | When the repair cannot widen the column (a table the service does not own), the action is still saved: the insert is retried with a 200-character label while `value` keeps the whole URL, so a replay is unaffected and the recording is not broken by a display string. |
 
 Publishing (`UT-PUB-*`) covers the four ways a save can end: published, saved locally with a retry that really is scheduled, saved locally with publishing disabled and no retry promised, and *refused* — GitHub answered 401/403, so no retry is scheduled and the message names the fix. `UT-PUB-09` keeps a rate-limit 403 out of that last bucket, because it is the same status and a very different outcome. The API publisher is exercised against an in-memory fake transport, so no test touches GitHub.
 
@@ -155,6 +162,8 @@ Pen-test scenarios (`UT-SEC-*`) attack the credential surface rather than the fe
 Queue hygiene (`UT-QUEUE-*`) covers the runs that will never execute: orphans left by a restart, entries stale behind a busy browser, and duplicates of a recording that is already waiting. Batch execution (`UT-BATCH-*`) covers one browser for many recordings, learned step budgets, screenshots only where they are worth the CPU, and the retry rule that distinguishes a transient timeout from a broken recording.
 
 Resource guardrails (`UT-MEM-*`) cover the limits that keep a 512MB instance inside its memory ceiling: one Chromium shared by recording and execution, bounded live frames, bounded run event buffers, a bounded run list, and an artifact export that streams instead of buffering.
+
+Schema drift (`UT-DB-*`) covers a database that disagrees with the model: a label longer than the column it is stored in, a legacy `varchar(300)` that `create_all()` never widens because the table already exists, and the repair-and-retry that saves the user's step instead of failing their recording.
 
 ## Library scenarios
 
@@ -223,6 +232,27 @@ These unit/API cases live in `tests/test_imports.py` and are included by the har
 | UT-IMP-21 | Action schema versions fail closed; JS option text is not rewritten accidentally. |
 | UT-IMP-22 | Idle websocket sender is cancelled when the client disconnects. |
 | UT-IMP-23 | Subscriber count/event queues are bounded and retain the final result. |
+| UT-IMP-24 | Plain-text step list imports as canonical steps; `{{placeholders}}` are preserved. |
+| UT-IMP-25 | Markdown/pipe table rows import in sheet order with their expected results. |
+| UT-IMP-26 | Market headers (Test Case/Step/Action) import; metadata columns become non-blocking notes. |
+| UT-IMP-27 | Two test cases in one sheet are refused rather than silently merged. |
+| UT-IMP-28 | Pipe/semicolon delimited scripts (`.psv`) import without a CSV header guess. |
+| UT-IMP-29 | Selenium IDE `.side` imports; a fixed `pause` is refused like `Thread.sleep`. |
+| UT-IMP-30 | Postman v2 collection imports as an `api_request` with its status assertion. |
+| UT-IMP-31 | Robot Framework suite imports; `*** Variables ***` become variable suggestions. |
+| UT-IMP-32 | A Cypress spec is read by the Cypress grammar, not reported as Playwright. |
+| UT-IMP-33 | Java/C# Selenium subsets import; `Thread.sleep` blocks the save with a fix. |
+| UT-IMP-34 | Word `.docx` tables and paragraphs import; a macro-enabled file is rejected. |
+| UT-IMP-35 | YAML and XML/test-case-name sources import as canonical steps. |
+| UT-IMP-36 | HAR captures become navigate + API steps with Cookie headers dropped; unknown extensions are sniffed. |
+| UT-IMP-37 | HTML pages and legacy Selenium HTML suites import; page headings are notes, not errors. |
+| UT-IMP-38 | An unsupported line is an error that blocks saving; a note never blocks it. |
+| UT-IMP-39 | Typed literals are named after their field, secrets marked, and expectations reuse the variable. |
+| UT-IMP-40 | One repeated literal becomes one variable with every usage rewritten (URL query included). |
+| UT-IMP-41 | Values already using `{{variables}}`, keys and invalid names are left alone. |
+| UT-IMP-42 | `variable-plan`/`variables` on a recording rewrite stored steps and are idempotent on retry. |
+| UT-IMP-43 | Import `variable-plan`/`variables` endpoints propose and create variables without saving. |
+| UT-IMP-44 | `/api/plans/catalog` returns recordings, inputs and variables in one cached read. |
 
 Opt-in **real Chromium** checks in `tests/test_browser_features.py` use a local fixture
 HTTP server. Set `TF_TEST_BROWSER=1`; the export parity case also needs
