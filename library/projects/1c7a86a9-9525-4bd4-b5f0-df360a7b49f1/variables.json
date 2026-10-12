@@ -15,6 +15,34 @@
   },
   {
     "category": "General",
+    "id": "23b94c74-471f-4f1c-91d3-c3500a3c23a8",
+    "is_secret": true,
+    "name": "Ext_User_ID",
+    "value": "enc:v1:gAAAAABqzUzgS5mdQobLVwJkhatRQ6yyhtSC-Pd91GIShz-APH13zCgxkIYMlelOtvWUjZDyQwQYdo97-LxJ3irgTLcWHXQc4A=="
+  },
+  {
+    "category": "General",
+    "id": "d4c556cb-418f-4d59-a2ef-d659ec2f0abe",
+    "is_secret": false,
+    "name": "placeholder_stores1",
+    "value": "Hi-Tech"
+  },
+  {
+    "category": "Parameter",
+    "id": "e8bb9061-8dd6-40a3-88e4-0a00cebe9420",
+    "is_secret": false,
+    "name": "Order_Qty",
+    "value": "2"
+  },
+  {
+    "category": "General",
+    "id": "b8d039ff-6fa9-4507-aee7-f3690bb6138e",
+    "is_secret": false,
+    "name": "Orser_commwnta",
+    "value": "Test order ignore"
+  },
+  {
+    "category": "General",
     "id": "c72221df-6cf4-4a70-a1cb-0c304315012c",
     "is_secret": true,
     "name": "HFM_Ext_pass",

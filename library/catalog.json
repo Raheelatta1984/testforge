@@ -295,6 +295,10 @@
       "variables": [
         "Product1",
         "Product2",
+        "Ext_User_ID",
+        "placeholder_stores1",
+        "Order_Qty",
+        "Orser_commwnta",
         "HFM_Ext_pass",
         "div_nth_div"
       ]
