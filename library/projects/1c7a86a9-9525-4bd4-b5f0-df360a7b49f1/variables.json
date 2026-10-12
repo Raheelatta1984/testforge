@@ -5,5 +5,12 @@
     "is_secret": true,
     "name": "HFM_Ext_pass",
     "value": "enc:v1:gAAAAABqy5zSV4E5Sf2miFHfLAhOPjrotItq_2XRwUqw1_E-cSX7SBYsi-ujfanf-jZBJ1CPlXZs6nW3ofdJVuhYxQBcaMBp6T8VztvMhH3xGNpgTHDgAeM="
+  },
+  {
+    "category": "General",
+    "id": "a53959de-b73c-4d21-a1fc-f078c26b8e9b",
+    "is_secret": false,
+    "name": "div_nth_div",
+    "value": "Ratta"
   }
 ]
