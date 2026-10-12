@@ -1,9 +1,30 @@
 [
   {
     "category": "General",
+    "id": "bbeb3bd4-179a-4a5a-8d2b-74515891d5bc",
+    "is_secret": false,
+    "name": "Product1",
+    "value": "Granny apple"
+  },
+  {
+    "category": "General",
+    "id": "82aa0cdd-d112-4b8a-acee-d7ea77584018",
+    "is_secret": false,
+    "name": "Product2",
+    "value": "Apple"
+  },
+  {
+    "category": "General",
     "id": "c72221df-6cf4-4a70-a1cb-0c304315012c",
     "is_secret": true,
     "name": "HFM_Ext_pass",
     "value": "enc:v1:gAAAAABqy5zSV4E5Sf2miFHfLAhOPjrotItq_2XRwUqw1_E-cSX7SBYsi-ujfanf-jZBJ1CPlXZs6nW3ofdJVuhYxQBcaMBp6T8VztvMhH3xGNpgTHDgAeM="
+  },
+  {
+    "category": "General",
+    "id": "a53959de-b73c-4d21-a1fc-f078c26b8e9b",
+    "is_secret": false,
+    "name": "div_nth_div",
+    "value": "Ratta"
   }
 ]

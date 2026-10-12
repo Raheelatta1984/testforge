@@ -244,7 +244,10 @@
         }
       ],
       "variables": [
-        "HFM_Ext_pass"
+        "Product1",
+        "Product2",
+        "HFM_Ext_pass",
+        "div_nth_div"
       ]
     }
   ],
