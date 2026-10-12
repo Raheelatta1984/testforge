@@ -10,10 +10,6 @@ Newest first, newest 200 retained.
 
 | Finished (UTC) | Kind | Id | Outcome | Steps | Recordings | PDF asset |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-10-12T09:40:07Z | batch | 9d41de05-7949-436d-909c-979294be1e55 | passed | 4 | testcomplete | not uploaded |
-| 2026-10-12T09:40:05Z | run | 68dd26c7-1c09-45ac-9761-d5f0ebc7a820 | passed | 4 | testcomplete | not uploaded |
-| 2026-10-12T09:39:10Z | batch | dfc595d6-35ac-4233-a3a3-6edf06b1e69c | passed | 4 | testcomplete | not uploaded |
-| 2026-10-12T09:39:08Z | run | e81b45ac-4e5b-4945-aa49-33ee63ffdab3 | passed | 4 | testcomplete | not uploaded |
 | 2026-10-11T21:34:02Z | batch | 75803f35-5f10-44a5-98b5-7bb9a2188207 | passed | 27 | Session 12/10/2026, 01:28:15 | not uploaded |
 | 2026-10-11T21:33:59Z | run | cd50d4e0-3028-485e-b07f-b1b00e08bfdf | passed | 27 | Session 12/10/2026, 01:28:15 | not uploaded |
 | 2026-10-11T14:42:59Z | batch | a34dd55a-0136-4bbd-9944-e96dcae6c816 | passed | 31 | Session 12/10/2026, 01:28:15, Session 11/10/2026, 14:42:14 | not uploaded |
