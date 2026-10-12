@@ -3,7 +3,8 @@
 - **Architecture:** 11-tab Persistent Dashboard (Optimized for Android 12). The bar is icon-only to fit a phone; every tab carries its name as a hover/long-press title and an accessible label.
 - **Demo tab:** the first tab. A guided walkthrough over the built-in sample app and the five synthetic domain fixtures, so recording, replay and evidence can be proved without pointing TestForge at a real application. It also carries a live demonstration of the voice input (🎤 browser speech recognition) and the deterministic text cleanup (✨) helpers. See below.
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
-- **Local helpers (no paid AI calls):** Browser-dependent voice input, deterministic text cleanup, and recording-variable association tagging. Autonomous AI execution is not connected.
+- **Local helpers (no paid AI calls):** Browser-dependent voice input, deterministic text cleanup, and recording-variable association tagging.
+- **AI smart onboarding for uploads:** the static import validator runs first; when it reports unsupported syntax and `ANTHROPIC_API_KEY` is set, the script is converted to canonical steps by a budgeted AI loop that re-validates **every single step** (validate → AI fix → re-validate). Uploaded source is still never executed, the save gate (passing test or written override) is unchanged, and without the key import stays fully offline. A runner script + its referenced `steps.json`/`execution-plan.json` can be uploaded as a bundle; the referenced steps are what gets imported.
 - **Tree Hierarchy:** Parent Group -> Sub-recording chunk organization. Parent/child, tags and
   start URL survive the catalog fast path, so the Library, the Record tab's tree and
   `GET /api/plans/catalog` all describe the same recording the same way.

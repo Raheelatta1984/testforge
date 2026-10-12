@@ -122,8 +122,13 @@ function ImportScripts({ project, onSaved, onRun }) {
   const [overrideOpen,setOverrideOpen]=useState(false);
   const [overrideReason,setOverrideReason]=useState('');
   const [overrideAck,setOverrideAck]=useState(false);
+  // AI smart onboarding: on by default. The server static-validates first and
+  // only invokes the AI repair loop when the static validator reports errors.
+  const [smart,setSmart]=useState(true);
+  const [aiInfo,setAiInfo]=useState(null);
   const generation = useRef(0);
   useEffect(()=>{API.get('/api/imports/packs').then(setPacks).catch(()=>{});},[]);
+  useEffect(()=>{API.get('/api/imports/formats').then(d=>setAiInfo(d.ai_onboarding||null)).catch(()=>{});},[]);
   useEffect(()=>{API.get('/api/imports/templates').then(data=>{setTemplates(data.templates||[]);setTemplatesNotice(data.notice||'');}).catch(()=>{});},[]);
 
   /* Restore whatever this project last had: the parsed steps, the plan options and
@@ -305,11 +310,14 @@ function ImportScripts({ project, onSaved, onRun }) {
     try {
       if(!files.length || files.length>8 || files.reduce((n,f)=>n+f.size,0)>1048576) throw new Error('Choose 1–8 files totalling at most 1 MiB. One test per recording; Jenkins bundles include the referenced script.');
       const result=files.length===1
-        ? await apiRequest('/api/imports/preview?filename='+encodeURIComponent(files[0].name),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:files[0]})
-        : await API.post('/api/imports/preview-bundle',{files:await Promise.all(files.map(async f=>({name:f.name,base64:await readBase64(f)})))});
+        ? await apiRequest('/api/imports/preview?filename='+encodeURIComponent(files[0].name)+(smart?'&smart=true':'&smart=false'),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:files[0]})
+        : await API.post('/api/imports/preview-bundle'+(smart?'?smart=true':'?smart=false'),{files:await Promise.all(files.map(async f=>({name:f.name,base64:await readBase64(f)})))});
       if(version!==generation.current) return;
       setPreview(result); setPlanOptions(JSON.stringify(result.execution_plan || {},null,2)); setName(result.name);
-      setNotice(result.notice || 'Preview only: no browser launched, no source code executed, nothing saved or published.');
+      let note=result.notice || 'Preview only: no browser launched, no source code executed, nothing saved or published.';
+      if(result.ai && result.ai.used)
+        note=`AI SMART ONBOARDING: ${result.ai.converted_steps||result.steps.length} step(s) converted, ${result.ai.step_fixes||0} per-step repair loop(s), ${result.ai.calls} AI call(s). `+note;
+      setNotice(note);
       if(result.can_save && result.variable_suggestions && Object.keys(result.variable_suggestions).length)
         setNotice((result.notice || 'Preview ready.')+` Detected ${Object.keys(result.variable_suggestions).length} declared variable(s) — review input values below.`);
     } catch(err) { if(version===generation.current) setError(err.message); }
@@ -357,8 +365,8 @@ function ImportScripts({ project, onSaved, onRun }) {
   const canOverride = !!preview?.can_save && !!name.trim() && !saved && !testRunning;
   return e('details',{className:'border border-indigo-800 bg-slate-900 p-4 rounded-xl space-y-3'},
     e('summary',{className:'font-bold text-indigo-300 cursor-pointer'},'UPLOAD TEST SCRIPTS'),
-    e('p',{className:'text-xs text-slate-300'},'Any format you already have: plain text/Markdown/logs, CSV/TSV/PSV or any smart table, Excel (.xlsx/.xls), Word (.docx), PDF text layers, XML/YAML, JUnit-style case lists, Selenium IDE (.side) or legacy HTML suites, Postman collections, Robot Framework, Cypress, supported Playwright Python/JS/TS, restricted Java/C# Selenium, HAR captures, BDD/Cucumber (.feature), or a restricted Jenkinsfile + its test script. The file is sniffed when the extension is unknown; preview reports unsupported syntax. Arbitrary code, shell commands, macros and custom step definitions never run.'),
-    e('p',{className:'text-xs text-amber-300'},'Use {{variables}} instead of passwords. Saving uses the existing GitHub publication settings. Unsupported source is never silently treated as tested. No paid parser or AI service is used.'),
+    e('p',{className:'text-xs text-slate-300'},'Any format you already have: plain text/Markdown/logs, CSV/TSV/PSV or any smart table, Excel (.xlsx/.xls), Word (.docx), PDF text layers, XML/YAML, JUnit-style case lists, Selenium IDE (.side) or legacy HTML suites, Postman collections, Robot Framework, Cypress, Playwright Python/JS/TS, restricted Java/C# Selenium, HAR captures, BDD/Cucumber (.feature), a restricted Jenkinsfile + its test script, or a runner script + its steps.json/execution-plan.json. The file is sniffed when the extension is unknown; unsupported syntax is converted by AI smart onboarding when enabled, and anything it cannot convert is named in the notes. Arbitrary code, shell commands, macros and custom step definitions never run.'),
+    e('p',{className:'text-xs text-amber-300'},'Use {{variables}} instead of passwords. Saving uses the existing GitHub publication settings. Unsupported source is never silently treated as tested. AI smart onboarding: the static validator runs first; if it reports unsupported syntax and an AI key is configured, the AI converts the script to canonical steps and every step is re-validated (validate → AI fix → re-validate, looping per step). Uploaded code is still never executed, and publishing still requires a passing test.'),
     e('label',{className:'block text-xs'},'Or start with a synthetic domain pack',
       e('select',{'aria-label':'Synthetic domain pack',defaultValue:'',disabled:busy || testRunning,className:'block bg-slate-800 p-2 rounded',onChange:async ev=>{
         const slug=ev.target.value;if(!slug) return;
@@ -391,13 +399,19 @@ function ImportScripts({ project, onSaved, onRun }) {
       }},'CLEAR AND START A NEW IMPORT'),
       saved && e('span',{className:'text-[10px] text-emerald-300'},
         `Saved as "${saved.name}"${saved.unverified ? ' · UNVERIFIED (no passing test)' : ' · tested before publishing'}`)),
-    e('input',{key:project.id,type:'file',multiple:true,accept:'.csv,.tsv,.psv,.tab,.txt,.md,.markdown,.log,.rst,.rtf,.xlsx,.xls,.xlsm,.json,.jsonc,.xml,.yaml,.yml,.har,.html,.htm,.docx,.doc,.pdf,.py,.js,.ts,.mjs,.jsx,.tsx,.cs,.java,.feature,.bdd,.gherkin,.robot,.resource,.side,.jenkins,.groovy,Jenkinsfile','aria-label':'Upload test scripts',disabled:busy || testRunning,onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);setPollNote('');clearImportSession(project.id);},className:'block w-full text-xs'}),
-    e('button',{disabled:busy || !files.length || testRunning,onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'),
+    e('input',{key:project.id,type:'file',multiple:true,'aria-label':'Upload test scripts',disabled:busy || testRunning,onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);setPollNote('');clearImportSession(project.id);},className:'block w-full text-xs'}),
+    e('div',{className:'flex flex-wrap items-center gap-3'},
+      e('button',{disabled:busy || !files.length || testRunning,onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'),
+      e('label',{className:'flex items-center gap-1 text-xs text-slate-300'},
+        e('input',{type:'checkbox','aria-label':'AI smart onboarding',checked:smart,disabled:busy,onChange:ev=>setSmart(ev.target.checked)}),
+        'AI SMART ONBOARDING',
+        aiInfo && e('span',{className:'text-[10px] '+(aiInfo.available?'text-emerald-300':'text-slate-500')},
+          aiInfo.available?` · ready (${aiInfo.model})`:' · unavailable (no ANTHROPIC_API_KEY)'))),
     error && e('p',{role:'alert',className:'text-red-300 text-xs'},error),
     pollNote && e('p',{role:'status',className:'text-amber-300 text-xs'},pollNote),
     notice && e('p',{role:'status',className:'text-emerald-300 text-xs'},notice),
     preview && e('div',{className:'space-y-2'},
-      e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?'ready to save':'corrections required'} · sequential execution` + (preview.restored ? ' · recovered receipt' : '')),
+      e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?(preview.ai&&preview.ai.used?'AI-repaired · ready to save':'ready to save'):'corrections required'} · sequential execution` + (preview.restored ? ' · recovered receipt' : '')),
       preview.detected && e('p',{className:'text-xs text-indigo-300'},`Detected as ${preview.detected.format} — ${preview.detected.why}`),
       e('button',{onClick:reviewVariables,disabled:busy || !preview.steps.length,className:'bg-amber-700 px-3 py-2 rounded text-xs disabled:opacity-50'},'REVIEW INPUT VALUES → VARIABLES'),
       adopted.length>0 && e('p',{role:'status',className:'text-xs text-emerald-300'},`Variables created: ${adopted.map(v=>v.name).join(', ')}`),
@@ -419,6 +433,12 @@ function ImportScripts({ project, onSaved, onRun }) {
           e('button',{onClick:adoptVariables,disabled:busy,className:'bg-emerald-700 px-3 py-2 rounded text-xs disabled:opacity-50'},'CREATE VARIABLES & REWRITE STEPS'),
           e('button',{onClick:()=>setVariablePlan(null),className:'bg-slate-700 px-3 py-2 rounded text-xs'},'CANCEL'))),
       (preview.diagnostics||[]).filter(d=>d.severity!=='note').map((d,i)=>e('p',{key:i,role:'alert',className:'text-xs text-red-300'},`${d.file}:${d.line} — ${d.message}`)),
+      preview.ai && preview.ai.used && e('div',{className:'border border-emerald-800 bg-slate-950 p-3 rounded space-y-1'},
+        e('p',{className:'text-xs font-bold text-emerald-300'},`AI SMART ONBOARDING LOOP — ${preview.ai.available===false?'unavailable':'applied'} · model ${preview.ai.model||''} · ${preview.ai.calls||0} call(s) · ${preview.ai.step_fixes||0} per-step repair(s)`),
+        e('p',{className:'text-[11px] text-slate-400'},'The static validator ran first; the AI converted the reported syntax into canonical steps, and every step was re-validated with the same validator that guards saved recordings (validate → fix → re-validate, per step). The uploaded source was never executed. Steps that could not be converted after repeated repairs are named in the notes below.'),
+        Array.isArray(preview.ai.trace) && preview.ai.trace.length>0 && e('details',{},
+          e('summary',{className:'text-xs cursor-pointer text-slate-400'},'Per-step loop trace'),
+          preview.ai.trace.map((t,i)=>e('p',{key:i,className:'text-[11px] text-slate-400 break-all'},`${t.step?('step '+t.step):t.stage} — ${t.result||''}`)))),
       (preview.diagnostics||[]).some(d=>d.severity==='note') && e('details',{className:'border border-slate-700 p-2 rounded'},
         e('summary',{className:'text-xs cursor-pointer text-slate-400'},'Import notes (non-blocking)'),
         (preview.diagnostics||[]).filter(d=>d.severity==='note').map((d,i)=>e('p',{key:i,className:'text-xs text-slate-400'},`${d.file}:${d.line} — ${d.message}`))),
