@@ -1,0 +1,19 @@
+{
+  "completed_at": 1791798007.744083,
+  "duration_seconds": 19.977,
+  "expires_at": 1791970807.744083,
+  "id": "9d41de05-7949-436d-909c-979294be1e55",
+  "kind": "batch",
+  "recordings": [
+    {
+      "failed": 0,
+      "id": "68dd26c7-1c09-45ac-9761-d5f0ebc7a820",
+      "name": "testcomplete",
+      "status": "passed",
+      "steps": 4
+    }
+  ],
+  "remote_status": "disabled",
+  "status": "passed",
+  "steps": 4
+}
