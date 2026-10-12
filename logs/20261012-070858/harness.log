@@ -1,7 +1,7 @@
-2026-10-12T07:06:33+00:00 harness: start 20261012-070633 revision 1075ed6
-2026-10-12T07:06:33+00:00 harness: python 3.11.2 Linux-6.1.158+-x86_64-with-glibc2.36
-2026-10-12T07:06:33+00:00 unit: starting unittest suite
-2026-10-12T07:06:59+00:00 unit: test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world (tests.test_unit.ArtifactExportTests.test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world) ... ok
+2026-10-12T07:08:58+00:00 harness: start 20261012-070858 revision 0110d95
+2026-10-12T07:08:58+00:00 harness: python 3.11.2 Linux-6.1.158+-x86_64-with-glibc2.36
+2026-10-12T07:08:58+00:00 unit: starting unittest suite
+2026-10-12T07:09:24+00:00 unit: test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world (tests.test_unit.ArtifactExportTests.test_UT_MEM_07_artifact_export_refuses_to_buffer_the_world) ... ok
            test_UT_MEM_08_artifact_export_streams_within_the_cap (tests.test_unit.ArtifactExportTests.test_UT_MEM_08_artifact_export_streams_within_the_cap) ... ok
            test_AZ_01_the_guide_is_served_as_markdown (tests.test_unit.AzureGuideTests.test_AZ_01_the_guide_is_served_as_markdown) ... ok
            test_AZ_02_repeated_reads_are_cached (tests.test_unit.AzureGuideTests.test_AZ_02_repeated_reads_are_cached) ... ok
@@ -243,6 +243,8 @@
            test_UT_ONB_08_template_endpoints (tests.test_onboarding_formats.TemplatePackTests.test_UT_ONB_08_template_endpoints) ... ok
            test_UT_ONB_09_reported_upload_through_the_api (tests.test_onboarding_formats.TemplatePackTests.test_UT_ONB_09_reported_upload_through_the_api)
            The exact reported file, uploaded the way the dashboard uploads it. ... ok
+           test_UT_ONB_11_vendor_metadata_columns_are_not_errors (tests.test_onboarding_formats.VendorColumnTests.test_UT_ONB_11_vendor_metadata_columns_are_not_errors)
+           An Azure DevOps/TFS export carries a lot of columns that are not steps. ... ok
            test_UT_PLAN_01_flows_fixtures_datasets_and_bounds (tests.test_plans.PlanTests.test_UT_PLAN_01_flows_fixtures_datasets_and_bounds) ... ok
            test_UT_PLAN_02_secret_and_auth_references_fail_closed (tests.test_plans.PlanTests.test_UT_PLAN_02_secret_and_auth_references_fail_closed) ... ok
            test_UT_PLAN_03_draft_isolation_binding_and_idempotent_save (tests.test_plans.PlanTests.test_UT_PLAN_03_draft_isolation_binding_and_idempotent_save) ... ok
@@ -280,10 +282,10 @@
            Reports reach the repository on their own, and a batch is one commit. ... ok
            
            ----------------------------------------------------------------------
-           Ran 219 tests in 24.741s
+           Ran 220 tests in 25.181s
            
            OK
            
-2026-10-12T07:06:59+00:00 unit: 219 ran, 0 failed, 0 errors
-2026-10-12T07:07:12+00:00 harness: PASS 243 passed, 0 failed, 0 skipped
-2026-10-12T07:07:12+00:00 harness: report /home/user/testforge/logs/20261012-070633/results.md
+2026-10-12T07:09:24+00:00 unit: 220 ran, 0 failed, 0 errors
+2026-10-12T07:09:39+00:00 harness: PASS 244 passed, 0 failed, 0 skipped
+2026-10-12T07:09:39+00:00 harness: report /home/user/testforge/logs/20261012-070858/results.md

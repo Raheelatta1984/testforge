@@ -168,6 +168,31 @@ class RecordedLabelTests(unittest.TestCase):
         self.assertTrue(any("Fixed waits" in item["message"] for item in errors(wait)))
 
 
+class VendorColumnTests(unittest.TestCase):
+    def test_UT_ONB_11_vendor_metadata_columns_are_not_errors(self):
+        """An Azure DevOps/TFS export carries a lot of columns that are not steps."""
+        table = workbook([
+            ["Test Case", "Step", "Action", "Input", "Expected Result", "Area Path", "Iteration Path",
+             "State", "Assigned To", "Work Item Type", "Remaining Work", "Associated Automation",
+             "Test Type", "Link", "Screenshot", "Tags"],
+            ["Login", 1, "Open https://example.test/login", "", "Sign-in form is displayed",
+             "Contoso\\Web", "Sprint 4", "Ready", "Ada", "Test Case", "2", "", "Functional",
+             "https://example.test/case/1", "", "smoke"],
+            ["Login", 2, "Enter {{username}} in the Username field", "{{username}}", "", "Contoso\\Web",
+             "Sprint 4", "Ready", "Ada", "Test Case", "1", "", "Functional", "", "", "smoke"],
+            ["Login", 3, "Click the Sign in button", "", "Dashboard loads", "Contoso\\Web", "Sprint 4",
+             "Ready", "Ada", "Test Case", "0", "", "Functional", "", "", "smoke"],
+        ])
+        result = parse_file("devops-export.xlsx", table)
+        self.assertEqual(errors(result), [], result["diagnostics"])
+        self.assertTrue(result["can_save"])
+        self.assertEqual([step["action"] for step in result["steps"]],
+                         ["navigate", "assert_contains", "fill", "click", "assert_contains"])
+        # Metadata is mentioned in a note, never silently dropped or turned into a step.
+        messages = [item["message"] for item in result["diagnostics"]]
+        self.assertTrue(any("Area Path" in message or "area path" in message for message in messages), messages)
+
+
 class CoordinateStepTests(unittest.TestCase):
     """A recorded point is a real target: it must normalise, save and replay."""
 

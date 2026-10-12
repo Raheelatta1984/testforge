@@ -1,13 +1,13 @@
 {
-  "started": "2026-10-12T07:06:33+00:00",
-  "finished": "2026-10-12T07:07:12+00:00",
-  "revision": "1075ed6",
+  "started": "2026-10-12T07:08:58+00:00",
+  "finished": "2026-10-12T07:09:39+00:00",
+  "revision": "0110d95",
   "python": "3.11.2",
   "platform": "Linux-6.1.158+-x86_64-with-glibc2.36",
-  "passed": 243,
+  "passed": 244,
   "failed": 0,
   "skipped": 0,
-  "total": 243,
+  "total": 244,
   "ok": true,
   "scenarios": [
     {
@@ -1523,6 +1523,14 @@
       "error": null
     },
     {
+      "id": "UT-ONB-11",
+      "title": "test_UT_ONB_11_vendor_metadata_columns_are_not_errors",
+      "layer": "unit",
+      "status": "passed",
+      "seconds": null,
+      "error": null
+    },
+    {
       "id": "UT-PLAN-01",
       "title": "test_UT_PLAN_01_flows_fixtures_datasets_and_bounds",
       "layer": "unit",
@@ -1766,7 +1774,7 @@
       "id": "LB-API-01",
       "title": "Health reports the recorder and the executor",
       "status": "passed",
-      "seconds": 0.002,
+      "seconds": 0.003,
       "error": null,
       "layer": "library"
     },
@@ -1774,7 +1782,7 @@
       "id": "LB-API-02",
       "title": "Creating a project without a name is rejected",
       "status": "passed",
-      "seconds": 0.001,
+      "seconds": 0.003,
       "error": null,
       "layer": "library"
     },
@@ -1782,7 +1790,7 @@
       "id": "LB-API-03",
       "title": "A project can be created and listed",
       "status": "passed",
-      "seconds": 0.02,
+      "seconds": 0.04,
       "error": null,
       "layer": "library"
     },
@@ -1790,7 +1798,7 @@
       "id": "LB-API-04",
       "title": "Variables can be created, updated, and deleted",
       "status": "passed",
-      "seconds": 0.042,
+      "seconds": 0.066,
       "error": null,
       "layer": "library"
     },
@@ -1822,7 +1830,7 @@
       "id": "LB-API-08",
       "title": "Running a recording with no steps fails before a browser opens",
       "status": "passed",
-      "seconds": 0.215,
+      "seconds": 0.25,
       "error": null,
       "layer": "library"
     },
@@ -1830,7 +1838,7 @@
       "id": "LB-API-09",
       "title": "A recording aimed at another local port is stored unchanged",
       "status": "passed",
-      "seconds": 0.121,
+      "seconds": 0.123,
       "error": null,
       "layer": "library"
     },
@@ -1838,7 +1846,7 @@
       "id": "LB-API-10",
       "title": "Diagnostics stays readable and the write probe succeeds",
       "status": "passed",
-      "seconds": 0.011,
+      "seconds": 0.012,
       "error": null,
       "layer": "library"
     },
@@ -1846,7 +1854,7 @@
       "id": "LB-REC-04",
       "title": "Stopping a session that is not running is idempotent",
       "status": "passed",
-      "seconds": 0.119,
+      "seconds": 0.131,
       "error": null,
       "layer": "library"
     },
@@ -1854,7 +1862,7 @@
       "id": "LB-REC-01",
       "title": "Starting a recording shows a live browser frame",
       "status": "passed",
-      "seconds": 1.124,
+      "seconds": 1.162,
       "error": null,
       "layer": "library"
     },
@@ -1862,7 +1870,7 @@
       "id": "LB-REC-02",
       "title": "Clicks, typing, and a key press are saved with selectors",
       "status": "passed",
-      "seconds": 1.534,
+      "seconds": 1.729,
       "error": null,
       "layer": "library"
     },
@@ -1871,14 +1879,14 @@
       "title": "Clicks, typing, and a key press are saved with selectors (covered)",
       "layer": "library",
       "status": "passed",
-      "seconds": 1.534,
+      "seconds": 1.729,
       "error": null
     },
     {
       "id": "LB-RUN-01",
       "title": "Replay of a literal recording passes and the page shows the typed name",
       "status": "passed",
-      "seconds": 2.718,
+      "seconds": 2.968,
       "error": null,
       "layer": "library"
     },
@@ -1886,7 +1894,7 @@
       "id": "LB-RUN-02",
       "title": "Replay interpolates {{user}} at execution time, not record time",
       "status": "passed",
-      "seconds": 2.488,
+      "seconds": 2.837,
       "error": null,
       "layer": "library"
     },
@@ -1894,7 +1902,7 @@
       "id": "LB-LIB-01",
       "title": "The dashboard library is the repository catalog",
       "status": "passed",
-      "seconds": 0.022,
+      "seconds": 0.019,
       "error": null,
       "layer": "library"
     },
@@ -1902,7 +1910,7 @@
       "id": "LB-LIB-02",
       "title": "Replay the repository recording qa-hello-literal",
       "status": "passed",
-      "seconds": 1.242,
+      "seconds": 1.243,
       "error": null,
       "layer": "library"
     },
@@ -1910,7 +1918,7 @@
       "id": "LB-LIB-03",
       "title": "Replay the repository recording that interpolates {{user}}",
       "status": "passed",
-      "seconds": 1.236,
+      "seconds": 1.243,
       "error": null,
       "layer": "library"
     },
@@ -1918,7 +1926,7 @@
       "id": "LB-API-11",
       "title": "The execution queue reports and clears entries that will never run",
       "status": "passed",
-      "seconds": 0.028,
+      "seconds": 0.029,
       "error": null,
       "layer": "library"
     },
@@ -1926,7 +1934,7 @@
       "id": "LB-API-12",
       "title": "Batch selection is validated before a browser is launched",
       "status": "passed",
-      "seconds": 0.019,
+      "seconds": 0.022,
       "error": null,
       "layer": "library"
     },
@@ -1950,7 +1958,7 @@
       "id": "LB-BAT-01",
       "title": "One browser replays both committed recordings in a batch",
       "status": "passed",
-      "seconds": 1.542,
+      "seconds": 1.596,
       "error": null,
       "layer": "library"
     }

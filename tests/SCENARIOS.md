@@ -280,6 +280,7 @@ These unit/API cases live in `tests/test_onboarding_formats.py` and are included
 | UT-ONB-08 | The template endpoints serve the catalog, one file, a bundle ZIP and the whole pack; the listed bytes pass the real preview endpoint. |
 | UT-ONB-09 | The reported upload goes through `POST /api/imports/preview`, is saveable, and still offers its literals for the variable review. |
 | UT-ONB-10 | Recorder labels map to canonical actions (click/type/press/open/save/select/right click/hover/verify) and a value-only label binds to the element the previous click targeted. |
+| UT-ONB-11 | Azure DevOps/TFS metadata columns (Area/Iteration Path, State, Assigned To, Work Item Type, Remaining Work, Associated Automation, Link…) import as notes, not errors; the steps and their expectations survive. |
 
 Opt-in **real Chromium** checks in `tests/test_browser_features.py` use a local fixture
 HTTP server. Set `TF_TEST_BROWSER=1`; the export parity case also needs

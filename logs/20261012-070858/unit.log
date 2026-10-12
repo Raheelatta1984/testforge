@@ -240,6 +240,8 @@ test_UT_ONB_07_every_template_imports_without_errors (tests.test_onboarding_form
 test_UT_ONB_08_template_endpoints (tests.test_onboarding_formats.TemplatePackTests.test_UT_ONB_08_template_endpoints) ... ok
 test_UT_ONB_09_reported_upload_through_the_api (tests.test_onboarding_formats.TemplatePackTests.test_UT_ONB_09_reported_upload_through_the_api)
 The exact reported file, uploaded the way the dashboard uploads it. ... ok
+test_UT_ONB_11_vendor_metadata_columns_are_not_errors (tests.test_onboarding_formats.VendorColumnTests.test_UT_ONB_11_vendor_metadata_columns_are_not_errors)
+An Azure DevOps/TFS export carries a lot of columns that are not steps. ... ok
 test_UT_PLAN_01_flows_fixtures_datasets_and_bounds (tests.test_plans.PlanTests.test_UT_PLAN_01_flows_fixtures_datasets_and_bounds) ... ok
 test_UT_PLAN_02_secret_and_auth_references_fail_closed (tests.test_plans.PlanTests.test_UT_PLAN_02_secret_and_auth_references_fail_closed) ... ok
 test_UT_PLAN_03_draft_isolation_binding_and_idempotent_save (tests.test_plans.PlanTests.test_UT_PLAN_03_draft_isolation_binding_and_idempotent_save) ... ok
@@ -277,6 +279,6 @@ test_UT_SCENE_18_every_execution_commits_a_report_without_extra_configuration (t
 Reports reach the repository on their own, and a batch is one commit. ... ok
 
 ----------------------------------------------------------------------
-Ran 219 tests in 24.741s
+Ran 220 tests in 25.181s
 
 OK

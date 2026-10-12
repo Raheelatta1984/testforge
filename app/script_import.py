@@ -15,6 +15,7 @@ from app.db import fit_text
 from app.step_runtime import MAX_STEPS, normalize_step
 
 MAX_BYTES = 1024 * 1024
+MAX_COLUMNS = 40   # see app.step_runtime; vendor exports carry wide metadata
 MAX_UNPACKED = 8 * 1024 * 1024
 MAX_FILES = 8
 # Everything the onboarding understands. app.import_formats adds the market
@@ -205,8 +206,8 @@ def parse_excel(data, preview):
         if len(workbook.worksheets) != 1:
             raise ImportProblem("Use one worksheet per upload; multiple sheets must not be silently combined")
         sheet = workbook.worksheets[0]
-        if (sheet.max_row or 0) > MAX_STEPS + 1 or (sheet.max_column or 0) > 12:
-            raise ImportProblem("Excel is limited to 500 steps and 12 columns")
+        if (sheet.max_row or 0) > MAX_STEPS + 1 or (sheet.max_column or 0) > MAX_COLUMNS:
+            raise ImportProblem(f"Excel is limited to {MAX_STEPS} steps and {MAX_COLUMNS} columns")
         rows = []
         for row in sheet.iter_rows():
             if any(cell.data_type == "f" for cell in row):

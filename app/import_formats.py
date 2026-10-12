@@ -23,6 +23,7 @@ import defusedxml.ElementTree as SafeET
 
 from app.script_import import (
     ImportProblem,
+    MAX_COLUMNS,
     MAX_STEPS,
     MAX_UNPACKED,
     parse_table,
@@ -104,7 +105,16 @@ HEADER_ALIASES = {
                # never steps, so they must not read as an unknown column.
                "screenshot", "screenshots", "evidence", "attachment", "attachments",
                "screenshot path", "actual result", "actual results", "test result",
-               "execution status", "outcome", "updated by", "estimate", "remaining"},
+               "execution status", "outcome", "updated by", "estimate", "remaining",
+               # The rest of the columns an Azure DevOps / TFS / TestRail / Zephyr /
+               # Xray / QTest export carries next to the steps.
+               "area", "area path", "iteration", "iteration path", "state", "reason",
+               "work item type", "remaining work", "original estimate", "completed work",
+               "board column", "board lane", "changed by", "changed date", "rev", "revision",
+               "refs", "section", "template", "configuration", "test type", "automation status",
+               "associated automation", "run id", "test run", "executed by", "executed on",
+               "history", "link", "links", "watermark", "test script", "call to test",
+               "shared steps", "parameterized", "start date", "end date", "due date"},
 }
 
 HEADER_LOOKUP = {alias: field for field, aliases in HEADER_ALIASES.items() for alias in aliases}
@@ -1788,8 +1798,8 @@ def parse_xls(preview, data):
         if book.nsheets != 1:
             raise ImportProblem("Use one worksheet per upload; multiple sheets must not be silently combined")
         sheet = book.sheet_by_index(0)
-        if sheet.nrows > MAX_STEPS + 1 or sheet.ncols > 12:
-            raise ImportProblem("Excel is limited to 500 steps and 12 columns")
+        if sheet.nrows > MAX_STEPS + 1 or sheet.ncols > MAX_COLUMNS:
+            raise ImportProblem(f"Excel is limited to {MAX_STEPS} steps and {MAX_COLUMNS} columns")
         rows = [[sheet.cell_value(r, c) for c in range(sheet.ncols)] for r in range(sheet.nrows)]
     finally:
         book.release_resources()

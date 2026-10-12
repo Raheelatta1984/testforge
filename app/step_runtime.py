@@ -13,6 +13,9 @@ from urllib.parse import urlparse
 from playwright.async_api import expect
 
 MAX_STEPS = 500
+# A vendor export (Azure DevOps, TestRail, Zephyr, HP ALM) carries 15-30 metadata
+# columns next to the steps; the row cap above still bounds the parse.
+MAX_COLUMNS = 40
 MAX_REPEAT = 100
 MAX_TEXT = 65536
 MAX_FILE = 512 * 1024
