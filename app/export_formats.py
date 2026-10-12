@@ -32,6 +32,15 @@ def _table(path: Path, headers, rows):
     workbook.save(path.with_suffix(".xlsx"))
 
 
+def _label_cell(step) -> str:
+    """The step label plus its repeat marker, so a table row survives a round trip."""
+    label = step.get("label") or step.get("action") or ""
+    repeat = step.get("repeat_count") or step.get("repeat") or 1
+    if isinstance(repeat, int) and repeat > 1 and "×" not in label:
+        return f"{label} ×{repeat}"
+    return label
+
+
 def write_exports(folder: Path, recording: dict) -> None:
     steps = sorted(recording.get("steps") or [], key=lambda step: step.get("order") or 0)
     title = recording.get("name") or "TestForge recording"
@@ -50,15 +59,22 @@ def write_exports(folder: Path, recording: dict) -> None:
         feature.append('    When I perform step %s "%s"' % (step.get("order"), label))
     (folder / "recording.feature").write_text("\n".join(feature) + "\n", encoding="utf-8")
     (folder / "steps.json").write_text(json.dumps(steps, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
-    azure = [(title, step.get("order"), step.get("label") or step.get("action"),
+    # A merged repeat is written into the label as " ×N" so the table can be
+    # re-imported with the repeat count intact (steps.json carries it natively).
+    azure = [(title, step.get("order"), _label_cell(step),
               step.get("value") or "", json.dumps(step.get("selector") or {}),
               step.get("screenshot") or "") for step in steps]
     _table(folder / "azure-devops.csv", ["Test Case", "Step", "Action", "Input", "Selector", "Screenshot"], azure)
-    jira = [(title, step.get("order"), step.get("action"), step.get("label") or "",
-             step.get("value") or "", step.get("screenshot") or "") for step in steps]
-    _table(folder / "jira.csv", ["Summary", "Step", "Action", "Description", "Input", "Screenshot"], jira)
+    jira = [(title, step.get("order"), step.get("action"), _label_cell(step),
+             json.dumps(step.get("selector") or {}), step.get("value") or "",
+             step.get("screenshot") or "") for step in steps]
+    _table(folder / "jira.csv", ["Summary", "Step", "Action", "Description", "Selector", "Input", "Screenshot"], jira)
+    # The Action cell carries the label (with its repeat marker) exactly like the
+    # Azure table; Selector/Input stay structured columns, so onboarding this
+    # table reproduces the recording. An unknown column would make Jira's own
+    # importer ask for a mapping, so every header here is a familiar one.
     _table(folder / "testcomplete.csv", ["Step", "Action", "Selector", "Input", "Screenshot"],
-           [(step.get("order"), step.get("action"), json.dumps(step.get("selector") or {}),
+           [(step.get("order"), _label_cell(step), json.dumps(step.get("selector") or {}),
              step.get("value") or "", step.get("screenshot") or "") for step in steps])
     (folder / "README.md").write_text(
         "# TestForge exports\n\n`recording.json` is the source of truth. "
@@ -67,6 +83,8 @@ def write_exports(folder: Path, recording: dict) -> None:
         "The Gherkin feature needs project-specific step definitions. "
         "Azure DevOps, Jira and TestComplete CSV/XLSX files are import templates "
         "that require mapping to the target instance; they are not native proprietary recordings. "
-        "Re-import steps.json for a lossless canonical round trip; arbitrary generated runtime code is not executed by the importer. "
-        "Screenshots are PNG. Video, when enabled, is WebM, not PNG.\n",
+        "Re-import steps.json for a lossless canonical round trip; the Azure DevOps, Jira and "
+        "TestComplete tables round-trip too, because the label carries the repeat marker (\" ×N\") "
+        "and the Selector column carries the recorded locator. Arbitrary generated runtime code is "
+        "not executed by the importer. Screenshots are PNG. Video, when enabled, is WebM, not PNG.\n",
         encoding="utf-8")

@@ -90,6 +90,11 @@ def launch_kwargs() -> dict:
     # Single process reduces memory on free tier (configurable)
     if os.environ.get("TF_BROWSER_SINGLE_PROCESS", "1") == "1":
         args.extend(["--single-process", "--no-zygote"])
+    # A Chromium built for another distribution can need one extra flag that this
+    # project does not set for the bundled browser (for example
+    # --ozone-platform=headless on a serverless build). Only the operator knows
+    # which, so the flags stay opt-in and empty by default.
+    args.extend(flag for flag in os.environ.get("TF_CHROMIUM_ARGS", "").split() if flag)
 
     kw = {"headless": True, "args": args}
     browser_env = _browser_env()

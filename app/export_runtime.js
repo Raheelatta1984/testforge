@@ -50,16 +50,32 @@ async function replay(initialPage, steps, outputDir, vars = {}, state = null) {
         const l = o.primary ? locator(page,o) : null;
         switch (action) {
           case 'navigate': await page.goto(url(value),{waitUntil:'domcontentloaded',timeout:o.timeout_ms || 20000}); break;
+          // A step may target an element, a recorded point (x/y) or the focused
+          // element; the same three shapes the Python runtime accepts.
           case 'click':
             if (l) await l.click({timeout});
-            else if (!o.strict && o.x !== undefined && o.y !== undefined) await page.mouse.click(o.x,o.y);
-            else throw new Error('Click requires a locator');
+            else if (o.x !== undefined && o.y !== undefined) await page.mouse.click(o.x,o.y);
+            else throw new Error('Click requires a locator or recorded coordinates');
+            break;
+          case 'right_click':
+            if (l) await l.click({button:'right',timeout});
+            else if (o.x !== undefined && o.y !== undefined) await page.mouse.click(o.x,o.y,{button:'right'});
+            else throw new Error('Right click requires a locator or recorded coordinates');
+            break;
+          case 'dblclick':
+            if (l) await l.dblclick({timeout});
+            else if (o.x !== undefined && o.y !== undefined) await page.mouse.dblclick(o.x,o.y);
+            else throw new Error('Double click requires a locator or recorded coordinates');
+            break;
+          case 'hover':
+            if (l) await l.hover({timeout});
+            else if (o.x !== undefined && o.y !== undefined) await page.mouse.move(o.x,o.y);
+            else throw new Error('Hover requires a locator or recorded coordinates');
             break;
           case 'fill': if (l) await l.fill(value,{timeout}); else await page.keyboard.insertText(value); break;
           case 'type': if (l) await l.pressSequentially(value,{delay:0,timeout}); else await page.keyboard.type(value,{delay:0}); break;
           case 'press': if (l) await l.press(value,{timeout}); else await page.keyboard.press(value); break;
-          case 'check': case 'uncheck': case 'hover': case 'dblclick': await l[action]({timeout}); break;
-          case 'right_click': await l.click({button:'right',timeout}); break;
+          case 'check': case 'uncheck': await l[action]({timeout}); break;
           case 'select_option': await l.selectOption(o.by === 'label' ? {label:value} : {value},{timeout}); break;
           case 'drag_to': await l.dragTo(locator(page,o.target),{timeout}); break;
           case 'scroll': await l.scrollIntoViewIfNeeded({timeout}); await l.evaluate((el,y)=>el.scrollBy(0,y),Number(value)); break;

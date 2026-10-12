@@ -15,6 +15,29 @@ from app.browser import launch_kwargs
 from playwright.async_api import async_playwright
 
 
+def recorded_label_workbook(base):
+    """The workbook shape that was reported as "Unsupported action" (an export of a
+    recording, with the recorder's labels in the Action column). The point is that
+    onboarding it reports no error and can become a runnable recording."""
+    import io
+    from openpyxl import Workbook
+    book = Workbook()
+    sheet = book.active
+    sheet.append(["Test Case", "Step", "Action", "Input", "Selector", "Screenshot"])
+    rows = [
+        ["Recorded login", 1, "Open " + base + "/demo.html", "", "", ""],
+        ["Recorded login", 2, "Click 80,140", "", '{"x": 80, "y": 140}', ""],
+        ["Recorded login", 3, "Type: Ada", "", "", ""],
+        ["Recorded login", 4, "Click #go", "", '{"primary": "#go"}', ""],
+        ["Recorded login", 5, "Verify the page contains Hello, Ada", "", "", ""],
+    ]
+    for row in rows:
+        sheet.append(row)
+    buffer = io.BytesIO()
+    book.save(buffer)
+    return buffer.getvalue()
+
+
 @unittest.skipUnless(os.environ.get('TF_TEST_APP_URL'), 'Needs isolated TF_TEST_APP_URL')
 class DashboardImport(unittest.TestCase):
     def test_BR_UI_01_import_preview_save_execute_report(self):
@@ -28,11 +51,19 @@ class DashboardImport(unittest.TestCase):
                 health=await page.request.get(base+'/api/health')
                 self.assertFalse((await health.json())['library_publish_enabled'])
                 await page.goto(base)
+                # The dashboard ties every project to a company/entity, so step 1
+                # creates one before step 2 can submit. Both submit buttons exist
+                # on the page, so each is addressed by its own label.
+                entity_name='Import entity '+str(int(time.time()))
+                await page.get_by_label('Company or entity name').fill(entity_name)
+                await page.get_by_role('button',name='CREATE COMPANY / ENTITY',exact=True).click()
                 project_name='Import validation '+str(int(time.time()))
                 await page.locator('#project-name').fill(project_name)
                 await page.locator('#project-url').fill(base+'/demo.html')
-                await page.locator('button[type=submit]').click()
-                await page.get_by_text(project_name,exact=True).click()
+                # Waits for the new entity to appear in the select itself.
+                await page.locator('#project-entity').select_option(label=entity_name)
+                await page.get_by_role('button',name='CREATE PROJECT',exact=True).click()
+                await page.get_by_text(project_name,exact=True).first.click()
                 await page.get_by_text('📚',exact=True).click()
                 await page.get_by_text('UPLOAD TEST SCRIPTS',exact=True).click()
                 data=('action,selector,value\n'
@@ -97,6 +128,78 @@ class DashboardImport(unittest.TestCase):
                 await browser.close()
         asyncio.run(exercise())
 
+
+    def test_BR_UI_03_recorded_label_export_onboards_and_runs(self):
+        """The reported upload: a recorded export whose Action column holds labels."""
+        async def exercise():
+            base=os.environ['TF_TEST_APP_URL'].rstrip('/')
+            async with async_playwright() as pw:
+                browser=await pw.chromium.launch(**launch_kwargs())
+                page=await browser.new_page(viewport={'width':1280,'height':900})
+                errors=[];page.on('pageerror',lambda err:errors.append(str(err)))
+                self.assertFalse((await (await page.request.get(base+'/api/health')).json())['library_publish_enabled'])
+                await page.goto(base)
+                if await page.locator('#project-entity option').count() <= 1:
+                    await page.get_by_label('Company or entity name').fill('Recorded export entity')
+                    await page.get_by_role('button',name='CREATE COMPANY / ENTITY',exact=True).click()
+                project_name='Recorded export '+str(time.time_ns())
+                await page.locator('#project-name').fill(project_name)
+                await page.locator('#project-entity').select_option(index=1)
+                await page.get_by_role('button',name='CREATE PROJECT',exact=True).click()
+                await page.get_by_text(project_name,exact=True).first.click()
+                await page.get_by_text('📚',exact=True).click()
+                await page.get_by_text('UPLOAD TEST SCRIPTS',exact=True).click()
+                data=recorded_label_workbook(base)
+                await page.get_by_label('Upload test scripts').set_input_files(
+                    {'name':'azure-devops.xlsx','mimeType':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','buffer':data})
+                async with page.expect_response(lambda r:'/api/imports/preview?' in r.url) as pending:
+                    await page.get_by_role('button',name='VALIDATE & PREVIEW',exact=True).click()
+                preview=await (await pending.value).json()
+                self.assertEqual([d for d in preview['diagnostics'] if d['severity']=='error'],[])
+                self.assertTrue(preview['can_save'],preview['diagnostics'])
+                self.assertEqual(len(preview['steps']),5)
+                # The dashboard must say it is ready, not ask for corrections.
+                await page.get_by_text('ready to save',exact=False).wait_for()
+                self.assertEqual(await page.get_by_text('corrections required',exact=False).count(),0)
+                await page.get_by_label('Imported recording name').fill('Recorded export login')
+                async with page.expect_response(lambda r:r.url.endswith('/api/imports/test')) as pending:
+                    await page.get_by_role('button',name='TEST BEFORE PUBLISHING',exact=True).click()
+                draft=await (await pending.value).json()
+                async with asyncio.timeout(60):
+                    while True:
+                        result=await (await page.request.get(base+'/api/imports/tests/'+draft['id'])).json()
+                        if result['status'] not in {'queued','running'}: break
+                        await asyncio.sleep(0.1)
+                self.assertEqual(result['status'],'passed',result)
+                async with page.expect_response(lambda r:r.url.endswith('/api/imports/save')) as pending:
+                    await page.get_by_role('button',name='SAVE TO LIBRARY & PUBLISH',exact=True).click()
+                saved=await (await pending.value).json()
+                self.assertEqual(saved['step_count'],5)
+                self.assertFalse(saved['published'])
+                async with page.expect_response(lambda r:r.url.endswith('/api/runs') and r.request.method=='POST') as pending:
+                    await page.get_by_role('button',name='RUN SAVED STEPS',exact=True).click()
+                run=await (await pending.value).json()
+                async with asyncio.timeout(60):
+                    while True:
+                        result=await (await page.request.get(base+'/api/runs/'+run['run_id'])).json()
+                        if result['status'] in {'passed','failed','error'}: break
+                        await asyncio.sleep(0.1)
+                self.assertEqual(result['status'],'passed',result)
+                # The template picker previews a pack file through the same parser,
+                # so a team can see the steps before replacing them.
+                await page.get_by_text('📚',exact=True).click()
+                await page.get_by_text('UPLOAD TEST SCRIPTS',exact=True).click()
+                await page.get_by_label('Onboarding template').select_option('recorded-labels')
+                async with page.expect_response(lambda r:'/api/imports/preview?' in r.url) as pending:
+                    await page.get_by_role('button',name='PREVIEW THIS TEMPLATE',exact=True).click()
+                template=await (await pending.value).json()
+                self.assertEqual([d for d in template['diagnostics'] if d['severity']=='error'],[])
+                self.assertTrue(template['can_save'])
+                self.assertGreaterEqual(len(template['steps']),6)
+                await page.get_by_text('ready to save',exact=False).wait_for()
+                self.assertEqual(errors,[])
+                await browser.close()
+        asyncio.run(exercise())
 
     def test_BR_UI_02_scenario_inputs_secrets_and_pdf(self):
         async def exercise():

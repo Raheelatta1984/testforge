@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 from playwright.async_api import async_playwright
-from testforge_runtime import StepRuntime, interpolate
+from testforge_runtime import StepRuntime
 
 async def main():
     here = Path(__file__).resolve().parent
@@ -51,13 +51,10 @@ async def main():
                     total += 1
                     if total > 2000:
                         raise ValueError("Expanded action limit exceeded")
-                    selector = step.get("selector") or {}
-                    if not selector.get("strict") and step["action"] == "click" and not selector.get("primary"):
-                        await runtime.page.mouse.click(selector["x"], selector["y"])
-                    elif not selector.get("strict") and step["action"] in ("type", "fill") and not selector.get("primary"):
-                        await runtime.page.keyboard.type(interpolate(step.get("value"), variables), delay=0)
-                    else:
-                        await runtime.perform(step, variables)
+                    # One code path for recordings and imported steps: the runtime
+                    # itself handles locators, recorded coordinates and typing into
+                    # the focused element.
+                    await runtime.perform(step, variables)
         finally:
             await runtime.close()
             await context.close()

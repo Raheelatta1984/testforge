@@ -98,7 +98,13 @@ HEADER_ALIASES = {
                "module", "component", "requirement", "requirement id", "reference", "ref",
                "sprint", "release", "milestone", "folder", "suite", "test suite", "tags", "tag",
                "labels", "environment", "env", "browser", "platform", "device", "automation",
-               "automation type", "type", "design", "design step", "duration", "time", "notes "},
+               "automation type", "type", "design", "design step", "duration", "time", "notes ",
+               # Evidence columns written by TestForge's own exports (azure-devops/jira/
+               # testcomplete) and by other exporters. They are screenshots/attachments,
+               # never steps, so they must not read as an unknown column.
+               "screenshot", "screenshots", "evidence", "attachment", "attachments",
+               "screenshot path", "actual result", "actual results", "test result",
+               "execution status", "outcome", "updated by", "estimate", "remaining"},
 }
 
 HEADER_LOOKUP = {alias: field for field, aliases in HEADER_ALIASES.items() for alias in aliases}
@@ -263,6 +269,320 @@ def _role_for(noun):
     return (noun or "").strip().lower() or None
 
 
+# --- step labels: the language real exports and TestForge itself write --------
+#
+# An export rarely carries a canonical verb. TestForge's own azure-devops/jira/
+# testcomplete tables write the recorded *label* into their Action column ("Click
+# add to cart", "Type: {{password}}", "Press Enter", "Click 528,562"), and the
+# tools teams already use write the same shapes. Everything below is a static
+# grammar over that text: no execution, no model, no guessing about code.
+
+# TestForge clips a label and appends " ×N" when the recorder merged repeats.
+LABEL_REPEAT = re.compile(r"\s*[×xX*]\s*(?P<count>\d{1,3})\s*$")
+
+POINTER_WORDS = r"(?:click|tap|hit|dblclick|double[\s-]?click|right[\s-]?click|hover|mouse\s+over)"
+POINTER_LABEL = re.compile(rf"^(?P<verb>{POINTER_WORDS})(?:\s+(?:at|on|at\s+position))?\s*[:=]?\s*(?P<rest>.+)$", re.I)
+COORDINATE_PAIR = re.compile(r"^\(?\s*(?P<x>\d{1,5})\s*(?:,\s*|;\s*|\s*[x×]\s*|\s+)\s*(?P<y>\d{1,5})\s*\)?$")
+POINTER_ACTIONS = {"click": "click", "tap": "click", "hit": "click",
+                   "dblclick": "dblclick", "double click": "dblclick", "doubleclick": "dblclick",
+                   "right click": "right_click", "rightclick": "right_click",
+                   "hover": "hover", "mouse over": "hover"}
+# Verbs the plain-English rules already build a locator for; they keep doing it so
+# an existing import behaves exactly as before.
+ENGLISH_POINTER_VERBS = {"click", "dblclick", "hover", "double click"}
+
+# "Type: {{password}}", "Fill: Ada", "Select: Express", "Press: Enter"
+LABEL_VALUE_VERBS = {
+    "type": "type", "type in": "type", "typing": "type", "enter": "type", "input": "type",
+    "keyboard type": "type", "write": "type",
+    "fill": "fill", "fill in": "fill", "set": "fill", "provide": "fill", "supply": "fill", "put": "fill",
+    "select": "select_option", "choose": "select_option", "pick": "select_option",
+    "press": "press", "hit": "press", "key": "press", "keyboard press": "press",
+    "open": "navigate", "go to": "navigate", "goto": "navigate", "navigate": "navigate",
+    "navigate to": "navigate", "launch": "navigate", "visit": "navigate", "browse": "navigate",
+}
+LABEL_ASSERT_VERBS = {"assert": None, "verify": None, "validate": None, "confirm": None, "expect": None}
+LABEL_CHECK_VERBS = {"check": "check", "tick": "check", "uncheck": "uncheck", "untick": "uncheck", "deselect": "uncheck"}
+LABEL_COLON = re.compile(r"^(?P<verb>[A-Za-z][A-Za-z ]{0,24}?)\s*[:=]\s*(?P<value>.+)$")
+# "Click the button named Continue" / "Click the link labelled Sign in"
+LABEL_NAMED = re.compile(
+    rf"^(?:click|tap|press|hit)\s+(?:on\s+)?(?:the\s+)?(?P<role>button|link|tab|menu\s*item|menuitem|"
+    rf"checkbox|radio(?:\s+button)?|option|icon|heading|image)\s+"
+    rf"(?:named|labelled|labeled|called|with\s+(?:the\s+)?(?:text|name|label)\s+)(?P<name>.+)$", re.I)
+# The value-only forms: "Type Ada", "Enter {{user}}", "Write Hello world".
+LABEL_BARE_VALUE = re.compile(r"^(?:type|enter|input|write|key\s+in|put)\s+(?P<value>.+)$", re.I)
+# Save what an input holds: TestForge writes "Save input into order_number".
+LABEL_SAVE_INPUT = re.compile(
+    r"^(?:save|store|capture|read|remember)\s+(?:the\s+)?(?P<subject>input|value|text|content|label)"
+    r"(?:\s+(?:of|from)\s+(?:the\s+)?(?P<field>.+?))?\s+(?:as|into|in|to)\s+(?P<name>[\w.\-]+)$", re.I)
+# Field words that mean "the place a value goes", not a real element name.
+_FIELD_SPLIT = re.compile(r"\s+(?:in|into|to|on|from|with|as|at|using)\s+", re.I)
+
+
+class LabelContext:
+    """What the previous steps targeted, the way the recorder understands it.
+
+    A recording export says ``Click your password`` and then ``Type: …`` with no
+    field at all, because the click focused the field and the typing went into it.
+    The importer binds such a value to the element the flow clicked last instead of
+    refusing the row; every inferred target is reported as a note so a reviewer sees
+    exactly which element the value will use.
+    """
+
+    TARGET_ACTIONS = {"click", "dblclick", "right_click", "check", "uncheck",
+                      "select_option", "hover", "fill", "type"}
+    TARGET_KEYS = {"kind", "primary", "name", "exact", "frames", "page"}
+
+    def __init__(self):
+        self.pending = None
+        self.inferred = 0
+
+    def observe(self, step, line):
+        selector = step.get("selector") if isinstance(step.get("selector"), dict) else {}
+        if not selector.get("primary"):
+            return
+        if (step.get("action") or "").lower() not in self.TARGET_ACTIONS:
+            return
+        self.pending = {"selector": {key: value for key, value in selector.items() if key in self.TARGET_KEYS},
+                        "line": line, "order": step.get("order"),
+                        "label": (step.get("label") or step.get("action") or "")[:80]}
+
+    def bind(self, preview, row, line, source, action):
+        """Point a value-only step at the element the flow clicked last."""
+        if self.pending:
+            row["selector"] = dict(self.pending["selector"])
+            self.inferred += 1
+            preview.note(line, f"{source}: no field named, so this value goes to the element "
+                               f"clicked in step {self.pending['order']} ({self.pending['label']}); "
+                               f"edit the step if that is the wrong field")
+            return True
+        if action in {"type", "fill"}:
+            # A recorder stores exactly this when the field was already focused.
+            preview.note(line, f"{source}: no field named, so the value is typed into whatever has focus "
+                               f"at this point; name the field if that is not what you want")
+            return True
+        return False
+
+
+def attach_label_context(preview):
+    """Install the label context on a preview exactly once.
+
+    ``Preview.add`` calls ``on_step`` for every step that reaches the recording, so
+    the context sees clicks added by any parser -- the plain-English rules, a table
+    row or a vendor format -- not just the ones built here.
+    """
+    context = getattr(preview, "label_context", None)
+    if context is None:
+        context = LabelContext()
+        preview.label_context = context
+        previous = getattr(preview, "on_step", None)
+
+        def observe(step, line, _previous=previous, _context=context):
+            if _previous is not None:
+                _previous(step, line)
+            _context.observe(step, line)
+
+        preview.on_step = observe
+    return context
+
+
+def looks_like_url(value):
+    text = str(value or "").strip()
+    if not text:
+        return False
+    if text.startswith(("http://", "https://", "www.", "/", "./", "../")) or "{{" in text:
+        return True
+    return bool(re.fullmatch(r"[\w.\-]+\.[a-z]{2,10}(?:[/?#]\S*)?", text, re.I))
+
+
+def strip_label_repeat(text):
+    """Split a trailing " ×3" repeat marker off a label. Returns (text, count)."""
+    match = LABEL_REPEAT.search(text or "")
+    if not match:
+        return text, None
+    base = text[: match.start()].strip()
+    if not base or len(base) < 3:
+        return text, None
+    return base, int(match.group("count"))
+
+
+def coordinates_in(text):
+    """Return (x, y) for "528,562" / "(528, 562)" / "528 x 562", else None."""
+    match = COORDINATE_PAIR.fullmatch(str(text or "").strip())
+    if not match:
+        return None
+    return int(match.group("x")), int(match.group("y"))
+
+
+def clip_label_text(text):
+    """Shorten a label that quotes a whole page region into its leading phrase.
+
+    A recorder writes the clicked element's entire text, e.g. "search for products
+    e.g. bread log in / sign up cart $0.00 0". Playwright's text locator matches a
+    substring, so the leading phrase is both shorter and more likely to resolve.
+    """
+    text = " ".join(str(text or "").split())
+    if len(text) <= 60 and not re.search(r"[$€£]|\s[/|•·]\s", text):
+        return text, False
+    cut = len(text)
+    for pattern in (r"\s+[/|•·]\s+", r"\s+e\.g\.\s+", r"\s+-\s+", r"\s+[$€£]", r"\.\s+[A-Z]", r"\s{2,}"):
+        match = re.search(pattern, text)
+        if match:
+            cut = min(cut, match.start())
+    clipped = text[:cut].strip(" -–—,;:|")
+    words = clipped.split()
+    if len(words) > 8:
+        clipped = " ".join(words[:8])
+    clipped = clipped[:60].strip()
+    return (clipped, True) if clipped and clipped != text else (text, False)
+
+
+def split_value_and_field(value):
+    """Split "Ada in the Username field" into ("Ada", "Username field"), else (value, None)."""
+    text = str(value or "").strip()
+    match = re.fullmatch(r"(?P<value>.+?)\s+(?:in|into|to|on|for)\s+(?:the\s+)?(?P<field>[\w'\"#.\[\]-][^,;]*?)"
+                         r"(?:\s+(?:field|input|box|textbox|dropdown|list|combobox))?$", text, re.I)
+    if not match:
+        return clean_value(text), None
+    return clean_value(match.group("value")), match.group("field").strip()
+
+
+def _label_rows_from_assertion(preview, value, line_no, source, text):
+    """Turn "the page contains Welcome" / "#out equals Done" into an assertion row."""
+    value = clean_value(value)
+    page_scope = re.match(r"^(?:the\s+)?(?:page|screen|form|table|app(?:lication)?|window|dialog)\s+"
+                          r"(?:contains?|includes?|shows?|displays?|has)\s+(?P<value>.+)$", value, re.I)
+    if page_scope:
+        return [{"action": "assert_contains", "value": clean_value(page_scope.group("value")),
+                 "selector": {"kind": "css", "primary": "body"}, "label": text}]
+    field_contains = re.match(r"^(?:the\s+)?(?P<field>.+?)\s+(?:contains?|includes?)\s+(?P<value>.+)$", value, re.I)
+    if field_contains:
+        expected = clean_value(field_contains.group("value"))
+        if expected:
+            return [{"action": "assert_contains", "value": expected,
+                     "selector": field_locator(field_contains.group("field")), "label": text}]
+    field_equals = re.match(r"^(?:the\s+)?(?P<field>.+?)\s+(?:equals?|is|shows?|displays?|matches)\s+(?P<value>.+)$", value, re.I)
+    if field_equals:
+        expected = clean_value(field_equals.group("value"))
+        if expected:
+            return [{"action": "assert_text", "value": expected,
+                     "selector": field_locator(field_equals.group("field")), "label": text}]
+    if value:
+        return [{"action": "assert_contains", "value": value,
+                 "selector": {"kind": "css", "primary": "body"}, "label": text}]
+    return []
+
+
+def label_rows(preview, raw, line_no, source="text"):
+    """Convert one *label* into canonical rows. Returns (rows, handled).
+
+    ``handled`` is True when the text is a label this grammar recognises, even if
+    the row it produces is empty because the label itself was refused (a fixed wait,
+    for example) -- the caller must not then report the same line as unknown.
+    """
+    text = strip_numbering(raw)
+    if not text:
+        return [], True
+    context = attach_label_context(preview)
+    stripped, repeat = strip_label_repeat(text)
+    repeat = repeat or 1
+
+    # 1. A pointer label that addresses recorded coordinates, or a pointer verb
+    #    the plain-English rules do not cover (tap / hit / right click / mouse over).
+    pointer = POINTER_LABEL.fullmatch(stripped)
+    if pointer:
+        verb = re.sub(r"\s+", " ", pointer.group("verb").lower())
+        action = POINTER_ACTIONS.get(verb)
+        coordinates = coordinates_in(pointer.group("rest"))
+        if action and coordinates:
+            x, y = coordinates
+            preview.note(line_no, f"{source}: '{text}' imports as a {action} on the recorded screen "
+                                   f"position {x},{y}; replace it with a locator if the element has one")
+            return [{"action": action, "value": "", "selector": {"x": x, "y": y},
+                     "label": text, "repeat_count": repeat}], True
+        if action and verb not in ENGLISH_POINTER_VERBS and pointer.group("rest").strip():
+            target, clipped = clip_label_text(pointer.group("rest"))
+            if clipped:
+                preview.note(line_no, f"{source}: label quotes a whole page region; the locator uses "
+                                       f"the leading phrase '{target[:60]}'")
+            return [{"action": action, "value": "", "selector": field_locator(target),
+                     "label": text, "repeat_count": repeat}], True
+
+    # 2. "Click the button named Continue".
+    named = LABEL_NAMED.fullmatch(stripped)
+    if named:
+        role = re.sub(r"\s+", " ", named.group("role").lower())
+        role = {"menu item": "menuitem", "radio button": "radio"}.get(role, role)
+        return [{"action": "click", "value": "",
+                 "selector": field_locator(named.group("name"), role),
+                 "label": text, "repeat_count": repeat}], True
+
+    # 3. "Verb: value" labels.
+    colon = LABEL_COLON.fullmatch(stripped)
+    if colon:
+        verb = re.sub(r"\s+", " ", colon.group("verb").strip().lower())
+        value = clean_value(colon.group("value"))
+        if verb in LABEL_VALUE_VERBS:
+            action = LABEL_VALUE_VERBS[verb]
+            if action == "navigate":
+                if value and not looks_like_url(value):
+                    preview.note(line_no, f"{source}: '{value[:60]}' is not a URL; imported as {{{{base_url}}}} "
+                                           f"-- set base_url in the Variables tab")
+                    value = "{{base_url}}"
+                return [{"action": "navigate", "value": _navigate_value(value or "{{base_url}}"),
+                         "label": text, "repeat_count": repeat}], True
+            if action == "press":
+                return [{"action": "press", "value": value.split()[0] if value else "",
+                         "label": text, "repeat_count": repeat}], True
+            if not value:
+                preview.error(line_no, f"'{text}' has no value; add the text it should use")
+                return [], True
+            # "Type: {{user}} in the Username field" / "Select: Express from Delivery".
+            named_value, named_field = split_value_and_field(value)
+            row = {"action": action, "value": named_value, "label": text, "repeat_count": repeat}
+            if named_field and action in {"fill", "type", "select_option"}:
+                row["selector"] = field_locator(named_field, "combobox" if action == "select_option" else "input")
+            elif not context.bind(preview, row, line_no, source, action):
+                preview.error(line_no, f"'{text}' needs the field it uses; name it in the label "
+                                       f"or click that field in the step before")
+                return [], True
+            if action == "select_option":
+                row["selector"]["by"] = "label"
+            return [row], True
+        if verb in LABEL_ASSERT_VERBS:
+            return _label_rows_from_assertion(preview, colon.group("value"), line_no, source, text), True
+        if verb in LABEL_CHECK_VERBS:
+            if not value:
+                preview.error(line_no, f"'{text}' needs the checkbox it toggles")
+                return [], True
+            return [{"action": LABEL_CHECK_VERBS[verb], "value": "",
+                     "selector": field_locator(value), "label": text, "repeat_count": repeat}], True
+
+    # 4. "Save input into <name>" and the same sentence with a field named.
+    save = LABEL_SAVE_INPUT.fullmatch(stripped)
+    if save:
+        name = save.group("name")
+        action = "save_variable" if save.group("subject").lower() in {"input", "value"} else "capture_text"
+        row = {"action": action, "value": name, "label": text, "repeat_count": repeat}
+        if save.group("field"):
+            row["selector"] = field_locator(save.group("field"))
+        elif not context.bind(preview, row, line_no, source, action):
+            preview.error(line_no, f"'{text}' needs the field it reads; name it or click the field first")
+            return [], True
+        return [row], True
+
+    # 5. A value with no field named: "Type Ada", "Enter {{user}}".
+    bare = LABEL_BARE_VALUE.fullmatch(stripped)
+    if bare and not _FIELD_SPLIT.search(bare.group("value")):
+        value = clean_value(bare.group("value"))
+        if not value or len(value.split()) > 6:
+            return [], False
+        row = {"action": "type", "value": value, "label": text, "repeat_count": repeat}
+        context.bind(preview, row, line_no, source, "type")
+        return [row], True
+    return [], False
+
+
 # --- smart tables ------------------------------------------------------------
 
 def _split_smart(text):
@@ -343,87 +663,266 @@ def parse_table_smart(rows, preview, source="table"):
         if not any(cell not in (None, "") and str(cell).strip() for cell in row):
             continue
         values = dict(zip(fields, [cell for cell in row] + [None] * (len(fields) - len(row))))
-        _table_row(preview, values, offset)
+        import_table_row(preview, values, offset, source)
     return True
 
 
-def _table_row(preview, values, line):
-    """One export row: an action, or an object/data/expected-result triple."""
-    action = clean_value(values.get("action") or "")
-    selector = clean_value(values.get("selector") or "")
-    value = clean_value(values.get("value") if values.get("value") is not None else values.get("label") or "")
-    description = clean_value(values.get("label") or "")
-    expected = clean_value(values.get("expected") or "")
-    repeat = values.get("repeat")
-    precondition = clean_value(values.get("precondition") or "")
-    if precondition:
-        preview.note(line, f"precondition noted, not imported as a step: {precondition[:120]}")
-    if not action and not selector and not value and not expected:
-        return
-    if not action:
-        # Object + data is the HP ALM / TestComplete shape: no verb column.
-        if selector and value:
-            preview.add({"action": "fill", "selector": field_locator(selector), "value": value,
-                         "label": description or f"Fill {selector}"}, line)
-        elif selector:
-            preview.add({"action": "click", "selector": field_locator(selector),
-                         "label": description or f"Click {selector}"}, line)
-        elif expected:
-            preview.add({"action": "assert_contains", "selector": {"kind": "css", "primary": "body"},
-                         "value": expected, "label": description or "Verify page content"}, line)
-        else:
-            preview.error(line, "Row has no action and no object; add an action column or an object name")
-        return
-    keyword = action.lower().strip()
-    known = {"navigate", "click", "type", "fill", "press", "check", "uncheck", "select_option",
-             "hover", "dblclick", "assert_text", "assert_contains", "assert_value", "assert_visible",
-             "assert_hidden", "assert_enabled", "assert_disabled", "assert_checked", "assert_unchecked",
-             "assert_count", "assert_url", "assert_title", "wait_visible", "wait_hidden", "capture_text"}
-    if keyword not in known:
-        # A real export may use English instead of canonical verbs ("Click", "Enter text").
-        handled = parse_english_line(
-            preview, " ".join(part for part in [action, selector, value] if part), line)
-        if handled:
-            if expected:
-                preview.add({"action": "assert_contains",
-                             "selector": {"kind": "css", "primary": "body"}, "value": expected,
-                             "label": "Verify expected result"}, line)
-            return
-        preview.error(line, f"Unsupported action '{action}'; use a canonical action or a plain-English step")
-        return
-    row = {"action": keyword, "value": ""}
-    if selector:
+VALUE_ACTIONS = {"navigate", "fill", "type", "press", "select_option", "assert_text",
+                 "assert_contains", "assert_value", "assert_count", "assert_url", "assert_title",
+                 "capture_text", "save_variable", "dialog", "scroll", "api_request", "mock_route",
+                 "new_page", "download"}
+NO_VALUE_ACTIONS = {"click", "dblclick", "right_click", "hover", "check", "uncheck",
+                    "assert_visible", "assert_hidden", "assert_enabled", "assert_disabled",
+                    "assert_checked", "assert_unchecked", "wait_visible", "wait_hidden",
+                    "switch_page", "close_page", "clear_routes"}
+NOTE_LINE = re.compile(r"(?:note|comment|remark|hint|tip|info|assumption|precondition|given|background)\b[\s:].*", re.I)
+
+
+def canonical_actions():
+    """The runtime's own action list, so importer and replay never drift apart."""
+    from app.step_runtime import ACTIONS
+    return ACTIONS
+
+
+# Resolved when a recording is saved; re-imported tables do not need to carry it.
+RUNTIME_SELECTOR_KEYS = {"schema_version", "strict"}
+
+
+def clean_selector_object(raw, action, preview, line):
+    """Keep the locator keys the runtime understands; name anything dropped.
+
+    An object that holds neither an element locator nor a recorded point is not a
+    selector at all (an export writes ``{}`` for a press or navigate row), so it is
+    reported as absent instead of as "a selector you cannot use".
+    """
+    kept, dropped = {}, []
+    try:
+        from app.step_runtime import COMMON_KEYS, OPTION_KEYS
+        allowed = COMMON_KEYS | OPTION_KEYS.get(action, set())
+    except ImportError:                      # pragma: no cover - runtime always present
+        allowed = None
+    for key, item in raw.items():
+        key = str(key)
+        if key in RUNTIME_SELECTOR_KEYS or item is None or (isinstance(item, str) and not item.strip()):
+            continue
+        if allowed is not None and key not in allowed:
+            dropped.append(key)
+            continue
+        kept[key] = item
+    if dropped:
+        preview.note(line, "selector keys not used by this action were ignored: " + ", ".join(sorted(dropped)))
+    if not kept.get("primary") and kept.get("x") is None and kept.get("y") is None:
+        return None
+    return kept
+
+
+def selector_from_cell(cell, action, preview, line):
+    """Read an export's Selector column: locator object, JSON text or plain CSS."""
+    if cell is None:
+        return None
+    if isinstance(cell, dict):
+        return clean_selector_object(cell, action, preview, line)
+    text = str(cell).strip()
+    if not text:
+        return None
+    if text.startswith("{"):
         try:
-            row["selector"] = field_locator(selector)
-        except ImportProblem as exc:
-            preview.error(line, exc)
-            return
-    needs_locator = keyword not in {"navigate", "press", "assert_url", "assert_title"}
-    if needs_locator and not selector:
-        preview.error(line, f"{keyword} needs a selector or object name")
-        return
-    if keyword in {"navigate", "press", "assert_url", "assert_title", "assert_count", "assert_text",
-                   "assert_contains", "assert_value"} or value:
-        row["value"] = value or expected if keyword.startswith("assert") else value
-    if keyword.startswith("assert") and not row["value"] and expected:
-        row["value"] = expected
-    if keyword in {"assert_visible", "assert_hidden", "assert_enabled", "assert_disabled",
-                   "assert_checked", "assert_unchecked", "click", "hover", "dblclick", "check", "uncheck",
-                   "wait_visible", "wait_hidden"}:
-        row["value"] = ""
-    row["label"] = description or action
-    if repeat not in (None, "", "1", 1):
-        try:
-            row["repeat_count"] = int(float(str(repeat)))
-        except (TypeError, ValueError):
-            preview.error(line, "repeat_count must be a whole number")
-            return
-    if expected and not keyword.startswith("assert"):
-        preview.add(row, line)
+            parsed = json.loads(text)
+        except ValueError as exc:
+            raise ImportProblem(f"Selector '{text[:60]}' looks like JSON but does not parse") from exc
+        if not isinstance(parsed, dict):
+            raise ImportProblem("A JSON selector in the Selector column must be an object")
+        return clean_selector_object(parsed, action, preview, line)
+    return field_locator(text)
+
+
+def _borrow_label_target(preview, text, line, source):
+    """Recover the element a label names, for tables that split verb and label.
+
+    jira.csv writes the canonical verb in "Action" and the recorded label in
+    "Description" ("Click your password"), so the element a step targets lives in
+    the description. Nothing is invented: the label is parsed by the same grammar
+    every other input uses.
+    """
+    if not str(text or "").strip():
+        return None
+    rows, _handled = step_rows(preview, str(text), line, source)
+    for row in rows:
+        if row.get("selector") or row.get("value"):
+            return row
+    return None
+
+
+def repeat_count_from_cell(preview, repeat, line, source):
+    """1 unless the row says otherwise. Reports and returns None for nonsense."""
+    if repeat in (None, "", "1", 1):
+        return 1
+    try:
+        count = int(float(str(repeat)))
+    except (TypeError, ValueError):
+        preview.error(line, f"{source}: repeat_count must be a whole number")
+        return None
+    if not 1 <= count <= 100:
+        preview.error(line, f"{source}: repeat_count must be between 1 and 100")
+        return None
+    return count
+
+
+def add_row_with_expectation(preview, row, expected, line, repeat_count=1):
+    """Add one row, then its Expected Result column as its own assertion."""
+    if repeat_count and repeat_count != 1:
+        row["repeat_count"] = repeat_count
+    preview.add(row, line)
+    if expected and not str(row.get("action") or "").startswith("assert"):
         preview.add({"action": "assert_contains", "selector": {"kind": "css", "primary": "body"},
                      "value": expected, "label": "Verify expected result"}, line)
+
+
+def _merge_row_columns(preview, row, selector_cell, value, description, action_text, line, source):
+    """Let the structured columns win over what the label implied.
+
+    This is what makes TestForge's own azure-devops/jira/testcomplete exports
+    re-importable: the label says "Click add to cart" and the Selector column holds
+    the locator the recorder actually captured, so the imported step keeps it.
+    """
+    action = str(row.get("action") or "")
+    selector = None
+    if selector_cell not in (None, ""):
+        try:
+            selector = selector_from_cell(selector_cell, action, preview, line)
+        except ImportProblem as exc:
+            preview.error(line, f"{source}: {exc}")
+            return False
+    if selector:
+        if action in {"navigate", "press", "assert_url", "assert_title"}:
+            preview.note(line, f"{source}: {action} does not use a locator, so the Selector "
+                               f"column was left out of this step")
+        else:
+            row["selector"] = selector
+    if value:
+        if action in VALUE_ACTIONS:
+            row["value"] = value
+        elif action in NO_VALUE_ACTIONS:
+            preview.note(line, f"{source}: '{value[:60]}' in the input column is not used by {action}")
+        else:
+            row["value"] = value
+    if description:
+        row["label"] = description
+    row.setdefault("label", action_text)
+    return True
+
+
+def import_table_row(preview, values, line, source="table"):
+    """Import one row of any step table into canonical steps.
+
+    Four shapes arrive here and all of them must onboard without an error: the
+    canonical template, a recorded label in the Action column, an object/data pair
+    with no verb at all (HP ALM, TestComplete), and a vendor export that mixes a
+    label with structured Selector/Input columns.
+    """
+    action = clean_value(values.get("action") or "")
+    selector_cell = values.get("selector")
+    raw_value = values.get("value")
+    value = clean_value("" if raw_value is None else raw_value)
+    description = clean_value(values.get("label") or "")
+    # A label is also where a merged repeat travels ("Click add to cart ×3"), so a
+    # table that writes the label into a Description column keeps the repeat count
+    # even though the canonical verb sits in the Action column.
+    description, description_repeat = strip_label_repeat(description)
+    expected = clean_value(values.get("expected") or "")
+    precondition = clean_value(values.get("precondition") or "")
+    if precondition:
+        preview.note(line, f"{source}: precondition noted, not imported as a step: {precondition[:120]}")
+    if not action and not selector_cell and not value and not expected:
         return
-    preview.add(row, line)
+    repeat_count = repeat_count_from_cell(preview, values.get("repeat"), line, source)
+    if repeat_count is None:
+        return
+    if description_repeat and repeat_count == 1:
+        repeat_count = description_repeat
+    attach_label_context(preview)
+
+    if not action:
+        # Object + data is the HP ALM / TestComplete shape: no verb column.
+        if selector_cell and value:
+            row = {"action": "fill", "value": value, "label": description or f"Fill {selector_cell}",
+                   "selector": selector_from_cell(selector_cell, "fill", preview, line)}
+        elif selector_cell:
+            row = {"action": "click", "value": "", "label": description or f"Click {selector_cell}",
+                   "selector": selector_from_cell(selector_cell, "click", preview, line)}
+        elif expected:
+            row = {"action": "assert_contains", "selector": {"kind": "css", "primary": "body"},
+                   "value": expected, "label": description or "Verify page content"}
+            add_row_with_expectation(preview, row, "", line, repeat_count)
+            return
+        else:
+            preview.error(line, "Row has no action and no object; add an action column or an object name")
+            return
+        if not row.get("selector"):
+            preview.error(line, "Row has no usable object name")
+            return
+        add_row_with_expectation(preview, row, expected, line, repeat_count)
+        return
+
+    keyword = re.sub(r"[\s-]+", "_", action.strip().lower())
+    if keyword in canonical_actions():
+        row = {"action": keyword, "value": ""}
+        if selector_cell not in (None, "") and keyword not in {"navigate", "press", "assert_url", "assert_title"}:
+            try:
+                row["selector"] = selector_from_cell(selector_cell, keyword, preview, line)
+            except ImportProblem as exc:
+                preview.error(line, f"{source}: {exc}")
+                return
+            if not row["selector"]:
+                preview.error(line, f"{keyword} needs a selector or object name")
+                return
+        needs_locator = keyword not in {"navigate", "press", "assert_url", "assert_title"}
+        if needs_locator and "selector" not in row:
+            borrowed = _borrow_label_target(preview, description, line, source)
+            if borrowed:
+                if borrowed.get("selector"):
+                    row["selector"] = borrowed["selector"]
+                if keyword in VALUE_ACTIONS and not value and borrowed.get("value"):
+                    row["value"] = borrowed["value"]
+                if borrowed.get("repeat_count") and repeat_count == 1:
+                    repeat_count = borrowed["repeat_count"]
+                if borrowed.get("action") != keyword:
+                    preview.note(line, f"{source}: the locator for this {keyword} step came from the "
+                                       f"description column ('{description[:60]}')")
+        if needs_locator and keyword not in {"type", "fill"} and "selector" not in row:
+            preview.error(line, f"{keyword} needs a selector or object name")
+            return
+        if keyword in VALUE_ACTIONS:
+            row["value"] = value or (expected if keyword.startswith("assert") else "")
+        if keyword in NO_VALUE_ACTIONS:
+            if value:
+                preview.note(line, f"{source}: '{value[:60]}' in the input column is not used by {keyword}")
+            row["value"] = ""
+        row["label"] = description or action
+        add_row_with_expectation(preview, row, expected, line, repeat_count)
+        return
+
+    # Not a canonical verb: read the action cell as a recorded label or an English
+    # step. Only the action cell is read, so a Selector/Input column cannot corrupt
+    # the sentence the way joining the whole row used to.
+    before = len(preview.diagnostics)
+    rows, handled = step_rows(preview, action, line, source)
+    if not handled:
+        preview.error(line, f"Unsupported action '{action}'; use a canonical action or a plain-English step")
+        return
+    if not rows:
+        return
+    for row in rows:
+        if not _merge_row_columns(preview, row, selector_cell, value, description, action, line, source):
+            return
+        selector = row.get("selector") or {}
+        if selector.get("primary"):
+            # The export carried the real locator; the coordinate-only advice for the
+            # label no longer applies to the step that will be saved.
+            preview.diagnostics = [item for index, item in enumerate(preview.diagnostics)
+                                   if not (index >= before and item["severity"] == "note"
+                                           and "recorded screen position" in item["message"])]
+        add_row_with_expectation(preview, row, expected, line, repeat_count)
 
 
 # --- plain English steps -----------------------------------------------------
@@ -454,7 +953,9 @@ def _english_rules():
          "type_by_field"),
         (re.compile(rf"^(?:fill|populate)\s+(?:in\s+)?(?:the\s+)?(?P<field>.+?)\s+(?:with|using)\s+(?P<value>{quoted}|.+)$", re.I),
          "type_by_field"),
-        (re.compile(rf"^{INPUT_WORDS}\s+(?:the\s+value\s+)?(?P<value>{quoted}|\S+)\s+(?:in|into|to|on)\s+(?:the\s+)?(?P<field>.+)$", re.I),
+        # The value may be several words ("Enter Ada Lovelace in the Username field");
+        # the first in/into/to/on that still lets the line match ends the value.
+        (re.compile(rf"^{INPUT_WORDS}\s+(?:the\s+value\s+)?(?P<value>{quoted}|.+?)\s+(?:in|into|to|on)\s+(?:the\s+)?(?P<field>.+)$", re.I),
          "type_by_field"),
         (re.compile(rf"^{ASSERT_WORDS}\s+(?:that\s+)?the\s+(?:url|address|location)\s+(?:is|equals?|contains?|includes?)\s+(?P<value>.+)$", re.I),
          "assert_url"),
@@ -506,14 +1007,46 @@ def _english_rules():
 ENGLISH_RULES = _english_rules()
 
 
-def parse_english_line(preview, raw, line_no, source="text"):
-    """Convert one plain-English step line into a canonical step. True when handled."""
-    text = strip_numbering(raw)
+def step_rows(preview, text, line_no, source="text"):
+    """Rows for one step line: a recorded label first, then the English rules.
+
+    Returns ``(rows, handled)``. ``handled`` is True even when ``rows`` is empty,
+    because the line matched a rule that reports its own diagnostic (a fixed wait,
+    an upload without a fixture, a note); the caller must not report it as unknown
+    twice.
+    """
+    text = strip_numbering(text)
     if not text:
-        return True
-    if re.fullmatch(r"(?:note|comment|remark|hint|tip|info|assumption|precondition|given|background)\b[\s:].*", text, re.I):
+        return [], True
+    if NOTE_LINE.fullmatch(text):
         preview.note(line_no, f"{source}: {text[:200]}")
-        return True
+        return [], True
+    stripped, repeat = strip_label_repeat(text)
+    rows, handled = label_rows(preview, text, line_no, source)
+    if handled:
+        return rows, True
+    # The repeat marker of a compressed recording ("Click add to cart ×3") is data,
+    # not part of the element name: the text locator uses the stripped label and the
+    # count is restored as repeat_count.
+    rows, handled = english_rows(preview, stripped, line_no, source)
+    if handled and repeat and repeat > 1:
+        for row in rows:
+            row.setdefault("repeat_count", repeat)
+    return rows, handled
+
+
+def parse_english_line(preview, raw, line_no, source="text"):
+    """Convert one plain-English or recorded-label line into canonical steps."""
+    rows, handled = step_rows(preview, raw, line_no, source)
+    if not handled:
+        return False
+    for row in rows:
+        preview.add(row, line_no)
+    return True
+
+
+def english_rows(preview, text, line_no, source="text"):
+    """The plain-English rule set. Returns (rows, handled) and adds nothing."""
     for pattern, kind in ENGLISH_RULES:
         match = pattern.fullmatch(text)
         if not match:
@@ -523,50 +1056,44 @@ def parse_english_line(preview, raw, line_no, source="text"):
             if kind == "fixed_wait":
                 preview.error(line_no, "Fixed waits are not imported (this project runs without fixed sleeps); "
                                        "use a wait_visible / wait_hidden step instead")
-                return True
+                return [], True
             if kind in {"check", "uncheck", "hover", "dblclick"}:
-                preview.add({"action": kind, "selector": field_locator(groups["field"]),
-                             "label": text}, line_no)
-                return True
+                return [{"action": kind, "selector": field_locator(groups["field"]), "label": text}], True
             if kind == "click":
-                preview.add({"action": "click", "selector": field_locator(groups["field"], groups.get("role")),
-                             "label": text}, line_no)
-                return True
-            if kind == "dblclick":
-                preview.add({"action": "dblclick", "selector": field_locator(groups["field"]), "label": text}, line_no)
-                return True
+                # A recorder writes the clicked element's whole text into the label;
+                # the leading phrase is what a text locator can actually match.
+                target, clipped = clip_label_text(groups["field"])
+                if clipped:
+                    preview.note(line_no, f"{source}: label quotes a whole page region; the locator uses "
+                                           f"the leading phrase '{target[:60]}'")
+                return [{"action": "click", "selector": field_locator(target, groups.get("role")),
+                         "label": text}], True
             if kind == "press":
                 key = clean_value(groups.get("value") or "")
                 if not key:
                     preview.error(line_no, "Name the key to press, e.g. 'press Enter' or 'press the Tab key'")
-                    return True
-                preview.add({"action": "press", "value": key.title().replace("Control+", "Control+"),
-                             "label": text}, line_no)
-                return True
+                    return [], True
+                return [{"action": "press", "value": key.title(), "label": text}], True
             if kind == "select_option":
-                preview.add({"action": "select_option", "value": clean_value(groups["value"]),
-                             "selector": {**field_locator(groups["field"], "combobox"), "by": "label"},
-                             "label": text}, line_no)
-                return True
+                return [{"action": "select_option", "value": clean_value(groups["value"]),
+                         "selector": {**field_locator(groups["field"], "combobox"), "by": "label"},
+                         "label": text}], True
             if kind == "type_by_field":
-                preview.add({"action": "fill", "value": clean_value(groups["value"]),
-                             "selector": field_locator(groups["field"], "input"), "label": text}, line_no)
-                return True
+                return [{"action": "fill", "value": clean_value(groups["value"]),
+                         "selector": field_locator(groups["field"], "input"), "label": text}], True
             if kind in {"assert_contains", "assert_equals"}:
                 target = clean_value(groups.get("field") or "")
                 expected = clean_value(groups.get("value") or "")
                 action = "assert_contains" if kind == "assert_contains" else "assert_text"
                 if not expected:
                     preview.error(line_no, "An expected value is required for the assertion")
-                    return True
-                preview.add({"action": action, "value": expected,
-                             "selector": field_locator(target) if target else {"kind": "css", "primary": "body"},
-                             "label": text}, line_no)
-                return True
+                    return [], True
+                return [{"action": action, "value": expected,
+                         "selector": field_locator(target) if target else {"kind": "css", "primary": "body"},
+                         "label": text}], True
             if kind == "assert_page_contains":
-                preview.add({"action": "assert_contains", "value": clean_value(groups["value"]),
-                             "selector": {"kind": "css", "primary": "body"}, "label": text}, line_no)
-                return True
+                return [{"action": "assert_contains", "value": clean_value(groups["value"]),
+                         "selector": {"kind": "css", "primary": "body"}, "label": text}], True
             if kind in {"assert_visible", "assert_hidden", "assert_state_phrase"}:
                 state = (groups.get("state") or "").strip().lower()
                 action = {"visible": "assert_visible", "displayed": "assert_visible",
@@ -580,44 +1107,36 @@ def parse_english_line(preview, raw, line_no, source="text"):
                         action = "assert_hidden"
                     else:
                         preview.error(line_no, f"Unsupported state '{state}'")
-                        return True
-                preview.add({"action": action, "selector": field_locator(groups["field"]), "label": text}, line_no)
-                return True
+                        return [], True
+                return [{"action": action, "selector": field_locator(groups["field"]), "label": text}], True
             if kind == "assert_text_visible":
-                preview.add({"action": "assert_visible",
-                             "selector": {"kind": "text", "primary": clean_value(groups["value"]), "exact": False},
-                             "label": text}, line_no)
-                return True
+                return [{"action": "assert_visible",
+                         "selector": {"kind": "text", "primary": clean_value(groups["value"]), "exact": False},
+                         "label": text}], True
             if kind in {"assert_url", "assert_title"}:
-                expected = clean_value(groups["value"])
-                preview.add({"action": kind, "value": expected, "label": text}, line_no)
-                return True
+                return [{"action": kind, "value": clean_value(groups["value"]), "label": text}], True
             if kind == "navigate":
-                preview.add({"action": "navigate", "value": _navigate_value(groups["value"]), "label": text}, line_no)
-                return True
+                return [{"action": "navigate", "value": _navigate_value(groups["value"]), "label": text}], True
             if kind == "navigate_bare":
-                preview.add({"action": "navigate", "value": "{{base_url}}", "label": text}, line_no)
                 preview.note(line_no, "No URL in this step; imported as {{base_url}} -- set base_url in the Variables tab")
-                return True
+                return [{"action": "navigate", "value": "{{base_url}}", "label": text}], True
             if kind == "capture_text":
                 name = clean_value(groups["value"])
                 if not re.fullmatch(r"[\w.\-]{1,100}", name):
                     preview.error(line_no, f"'{name}' is not a valid variable name")
-                    return True
-                preview.add({"action": "capture_text", "value": name,
-                             "selector": field_locator(groups["field"]), "label": text}, line_no)
-                return True
-            if kind == "wait_visible" or kind == "wait_hidden":
-                preview.add({"action": kind, "selector": field_locator(groups["field"]), "label": text}, line_no)
-                return True
+                    return [], True
+                return [{"action": "capture_text", "value": name,
+                         "selector": field_locator(groups["field"]), "label": text}], True
+            if kind in {"wait_visible", "wait_hidden"}:
+                return [{"action": kind, "selector": field_locator(groups["field"]), "label": text}], True
             if kind == "upload":
                 preview.error(line_no, "File uploads must carry the file contents; add this step in the "
                                        "Actions panel instead so the fixture is stored with the step")
-                return True
+                return [], True
         except ImportProblem as exc:
             preview.error(line_no, exc)
-            return True
-    return False
+            return [], True
+    return [], False
 
 
 def parse_english(preview, text, source="text", require_all=True):
@@ -1274,8 +1793,8 @@ def parse_xls(preview, data):
         rows = [[sheet.cell_value(r, c) for c in range(sheet.ncols)] for r in range(sheet.nrows)]
     finally:
         book.release_resources()
-    if not parse_table_smart(rows, preview, "xls"):
-        parse_table(rows, preview)
+    from app.script_import import parse_rows
+    parse_rows(rows, preview, "xls")
     return True
 
 

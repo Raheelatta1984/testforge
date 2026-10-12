@@ -64,6 +64,7 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-BRW-02 | Missing binary | A `TF_CHROMIUM_PATH` that is not a file raises `RuntimeError`. |
 | UT-BRW-03 | Install hint | A Playwright "executable doesn't exist" error becomes the `playwright install chromium` message, without the internal path. |
 | UT-BRW-04 | Video override | A stand-in binary disables Playwright video so a video failure cannot fail the run. |
+| UT-BRW-05 | Extra Chromium flags | `TF_CHROMIUM_ARGS` is appended to the launch arguments and is empty by default; the extra flag reaches only the browser process. |
 | UT-SEC-01 | Credential redaction | `postgresql://user:password@host/db` loses the password before it can reach the UI. |
 | UT-SEC-02 | Configuration surfaces carry no token | `describe()`, `status()` and both `publish_outcome()` payloads serialize without the token even when `TF_GITHUB_TOKEN` is configured and working. |
 | UT-SEC-03 | Hostile GitHub errors are scrubbed at the transport | An HTTP error body or URL error quoting the `Authorization` header, the live token, or an unknown `github_pat_…` becomes `***` before `GitHubAPIError` leaves `request()`. |
@@ -263,6 +264,23 @@ These unit/API cases live in `tests/test_imports.py` and are included by the har
 | UT-IMP-43 | Import `variable-plan`/`variables` endpoints propose and create variables without saving. |
 | UT-IMP-44 | `/api/plans/catalog` returns recordings, inputs and variables in one cached read. |
 
+## Onboarding formats, recorded labels and the template pack
+
+These unit/API cases live in `tests/test_onboarding_formats.py` and are included by the harness. They are the regression for the reported "Unsupported action" upload: a table exported by TestForge itself (the Action cell holds the recorded label) and the equivalent vendor tables must preview with **no error-severity diagnostic** while genuinely unsupported input must still fail closed.
+
+| ID | Verification |
+| --- | --- |
+| UT-ONB-01 | The reported 17-label `azure-devops.xlsx` (recorded labels in Action) previews with zero errors; values keep `{{placeholders}}`, the recorded point stays a point, and a region-quoting label is clipped. |
+| UT-ONB-02 | Exports round-trip: `azure-devops.xlsx/.csv`, `jira.csv/.xlsx`, `testcomplete.csv/.xlsx` and `steps.json` re-import identically (action, value, locator, coordinates, repeat). A legacy Jira table without a Selector column still imports and keeps the `×3`. |
+| UT-ONB-03 | Sentence tables keep a multi-word value whole and give every row its own expected-result assertion, in sheet order. |
+| UT-ONB-04 | Unsupported verbs, labels and a fixed wait still block the save with an error. |
+| UT-ONB-05 | Coordinates and a focus-only typing step normalise; a non-pointer coordinate step and an empty selector are still refused. |
+| UT-ONB-06 | A coordinate click replays on the recorded point and a selector-less `type` goes to the keyboard. |
+| UT-ONB-07 | Every template in `app/import_templates.CATALOG` imports (single file or bundle) with zero errors and no real-world target. |
+| UT-ONB-08 | The template endpoints serve the catalog, one file, a bundle ZIP and the whole pack; the listed bytes pass the real preview endpoint. |
+| UT-ONB-09 | The reported upload goes through `POST /api/imports/preview`, is saveable, and still offers its literals for the variable review. |
+| UT-ONB-10 | Recorder labels map to canonical actions (click/type/press/open/save/select/right click/hover/verify) and a value-only label binds to the element the previous click targeted. |
+
 Opt-in **real Chromium** checks in `tests/test_browser_features.py` use a local fixture
 HTTP server. Set `TF_TEST_BROWSER=1`; the export parity case also needs
 `TF_TEST_NODE_MODULES` pointing at Node dependencies including `@playwright/test@1.49.1`.
@@ -275,6 +293,8 @@ HTTP server. Set `TF_TEST_BROWSER=1`; the export parity case also needs
 | BR-NEW-04 | Incorrect assertions fail actual single and batch runs; no assertion retry; failure-only screenshots. |
 | BR-NEW-05 | Generated Python/JS/TS projects execute correctly, and all three exit nonzero for an incorrect assertion. |
 | BR-UI-01 | Actual dashboard CSV upload → preview → isolated test → save → replay → report, then a two-row synthetic domain plan → test → save; no browser console errors. |
+| BR-UI-02 | Scenario inputs, a secret variable and a PDF report on the live dashboard. |
+| BR-UI-03 | The reported recorded-label export is uploaded in the dashboard: zero errors, "ready to save", isolated test passes, the recording saves and replays to a passing run. |
 
 `BR-UI-01` lives in `tests/test_dashboard_import.py` and requires an isolated server via
 `TF_TEST_APP_URL`. It refuses a publishing-enabled instance. Never target production.

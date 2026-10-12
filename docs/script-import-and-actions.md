@@ -32,7 +32,7 @@ Do not upload literal passwords, personal data or production files: canonical st
 
 | Input | Supported contract |
 | --- | --- |
-| CSV / TSV | One recording, one action per row. Required `action`; optional `selector`, `value`/`input`, `label`/`description`, `repeat_count`. Selected vendor metadata columns are accepted, but natural-language actions are not inferred. Multiple different `test_case`/`summary` values are rejected. |
+| CSV / TSV | One recording, one action per row. Required `action`; optional `selector`, `value`/`input`, `label`/`description`, `repeat_count`. The `action` cell may name a canonical verb **or** carry a recorded step label (`Click add to cart`, `Type: {{password}}`, `Click 528,562`) — see *Re-importing your own recordings*. Selected vendor metadata columns (`Screenshot`, `Evidence`, `Actual result`, `Attachment`, status/estimate columns) are accepted as non-steps. Multiple different `test_case`/`summary` values are rejected. |
 | Excel `.xlsx` / `.xlsm` | The same step table in one worksheet. Literal cells only. Formulas, macros, external links and multi-sheet workbooks are rejected. |
 | Legacy Excel `.xls` | The same step table read with `xlrd` (`.xlsm` also accepted). One worksheet, ≤12 columns, literal cells only. |
 | JSON | A canonical step array, `{ "name": "…", "steps": [...] }`, or `{ "name": "…", "execution_plan": {...} }`. Array order is execution order. Use this format for a lossless re-import of supported canonical steps. |
@@ -56,6 +56,24 @@ Do not upload literal passwords, personal data or production files: canonical st
 | Other formats / unsupported code | Rejected with diagnostics. There is no safe universal converter for arbitrary executable programs. No AI service guesses what omitted code was supposed to do. |
 
 The generated Python/JS runners are executable artifacts, not input-language promises: **re-import their `steps.json` (ordinary recordings) or `execution-plan-source.json` (advanced plans)**, rather than their generic interpreter code. Vendor CSV/XLSX files remain mapping templates; they are not proprietary native test projects.
+
+### Onboarding templates in every format
+
+`GET /api/imports/templates` lists one working example per supported format, each of which previews with **zero diagnostics of severity `error`**: simple steps (`.csv`/`.xlsx`), plain-English Excel, Azure DevOps column names (`.xlsx`/`.csv`), a re-importable recorded-label table (`.xlsx`), Playwright Python and TypeScript, BDD `.feature`, a Jenkinsfile bundle, Robot Framework, Selenium IDE, Cypress, canonical JSON/YAML, Markdown step lines, and a Postman collection. `GET /api/imports/templates.zip` downloads the whole pack with its `README.md`; `GET /api/imports/templates/{id}` returns one file (a bundle returns a ZIP). The dashboard's **START FROM A TEMPLATE (ANY FORMAT)** picker previews a chosen template through the same parser as an upload, so the steps can be inspected before being replaced. Every template is synthetic (`example.test`, `{{variables}}`), never a real target.
+
+### Re-importing your own recordings and vendor exports
+
+TestForge's own `azure-devops.xlsx`/`.csv`, `jira.csv`/`.xlsx` and `testcomplete.csv`/`.xlsx` write the recorded *label* into the action/description cell, because that is the part a person reads. Those tables are re-importable and, for `azure-devops.*` and `testcomplete.*`, reproduce the recording exactly:
+
+- The structured `Selector` (JSON, or a plain CSS/text cell) and `Input`/`value` columns win over whatever the label implies, so a recorded locator is not degraded into a text guess.
+- A trailing `×N` repeat marker in a label is restored as the canonical `repeat_count` (`Click add to cart ×3`).
+- `Click 528,562` (with or without `at`/parentheses/`x`) is a click on the recorded screen position. The preview adds a note suggesting a locator when the element has one; the step is saved as-is, because that is what the recorder captured.
+- `Type: {{password}}` / `Type: granny apple` with no field name binds to the element the previous click targeted (the recorder focuses the element and then types), with a note naming that element. With no such element the value is typed into whatever has focus, exactly as the recorder replays it.
+- `Press Enter`, `Open <url>`, `Select: <value>`, `Save input into <name>`, `Capture <field> as <name>`, `Verify: …` and the other recorder labels are recognised in either the canonical template or a label-only column.
+- A label that quotes a whole page region (`Click search for products e.g. bread log in / sign up cart $0.00 0`) uses the leading phrase as its text locator and notes the shortening, instead of storing a whole paragraph as a locator.
+- `jira.csv` has no locator of its own on older exports; the locator is rebuilt from the description column, and the step keeps the description as its label.
+
+An unsupported verb or an unrecognised label is still an error: nothing is silently treated as tested, and no AI service guesses what a step meant.
 
 ### CSV example
 

@@ -175,6 +175,24 @@ class BrowserLaunchTests(unittest.TestCase):
         finally:
             _env_restore(saved)
 
+    def test_UT_BRW_05_chromium_args_are_opt_in(self):
+        """A custom Chromium can need one extra flag; the default adds none."""
+        saved = _env_set(TF_CHROMIUM_ARGS=None, TF_CHROMIUM_LIBS=None, TF_CHROMIUM_PATH=None)
+        try:
+            self.assertNotIn("--ozone-platform=headless", launch_kwargs()["args"])
+        finally:
+            _env_restore(saved)
+        saved = _env_set(TF_CHROMIUM_ARGS="--ozone-platform=headless --disable-gpu-compositing",
+                         TF_CHROMIUM_LIBS="/tmp/tf-fake-libs", TF_CHROMIUM_PATH=None)
+        try:
+            kwargs = launch_kwargs()
+            self.assertEqual(kwargs["args"][-2:], ["--ozone-platform=headless", "--disable-gpu-compositing"])
+            # The extra flag belongs to the browser process, never to the server.
+            self.assertNotIn("ozone", os.environ.get("LD_LIBRARY_PATH") or "")
+            self.assertIn("/tmp/tf-fake-libs", kwargs["env"]["LD_LIBRARY_PATH"])
+        finally:
+            _env_restore(saved)
+
     def test_UT_BRW_03_install_hint(self):
         message = explain_launch_error(RuntimeError(
             "Executable doesn't exist at /opt/ms-playwright/chromium\n"

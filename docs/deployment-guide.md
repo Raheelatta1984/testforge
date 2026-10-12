@@ -571,6 +571,7 @@ grep -rhoE '"TF_[A-Z0-9_]+"' app/*.py | tr -d '"' | sort -u | wc -l    # 62
 | `TF_BROWSER_SINGLE_PROCESS` | `1` | one process, no zygote — required on a 512 MB instance |
 | `TF_CHROMIUM_PATH` | unset | explicit binary (also used by the harness, before the bundled one) |
 | `TF_CHROMIUM_LIBS` | unset | extra `LD_LIBRARY_PATH` entries for a non-Distroless host |
+| `TF_CHROMIUM_ARGS` | unset | extra Chromium flags appended to the launch arguments, for a browser built for another distribution (for example `--ozone-platform=headless`) |
 | `TF_VIEWPORT_WIDTH` / `_HEIGHT` | `1024` / `640` | recorder canvas |
 | `TF_ENABLE_VIDEO` | `0` | `1` records a WebM per run |
 | `TF_NO_VIDEO` | unset | `1` in bundled mode forces video off entirely |
@@ -849,6 +850,7 @@ Two facts that matter in CI:
   `TF_GITHUB_REPO`, `TF_GITHUB_BRANCH` and `TF_GIT_REMOTE` from the server env it starts. Safe by
   design; don't "fix" it to test publishing end-to-end against the real repo.
 * Browser resolution order is `TF_CHROMIUM_PATH` → Playwright's bundled browser → `/tmp/cr/chromium`.
+* `TF_BROWSER_SINGLE_PROCESS=0` disables `--single-process --no-zygote` when a custom Chromium build cannot run single-process; `TF_CHROMIUM_ARGS` adds any further flag the binary needs.
   In a container that has the bundled one, do nothing. If you see skips, run `--require-browser` to
   turn them into a loud failure.
 * `python -m unittest tests.test_unit -v` is the fast loop with no browser at all (the batch executor
