@@ -1,1 +1,238 @@
-[]
+[
+  {
+    "id": "ac3eb0a2-ae3f-4b0a-9cc9-ade12b6721db",
+    "order": 1,
+    "action": "navigate",
+    "value": "https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
+    "label": "Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08",
+    "selector": null
+  },
+  {
+    "id": "aa4b19ab-7772-40f3-85cc-169d1dcf9325",
+    "order": 2,
+    "action": "click",
+    "value": null,
+    "label": "Click 152,303",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)",
+      "x": 152,
+      "y": 303,
+      "text": "",
+      "tag": "input"
+    },
+    "screenshot": "step-002.png"
+  },
+  {
+    "id": "f38e73e5-61d5-4e04-9cd6-e19e92452d6d",
+    "order": 3,
+    "action": "type",
+    "value": "Sa",
+    "label": "Type: Sa",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)"
+    },
+    "screenshot": "step-003.png"
+  },
+  {
+    "id": "fc7fa896-6de1-42e3-bf08-4b98a79fbf66",
+    "order": 4,
+    "action": "click",
+    "value": null,
+    "label": "Click DEV\nWholesale sign in\n\nUse the account details issued for your store.\n\n* Require",
+    "selector": {
+      "primary": "#root > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1)",
+      "x": 146,
+      "y": 418,
+      "text": "DEV\nWholesale sign in\n\nUse the account details issued for your store.\n\n* Require",
+      "tag": "form"
+    },
+    "screenshot": "step-004.png"
+  },
+  {
+    "id": "a59f8cb2-fbd0-4c7b-9d8b-3e858f3a5671",
+    "order": 5,
+    "action": "click",
+    "value": null,
+    "label": "Click 212,408",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)",
+      "x": 212,
+      "y": 408,
+      "text": "",
+      "tag": "input"
+    },
+    "screenshot": "step-005.png"
+  },
+  {
+    "id": "36b896c7-a168-48cb-9319-a6cdcdd3e0c0",
+    "order": 6,
+    "action": "type",
+    "value": "{{HFM_Ext_pass}}",
+    "label": "Type: {{HFM_Ext_pass}}",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)"
+    },
+    "screenshot": "step-006.png"
+  },
+  {
+    "id": "a8805bee-184e-4af3-9a00-a82b40e39a80",
+    "order": 7,
+    "action": "click",
+    "value": null,
+    "label": "Click Sign in",
+    "selector": {
+      "primary": "#root > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)",
+      "x": 204,
+      "y": 519,
+      "text": "Sign in",
+      "tag": "button"
+    },
+    "screenshot": "step-007.png"
+  },
+  {
+    "id": "33f19091-a5e0-4a7c-8ddb-122bcfedbf1d",
+    "order": 8,
+    "action": "click",
+    "value": null,
+    "label": "Click HFM Internal Production",
+    "selector": {
+      "primary": "main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > select:nth-of-type(1)",
+      "x": 126,
+      "y": 260,
+      "text": "HFM Internal Production",
+      "tag": "select"
+    },
+    "screenshot": "step-008.png"
+  },
+  {
+    "id": "823363be-4d6a-48f2-a88f-780409d09aed",
+    "order": 9,
+    "action": "type",
+    "value": "Hi-Tech",
+    "label": "Type: Hi-Tech",
+    "selector": {
+      "primary": "input[placeholder=\"Search stores\"]"
+    },
+    "screenshot": "step-009.png"
+  },
+  {
+    "id": "48716ec0-a9dc-4dd5-85d1-2fb291e0f439",
+    "order": 10,
+    "action": "click",
+    "value": null,
+    "label": "Click Hi-Tech\nStore 426",
+    "selector": {
+      "primary": "#\\:r2\\: > button:nth-of-type(1)",
+      "x": 118,
+      "y": 381,
+      "text": "Hi-Tech\nStore 426",
+      "tag": "button"
+    },
+    "screenshot": "step-010.png"
+  },
+  {
+    "id": "1c1f3e77-1407-4e1c-afdb-b6b2381124f9",
+    "order": 11,
+    "action": "click",
+    "value": null,
+    "label": "Click Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY",
+    "selector": {
+      "primary": "input[aria-label=\"Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY\"]",
+      "x": 654,
+      "y": 407,
+      "text": "Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY",
+      "tag": "input"
+    },
+    "screenshot": "step-011.png"
+  },
+  {
+    "id": "2404962f-8188-4e2d-bee3-6168be2257e1",
+    "order": 12,
+    "action": "click",
+    "value": null,
+    "label": "Click 649,420",
+    "selector": {
+      "primary": "section:nth-of-type(1) > div:nth-of-type(4) > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(6)",
+      "x": 649,
+      "y": 420,
+      "text": "",
+      "tag": "td"
+    },
+    "screenshot": "step-012.png"
+  },
+  {
+    "id": "e93b2aff-ae2e-4911-9f64-77f7ddb28175",
+    "order": 13,
+    "action": "click",
+    "value": null,
+    "label": "Click Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY",
+    "selector": {
+      "primary": "input[aria-label=\"Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY\"]",
+      "x": 638,
+      "y": 396,
+      "text": "Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY",
+      "tag": "input"
+    },
+    "screenshot": "step-013.png"
+  },
+  {
+    "id": "616dc084-8e8f-43c4-b6bf-29a94d833216",
+    "order": 14,
+    "action": "type",
+    "value": "2",
+    "label": "Type: 2",
+    "selector": {
+      "primary": "div:nth-of-type(4) > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(6) > input:nth-of-type(1)"
+    },
+    "screenshot": "step-014.png"
+  },
+  {
+    "id": "c3904d6c-59f2-4e88-9b6f-e2ee38f77bb4",
+    "order": 15,
+    "action": "click",
+    "value": null,
+    "label": "Click Comment for ASIAN - BABY / SHANGHI BOK CHOY",
+    "selector": {
+      "primary": "input[aria-label=\"Comment for ASIAN - BABY / SHANGHI BOK CHOY\"]",
+      "x": 889,
+      "y": 404,
+      "text": "Comment for ASIAN - BABY / SHANGHI BOK CHOY",
+      "tag": "input"
+    },
+    "screenshot": "step-015.png"
+  },
+  {
+    "id": "b8e83d49-20ec-4edb-8519-92411d785a59",
+    "order": 16,
+    "action": "type",
+    "value": "Test order ignore",
+    "label": "Type: Test order ignore",
+    "selector": null,
+    "screenshot": "step-016.png"
+  },
+  {
+    "id": "f0e01b16-cae9-481f-8b02-c442768176b8",
+    "order": 17,
+    "action": "click",
+    "value": null,
+    "label": "Click 829,165",
+    "selector": {
+      "primary": "#\\:r0\\:-1312\\%7C51-comment",
+      "x": 829,
+      "y": 165,
+      "text": "",
+      "tag": "td"
+    },
+    "screenshot": "step-017.png"
+  },
+  {
+    "id": "af9d64fd-41f5-4f5f-9c87-9ad34abd367b",
+    "order": 18,
+    "action": "press",
+    "value": "ArrowUp",
+    "label": "Press ArrowUp",
+    "selector": null,
+    "screenshot": "step-018.png",
+    "repeat": 18
+  }
+]
