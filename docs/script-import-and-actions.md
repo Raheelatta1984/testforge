@@ -15,16 +15,31 @@ The Render blueprint now ignores `library/**` and `logs/**`-only changes for bui
 3. Click **VALIDATE & PREVIEW**. This only parses/validates; it does not execute a browser, run uploaded source, install dependencies, save a recording, or publish anything.
 4. Resolve every diagnostic. Unsupported statements are errors, not silently skipped steps. Review the normalized actions, name and tags.
 5. Click **TEST BEFORE PUBLISHING**. A private draft runs sequentially outside both the recording database and published library. Wait for a passing result; failures, cancellation, expired tests and flaky results do not enable publication.
+   The panel names the state it is in: while nothing has been tested, while the test runs, after a failure (with the failing case's error) and after a receipt expires, **SAVE TO LIBRARY & PUBLISH** stays locked and the sentence underneath says which of those it is and what to do. The receipt is good for one hour, and the remaining minutes are shown next to the result.
+   Leaving the tab no longer costs you the test. The receipt is kept for the project and re-read when you come back, and after a full page reload the panel recovers a still-valid passing test from `GET /api/imports/tests` — with the steps it tested — so you can save without running the browser again. A single dropped status poll does not discard it either.
 6. Click **SAVE TO LIBRARY & PUBLISH**. The canonical recording and generated resource files use the existing GitHub publisher and its configured branch. The response distinguishes published, refused, retrying and local-only. Publication is not claimed unless verified.
+   **Optional override.** When the test cannot pass — a target environment that is down, steps you will finish later — **SAVE WITHOUT A PASSING TEST (OPTIONAL, MARKED UNVERIFIED)** publishes anyway. It needs a written reason and an explicit acknowledgement, and the recording is tagged `unverified`: the Library card carries an `UNVERIFIED` badge, `unverified: true` is returned by every listing and by `/api/plans/catalog`, and the tag filter has an "unverified only" switch. The default path is unchanged — no passing test, no publication — and the uploaded source is still never executed.
 7. Click **RUN SAVED STEPS**. TestForge executes the canonical actions sequentially, not the original source program.
 8. Open the Runs tab's **HTML REPORT** or **JSON REPORT**. The Library's **DOWNLOAD RUNNABLE PROJECT ZIP** includes the companion files needed by exported Python/JavaScript/TypeScript runners.
 
 The dashboard now tests before publication. **Draft isolation protects the library, not the target application:** browser/API actions can still change the target system. Test only authorized, non-production fixtures/accounts. A receipt binds the project, canonical steps, dataset, profiles, project variables, secret references and auth state to the successful test. Editing execution inputs requires another test. Receipts expire after one hour or a server restart; saving the same receipt twice does not create duplicate recordings. Drafts never enter the library, so an unrelated publish cannot accidentally publish them.
 
 `POST /api/imports/save` also enforces the passing `draft_id`; callers cannot bypass
-the import gate by omitting the receipt or setting `require_test: false`. Existing
-non-import recorder/editor publication paths are separate: this is not a claim
+the import gate by omitting the receipt or setting `require_test: false`. The only way
+past it is the override above, which has to name itself (`allow_untested: true`) and
+carry an `override_reason`; the recording it writes is permanently marked instead of
+being indistinguishable from a tested one. A refusal says which rule it hit — a
+non-passing test, inputs edited after the pass, a receipt from another project, or an
+expired receipt — rather than one sentence for all four.
+Existing non-import recorder/editor publication paths are separate: this is not a claim
 that every legacy recording/editor change has passed a full replay.
+
+`GET /api/imports/tests?project_id=…` lists the receipts this instance still holds
+(status, name, step count, case summary and seconds of life left); adding `?plan=true`
+to a single receipt returns the plan it tested, which is what lets a reloaded dashboard
+rebuild a save payload that still fingerprints identically. Resolved secrets are never
+in a receipt — only `{"env": "TF_SECRET_*"}` references — so this exposes nothing the
+uploader did not already write.
 
 Do not upload literal passwords, personal data or production files: canonical step inputs and upload fixtures are repository content. Use the secret references below; previously committed secrets still need rotation.
 

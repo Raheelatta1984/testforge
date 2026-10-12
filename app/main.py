@@ -702,23 +702,11 @@ def list_recordings(project_id: str, fast: bool = True):
             if catalog:
                 for proj in catalog.get("projects") or []:
                     if proj.get("id") == project_id:
-                        # Return fast version
-                        rows = []
-                        for rec in proj.get("recordings") or []:
-                            rows.append({
-                                "id": rec.get("id"),
-                                "project_id": project_id,
-                                "name": rec.get("name") or "",
-                                "start_url": rec.get("start_url") or "",
-                                "tags": rec.get("tags") or "",
-                                "parent_id": rec.get("parent_id"),
-                                "status": "active",
-                                "created_at": rec.get("created_at") or "",
-                                "step_count": rec.get("step_count") or 0,
-                                "source": "repository",
-                                "repository_path": rec.get("path") or library_store.recording_repo_path(project_id, rec.get("id")),
-                                "resources": rec.get("resources") or [],
-                            })
+                        # Return fast version. The row shape is shared with
+                        # library_store so this endpoint and the slow path can
+                        # never disagree about tags, parent or start_url.
+                        rows = [library_store.catalog_recording_row(project_id, rec)
+                                for rec in proj.get("recordings") or []]
                         rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
                         return JSONResponse(
                             content=rows,

@@ -43,6 +43,52 @@ function ActionComposer({ onSave, label = 'ADD STEP' }) {
   );
 }
 
+/* --- The import session survives leaving the tab ---------------------------
+   A passing draft test is a receipt the server keeps for an hour, but this panel
+   unmounts the moment another tab is opened (and a single failed status poll used
+   to clear it too). The user came back to a disabled SAVE button with a passing
+   test they could not use. Both caches exist so the receipt survives: the module
+   map covers a tab switch, sessionStorage covers a reload, and
+   GET /api/imports/tests covers a browser that lost both. */
+const importSessions = {};
+const sessionKey = projectId => 'tf_import_session_' + projectId;
+
+function loadImportSession(projectId) {
+  if (!projectId) return null;
+  if (importSessions[projectId]) return importSessions[projectId];
+  try {
+    const raw = window.sessionStorage.getItem(sessionKey(projectId));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.project_id === projectId) {
+      importSessions[projectId] = parsed;
+      return parsed;
+    }
+  } catch (_) { /* an unreadable session is simply not restored */ }
+  return null;
+}
+
+function saveImportSession(projectId, data) {
+  if (!projectId) return;
+  const payload = { ...data, project_id: projectId, saved_at: Date.now() };
+  importSessions[projectId] = payload;
+  try {
+    const raw = JSON.stringify(payload);
+    // Bounded on purpose: a 1 MiB upload preview must not be able to fill the
+    // ~5 MB quota and break the tab, so an oversized session is simply dropped.
+    if (raw.length <= 1500000) window.sessionStorage.setItem(sessionKey(projectId), raw);
+    else window.sessionStorage.removeItem(sessionKey(projectId));
+  } catch (_) {
+    try { window.sessionStorage.removeItem(sessionKey(projectId)); } catch (__) {}
+  }
+}
+
+function clearImportSession(projectId) {
+  if (!projectId) return;
+  delete importSessions[projectId];
+  try { window.sessionStorage.removeItem(sessionKey(projectId)); } catch (_) {}
+}
+
 function ImportScripts({ project, onSaved, onRun }) {
   const [files, setFiles] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -55,6 +101,10 @@ function ImportScripts({ project, onSaved, onRun }) {
   const [draft,setDraft] = useState(null);
   const [planOptions,setPlanOptions] = useState('{}');
   const [packs,setPacks]=useState([]);
+  // A dropped poll is reported but does not discard the receipt; only the server
+  // saying the receipt is gone does that.
+  const [pollNote,setPollNote]=useState('');
+  const pollFailures = useRef(0);
   // Template pack: one downloadable example per supported format. Loading one runs
   // the same preview as an upload, so a team can see the parsed steps before they
   // replace them with their own (and see that onboarding reports no errors).
@@ -67,8 +117,77 @@ function ImportScripts({ project, onSaved, onRun }) {
   const [variablePlan,setVariablePlan] = useState(null);
   const [adopted,setAdopted] = useState([]);
   const [existingVars,setExistingVars] = useState([]);
+  // Explicit "save without a passing test" override. Off by default and it takes
+  // both a written reason and a tick, because what it publishes never ran.
+  const [overrideOpen,setOverrideOpen]=useState(false);
+  const [overrideReason,setOverrideReason]=useState('');
+  const [overrideAck,setOverrideAck]=useState(false);
+  const generation = useRef(0);
   useEffect(()=>{API.get('/api/imports/packs').then(setPacks).catch(()=>{});},[]);
   useEffect(()=>{API.get('/api/imports/templates').then(data=>{setTemplates(data.templates||[]);setTemplatesNotice(data.notice||'');}).catch(()=>{});},[]);
+
+  /* Restore whatever this project last had: the parsed steps, the plan options and
+     the test receipt. Then confirm the receipt with the server, because an hour
+     later (or after a restart) it is gone and SAVE must not look available. */
+  const restore = async (projectId) => {
+    const session = loadImportSession(projectId);
+    const version = generation.current;
+    if (session && session.preview) {
+      setPreview(session.preview);
+      setPlanOptions(session.planOptions || '{}');
+      setName(session.name || session.preview.name || '');
+      setTags(session.tags || 'imported');
+      setSaved(session.saved || null);
+      setDraft(session.draft || null);
+      setNotice('Restored your last import for this project, including its test receipt. ' +
+        'The uploaded file itself is not kept — only the parsed steps.');
+    }
+    const draftId = session && session.draft && session.draft.id;
+    try {
+      if (draftId) {
+        const fresh = await API.get('/api/imports/tests/' + draftId);
+        if (version === generation.current) { setDraft(fresh); setPollNote(''); }
+      } else {
+        // Nothing local: ask the server whether a passing test still exists here.
+        const listed = await API.get('/api/imports/tests?project_id=' + encodeURIComponent(projectId));
+        const passing = (listed.drafts || []).find(row => row.status === 'passed' && !row.saved_recording_id);
+        if (!passing || version !== generation.current) return;
+        const full = await API.get('/api/imports/tests/' + passing.id + '?plan=true');
+        if (version !== generation.current || !full.plan) return;
+        const restoredPlan = { ...full.plan };
+        setDraft(full);
+        setPreview({ name: full.name || 'Imported recording', can_save: true, diagnostics: [],
+          steps: restoredPlan.steps || [], execution_plan: restoredPlan, restored: true });
+        setPlanOptions(JSON.stringify(restoredPlan, null, 2));
+        if (full.name) setName(full.name);
+        setNotice(`Recovered a passing test from ${new Date((full.created_at || 0) * 1000).toLocaleString()} ` +
+          `(${Math.round((full.expires_in_seconds || 0) / 60)} min of receipt life left). ` +
+          'You can save it to the library now without testing again.');
+      }
+    } catch (err) {
+      if (version !== generation.current) return;
+      // The receipt is gone (expired, pruned, or a restart). Say so instead of
+      // leaving a SAVE button that looks enabled and then refuses.
+      setDraft(null);
+      setPollNote('That test receipt is no longer valid: ' + err.message);
+    }
+  };
+
+  useEffect(() => {
+    generation.current++;
+    setPreview(null); setSaved(null); setFiles([]); setNotice(''); setError(''); setDraft(null);
+    setPlanOptions('{}'); setVariablePlan(null); setAdopted([]); setPollNote('');
+    setOverrideOpen(false); setOverrideReason(''); setOverrideAck(false);
+    if (project && project.id) restore(project.id);
+  }, [project && project.id]);
+
+  /* Keep the session cache in step with what is on screen, so leaving the tab and
+     coming back does not cost another upload and another test. */
+  useEffect(() => {
+    if (!project || !project.id || (!preview && !draft && !saved)) return;
+    saveImportSession(project.id, { preview, planOptions, name, tags, draft, saved });
+  }, [project && project.id, preview, planOptions, name, tags, draft, saved]);
+
   const base64ToBlob = (encoded, name) => {
     const raw = atob(encoded || '');
     const bytes = new Uint8Array(raw.length);
@@ -97,7 +216,6 @@ function ImportScripts({ project, onSaved, onRun }) {
     } catch(err) { if(version===generation.current) setError(err.message); }
     finally { setBusy(false); }
   };
-  const generation = useRef(0);
   const reviewVariables = async () => {
     if(!preview?.steps?.length) return;
     setBusy(true); setError(''); const version=generation.current;
@@ -119,6 +237,18 @@ function ImportScripts({ project, onSaved, onRun }) {
         assignments:chosen.map(item=>({name:item.name,value:item.value,is_secret:!!item.is_secret,category:item.category,create:!!item.create}))});
       if(version!==generation.current) return;
       setPreview({...preview,steps:result.steps}); setAdopted(result.created_variables || []);
+      // The plan options carry their own copy of the steps for an advanced plan.
+      // Rewriting only preview.steps left the plan pointing at the pre-adoption
+      // literals, so the test ran (and published) the values the user had just
+      // replaced. Keep the two in step.
+      setPlanOptions(prev=>{
+        try {
+          const opts=JSON.parse(prev);
+          if(!opts || typeof opts!=='object' || Array.isArray(opts)) return prev;
+          if(!Object.keys(opts).length) return prev;
+          return JSON.stringify({...opts,steps:result.steps},null,2);
+        } catch(_) { return prev; }
+      });
       setVariablePlan(null); setDraft(null); setSaved(null);
       setNotice(`${result.counts.variables_created} variable(s) created, ${result.counts.variables_reused} reused. Steps now reference the variables — test before publishing.`);
     } catch(err){if(version===generation.current)setError(err.message);}
@@ -130,8 +260,24 @@ function ImportScripts({ project, onSaved, onRun }) {
     let disposed=false, timer;
     const check=async()=>{
       if(document.hidden) {timer=setTimeout(check,1000);return;}
-      try {const result=await API.get('/api/imports/tests/'+draft.id);if(!disposed) setDraft(result);}
-      catch(err) {if(!disposed) {setError(err.message);setDraft(null);}}
+      try {
+        const result=await API.get('/api/imports/tests/'+draft.id);
+        if(!disposed) {pollFailures.current=0;setPollNote('');setDraft(result);}
+      } catch(err) {
+        if(!disposed) {
+          // Only the server saying the receipt is gone may discard it. A timeout,
+          // a restart-in-progress or one failed request keeps the last known state
+          // and tries again: throwing the receipt away here is what left SAVE
+          // disabled after a test that had already passed.
+          if(/not found|expired|no longer/i.test(err.message)) {
+            setDraft(null); setError(err.message);
+          } else {
+            pollFailures.current+=1;
+            setPollNote(`Could not read the test status (${err.message}). Retrying — the test keeps running on the server.`);
+            if(pollFailures.current>40) {setDraft(null);setError('Lost contact with the draft test: '+err.message);}
+          }
+        }
+      }
       if(!disposed) timer=setTimeout(check,500);
     };
     timer=setTimeout(check,200);
@@ -144,18 +290,17 @@ function ImportScripts({ project, onSaved, onRun }) {
       ...(Object.keys(opts).length ? {execution_plan:{...opts,steps:opts.steps || preview.steps}} : {})};
   };
   const testDraft=async()=>{
-    setBusy(true);setError('');setDraft(null);const version=generation.current;
+    setBusy(true);setError('');setDraft(null);setPollNote('');const version=generation.current;
     try {const result=await API.post('/api/imports/test',payload());if(version===generation.current) setDraft(result);}
     catch(err) {if(version===generation.current) setError(err.message);}
     finally {setBusy(false);}
   };
-  useEffect(() => { generation.current++; setPreview(null); setSaved(null); setFiles([]); setNotice(''); setError(''); setDraft(null);setPlanOptions('{}');setVariablePlan(null);setAdopted([]); }, [project.id]);
   const readBase64 = file => new Promise((resolve,reject) => {
     const reader=new FileReader(); reader.onerror=()=>reject(new Error('Unable to read '+file.name));
     reader.onload=()=>resolve(String(reader.result).split(',')[1]); reader.readAsDataURL(file);
   });
   const inspect = async () => {
-    setBusy(true); setError(''); setPreview(null); setSaved(null); setNotice('');setDraft(null);setVariablePlan(null);setAdopted([]);
+    setBusy(true); setError(''); setPreview(null); setSaved(null); setNotice('');setDraft(null);setVariablePlan(null);setAdopted([]);setPollNote('');
     const version=generation.current;
     try {
       if(!files.length || files.length>8 || files.reduce((n,f)=>n+f.size,0)>1048576) throw new Error('Choose 1–8 files totalling at most 1 MiB. One test per recording; Jenkins bundles include the referenced script.');
@@ -177,19 +322,47 @@ function ImportScripts({ project, onSaved, onRun }) {
       const result=await API.post('/api/imports/save',{...payload(), draft_id:draft?.id,require_test:true});
       if(version!==generation.current) return;
       setSaved(result); setNotice(result.publish_message || 'Saved locally. Check GitHub publishing status.');
-      setVariablePlan(null); setAdopted([]);
+      setVariablePlan(null); setAdopted([]); setOverrideOpen(false);
       onSaved(result);
     } catch(err) {if(version===generation.current) setError(err.message);}
     finally {setBusy(false);}
   };
+  const saveUnverified = async () => {
+    if(!preview?.can_save || !name.trim() || !overrideReason.trim() || !overrideAck) return;
+    setBusy(true); setError(''); const version=generation.current;
+    try {
+      const result=await API.post('/api/imports/save',
+        {...payload(), draft_id:draft?.id, allow_untested:true, override_reason:overrideReason.trim()});
+      if(version!==generation.current) return;
+      setSaved(result); setNotice(result.notice || 'Saved without a passing test; marked unverified in the library.');
+      setVariablePlan(null); setAdopted([]); setOverrideOpen(false);
+      onSaved(result);
+    } catch(err) {if(version===generation.current) setError(err.message);}
+    finally {setBusy(false);}
+  };
+  const testRunning = ['queued','running'].includes(draft?.status);
+  const receiptLive = draft?.status==='passed' && (draft?.expires_in_seconds===undefined || draft?.expires_in_seconds>0);
+  /* Why SAVE is unavailable, in words. A greyed-out button with no reason is what
+     made a passing test look like a broken gate. */
+  const lockReason = !preview || saved ? '' :
+    !preview.can_save ? 'SAVE is locked: the preview still reports errors. Fix them and run VALIDATE & PREVIEW again.' :
+    !name.trim() ? 'SAVE is locked: give the recording a name.' :
+    !draft ? 'SAVE is locked: nothing has been tested yet. Run TEST BEFORE PUBLISHING — a passing test is what authorises publication.' :
+    testRunning ? `SAVE is locked while the test runs (${draft.percent || 0}%).` :
+    !receiptLive ? (draft.status==='passed'
+      ? 'SAVE is locked: that passing test has expired. Run TEST BEFORE PUBLISHING again.'
+      : `SAVE is locked: the test finished as '${draft.status}'${draft.error ? ' — ' + draft.error : ''}. Fix it and test again, or use the unverified override below.`) :
+    '';
+  const canSave = !!preview?.can_save && !!name.trim() && receiptLive && !saved;
+  const canOverride = !!preview?.can_save && !!name.trim() && !saved && !testRunning;
   return e('details',{className:'border border-indigo-800 bg-slate-900 p-4 rounded-xl space-y-3'},
     e('summary',{className:'font-bold text-indigo-300 cursor-pointer'},'UPLOAD TEST SCRIPTS'),
     e('p',{className:'text-xs text-slate-300'},'Any format you already have: plain text/Markdown/logs, CSV/TSV/PSV or any smart table, Excel (.xlsx/.xls), Word (.docx), PDF text layers, XML/YAML, JUnit-style case lists, Selenium IDE (.side) or legacy HTML suites, Postman collections, Robot Framework, Cypress, supported Playwright Python/JS/TS, restricted Java/C# Selenium, HAR captures, BDD/Cucumber (.feature), or a restricted Jenkinsfile + its test script. The file is sniffed when the extension is unknown; preview reports unsupported syntax. Arbitrary code, shell commands, macros and custom step definitions never run.'),
     e('p',{className:'text-xs text-amber-300'},'Use {{variables}} instead of passwords. Saving uses the existing GitHub publication settings. Unsupported source is never silently treated as tested. No paid parser or AI service is used.'),
     e('label',{className:'block text-xs'},'Or start with a synthetic domain pack',
-      e('select',{'aria-label':'Synthetic domain pack',defaultValue:'',disabled:busy || ['queued','running'].includes(draft?.status),className:'block bg-slate-800 p-2 rounded',onChange:async ev=>{
+      e('select',{'aria-label':'Synthetic domain pack',defaultValue:'',disabled:busy || testRunning,className:'block bg-slate-800 p-2 rounded',onChange:async ev=>{
         const slug=ev.target.value;if(!slug) return;
-        setBusy(true);setError('');setDraft(null);setSaved(null);const version=generation.current;
+        setBusy(true);setError('');setDraft(null);setSaved(null);setPollNote('');const version=generation.current;
         try {const result=await API.get('/api/imports/packs/'+slug);if(version!==generation.current)return;
           result.execution_plan.variables={demo_url:result.demo_url};
           setPreview(result);setName(result.name);setPlanOptions(JSON.stringify(result.execution_plan,null,2));setNotice(result.notice);
@@ -207,12 +380,24 @@ function ImportScripts({ project, onSaved, onRun }) {
           return e('a',{href:'/api/imports/templates/'+entry.id,className:'text-indigo-300 underline text-xs'},entry.bundle?'DOWNLOAD (.zip)':`DOWNLOAD ${entry.files[0]}`);})(),
         e('a',{href:'/api/imports/templates.zip',className:'text-indigo-300 underline text-xs'},'DOWNLOAD ALL (.zip)'),
         e('a',{href:'/api/imports/template.csv',className:'text-indigo-300 underline text-xs'},'DOWNLOAD CSV TEMPLATE'))),
-    e('input',{key:project.id,type:'file',multiple:true,accept:'.csv,.tsv,.psv,.tab,.txt,.md,.markdown,.log,.rst,.rtf,.xlsx,.xls,.xlsm,.json,.jsonc,.xml,.yaml,.yml,.har,.html,.htm,.docx,.doc,.pdf,.py,.js,.ts,.mjs,.jsx,.tsx,.cs,.java,.feature,.bdd,.gherkin,.robot,.resource,.side,.jenkins,.groovy,Jenkinsfile','aria-label':'Upload test scripts',disabled:busy || ['queued','running'].includes(draft?.status),onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);},className:'block w-full text-xs'}),
-    e('button',{disabled:busy || !files.length || ['queued','running'].includes(draft?.status),onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'),
+    (preview || draft || saved) && e('div',{className:'flex flex-wrap gap-2 items-center'},
+      // A restored session is a convenience, not a trap: this is how the panel is
+      // emptied again, which also drops the persisted receipt for this project.
+      e('button',{type:'button',className:'key-btn',disabled:busy || testRunning,onClick:()=>{
+        clearImportSession(project.id);
+        setFiles([]);setPreview(null);setSaved(null);setDraft(null);setNotice('');setError('');setPollNote('');
+        setPlanOptions('{}');setVariablePlan(null);setAdopted([]);
+        setOverrideOpen(false);setOverrideReason('');setOverrideAck(false);
+      }},'CLEAR AND START A NEW IMPORT'),
+      saved && e('span',{className:'text-[10px] text-emerald-300'},
+        `Saved as "${saved.name}"${saved.unverified ? ' · UNVERIFIED (no passing test)' : ' · tested before publishing'}`)),
+    e('input',{key:project.id,type:'file',multiple:true,accept:'.csv,.tsv,.psv,.tab,.txt,.md,.markdown,.log,.rst,.rtf,.xlsx,.xls,.xlsm,.json,.jsonc,.xml,.yaml,.yml,.har,.html,.htm,.docx,.doc,.pdf,.py,.js,.ts,.mjs,.jsx,.tsx,.cs,.java,.feature,.bdd,.gherkin,.robot,.resource,.side,.jenkins,.groovy,Jenkinsfile','aria-label':'Upload test scripts',disabled:busy || testRunning,onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);setPollNote('');clearImportSession(project.id);},className:'block w-full text-xs'}),
+    e('button',{disabled:busy || !files.length || testRunning,onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'),
     error && e('p',{role:'alert',className:'text-red-300 text-xs'},error),
+    pollNote && e('p',{role:'status',className:'text-amber-300 text-xs'},pollNote),
     notice && e('p',{role:'status',className:'text-emerald-300 text-xs'},notice),
     preview && e('div',{className:'space-y-2'},
-      e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?'ready to save':'corrections required'} · sequential execution`),
+      e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?'ready to save':'corrections required'} · sequential execution` + (preview.restored ? ' · recovered receipt' : '')),
       preview.detected && e('p',{className:'text-xs text-indigo-300'},`Detected as ${preview.detected.format} — ${preview.detected.why}`),
       e('button',{onClick:reviewVariables,disabled:busy || !preview.steps.length,className:'bg-amber-700 px-3 py-2 rounded text-xs disabled:opacity-50'},'REVIEW INPUT VALUES → VARIABLES'),
       adopted.length>0 && e('p',{role:'status',className:'text-xs text-emerald-300'},`Variables created: ${adopted.map(v=>v.name).join(', ')}`),
@@ -237,21 +422,42 @@ function ImportScripts({ project, onSaved, onRun }) {
       (preview.diagnostics||[]).some(d=>d.severity==='note') && e('details',{className:'border border-slate-700 p-2 rounded'},
         e('summary',{className:'text-xs cursor-pointer text-slate-400'},'Import notes (non-blocking)'),
         (preview.diagnostics||[]).filter(d=>d.severity==='note').map((d,i)=>e('p',{key:i,className:'text-xs text-slate-400'},`${d.file}:${d.line} — ${d.message}`))),
-      e('div',{className:'max-h-64 overflow-auto space-y-1'},preview.steps.map(s=>e('div',{key:s.order,className:'bg-slate-950 p-2 rounded text-xs break-all'},`#${s.order} ${s.action} · ${s.selector.primary || ''} · ${s.action==='upload_file'?'[fixture]':s.value}`))),
+      e('div',{className:'max-h-64 overflow-auto space-y-1'},preview.steps.map(s=>e('div',{key:s.order,className:'bg-slate-950 p-2 rounded text-xs break-all'},`#${s.order} ${s.action} · ${(s.selector||{}).primary || ''} · ${s.action==='upload_file'?'[fixture]':s.value}`))),
       e('input',{'aria-label':'Imported recording name',value:name,onChange:ev=>setName(ev.target.value),placeholder:'Recording name',className:'w-full bg-slate-800 p-2 rounded text-xs'}),
       e('input',{'aria-label':'Imported test tags',value:tags,onChange:ev=>setTags(ev.target.value),placeholder:'Comma-separated tags',className:'w-full bg-slate-800 p-2 rounded text-xs'}),
       e('details',{className:'border border-slate-700 p-3 rounded'},
         e('summary',{className:'text-xs cursor-pointer'},'Datasets, reusable flows, fixtures & profiles (optional)'),
         e('p',{className:'text-xs text-slate-400 my-2'},'JSON options: dataset rows, variables, setup/teardown steps, named flows, matrix [{browser:"chromium",device:"mobile"}], retries 0 or 1. Secret values use {"env":"TF_SECRET_NAME"}. No parallelism. Extra cases consume work only when you explicitly TEST/RUN.'),
-        e('textarea',{'aria-label':'Execution plan options',value:planOptions,disabled:busy || ['queued','running'].includes(draft?.status),onChange:ev=>{setPlanOptions(ev.target.value);setDraft(null);setSaved(null);},rows:6,className:'w-full bg-slate-950 p-2 font-mono text-xs'})),
-      e('button',{onClick:testDraft,disabled:busy || !preview.can_save || ['queued','running'].includes(draft?.status),className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},'TEST BEFORE PUBLISHING'),
+        e('textarea',{'aria-label':'Execution plan options',value:planOptions,disabled:busy || testRunning,onChange:ev=>{setPlanOptions(ev.target.value);setDraft(null);setSaved(null);},rows:6,className:'w-full bg-slate-950 p-2 font-mono text-xs'})),
+      e('button',{onClick:testDraft,disabled:busy || !preview.can_save || testRunning,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},testRunning?'TESTING…':'TEST BEFORE PUBLISHING'),
       draft && e('div',{role:'status',className:'text-xs space-y-2'},
-        e('p',{},`Draft test: ${draft.status} · ${draft.percent || 0}% · ${saved ? 'recording saved; see publication status above' : 'not in GitHub/library'}`),
+        e('p',{className:draft.status==='passed'?'text-emerald-300 font-bold':draft.status==='failed'?'text-red-300 font-bold':''},
+          `Draft test: ${draft.status} · ${draft.percent || 0}% · ${saved ? 'recording saved; see publication status above' : 'not in GitHub/library'}` +
+          (receiptLive ? ` · receipt valid for ${Math.round((draft.expires_in_seconds || 0) / 60)} more min` : '')),
+        draft.summary && e('p',{className:'text-slate-400'},`${draft.summary.passed}/${draft.summary.total} case(s) passed`),
         draft.error && e('p',{className:'text-red-300'},draft.error),
         draft.result && e('details',{},e('summary',{},'Test results'),e('pre',{className:'max-h-64 overflow-auto'},JSON.stringify(draft.result,null,2))),
-        ['queued','running'].includes(draft.status) && e('button',{className:'key-btn',onClick:async()=>{await API.post('/api/imports/tests/'+draft.id+'/cancel',{});}},'CANCEL DRAFT TEST')),
-      e('button',{onClick:save,disabled:busy || draft?.status!=='passed' || !preview.can_save || !name.trim() || !!saved,className:'bg-emerald-700 px-4 py-2 rounded text-xs disabled:opacity-50'},saved?'SAVED':'SAVE TO LIBRARY & PUBLISH'),
-      saved && e('button',{onClick:()=>onRun(saved),className:'ml-2 bg-indigo-600 px-4 py-2 rounded text-xs'},'RUN SAVED STEPS')
+        testRunning && e('button',{className:'key-btn',onClick:async()=>{await API.post('/api/imports/tests/'+draft.id+'/cancel',{});}},'CANCEL DRAFT TEST'),
+        !testRunning && draft.status!=='passed' && e('button',{className:'key-btn',onClick:testDraft,disabled:busy},'TEST AGAIN')),
+      e('div',{className:'flex flex-wrap items-center gap-2'},
+        e('button',{onClick:save,disabled:busy || !canSave,'aria-disabled':!canSave,
+          title:lockReason || 'Save the tested steps into the library and publish',
+          className:'bg-emerald-700 px-4 py-2 rounded text-xs disabled:opacity-50'},saved?'SAVED':'SAVE TO LIBRARY & PUBLISH'),
+        saved && e('button',{onClick:()=>onRun(saved),className:'bg-indigo-600 px-4 py-2 rounded text-xs'},'RUN SAVED STEPS')),
+      lockReason && e('p',{role:'note',className:'text-[11px] text-amber-300'},lockReason),
+      canOverride && e('details',{className:'border border-amber-800 bg-slate-950 p-3 rounded space-y-2',open:overrideOpen,onToggle:ev=>setOverrideOpen(ev.target.open)},
+        e('summary',{className:'text-xs font-bold text-amber-300 cursor-pointer'},'SAVE WITHOUT A PASSING TEST (OPTIONAL, MARKED UNVERIFIED)'),
+        e('p',{className:'text-[11px] text-slate-400'},
+          'Publication normally needs a passing draft test. This override exists for the times you must bank the script anyway — ' +
+          'a target environment that is down, or steps you will finish later. The recording is saved to the library tagged ' +
+          '"unverified" so nobody mistakes it for a tested one, and the uploaded source is still never executed.'),
+        e('input',{'aria-label':'Reason for saving unverified',value:overrideReason,placeholder:'Why is this being saved without a passing test?',
+          onChange:ev=>setOverrideReason(ev.target.value.slice(0,200)),className:'w-full bg-slate-800 p-2 rounded text-xs'}),
+        e('label',{className:'flex items-center gap-2 text-[11px] text-slate-300'},
+          e('input',{type:'checkbox','aria-label':'Acknowledge this recording is unverified',checked:overrideAck,onChange:ev=>setOverrideAck(ev.target.checked)}),
+          'I understand this recording has not passed a test and will be listed as unverified.'),
+        e('button',{onClick:saveUnverified,disabled:busy || !overrideReason.trim() || !overrideAck,
+          className:'bg-amber-700 px-4 py-2 rounded text-xs disabled:opacity-50'},'SAVE AS UNVERIFIED'))
     )
   );
 }

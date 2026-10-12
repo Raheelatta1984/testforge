@@ -44,6 +44,26 @@ from app.db import (
 LOCK = threading.RLock()
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,80}$")
 
+# A recording saved through the explicit "no passing test" override carries this
+# tag. It is a tag rather than a new column so the marker travels with the
+# recording into catalog.json, recording.json and every export, and so the
+# Library can badge and filter it without a schema migration.
+UNVERIFIED_TAG = "unverified"
+
+
+def is_unverified(tags) -> bool:
+    """Was this recording published without a passing draft test?"""
+    return UNVERIFIED_TAG in {str(part).strip().lower()
+                              for part in re.split(r"[\s,]+", str(tags or "")) if part}
+
+
+def mark_unverified(tags) -> str:
+    """Append the unverified marker to a tag string, keeping it deduplicated."""
+    parts = [str(part).strip() for part in re.split(r"[\s,]+", str(tags or "")) if part.strip()]
+    if not any(part.lower() == UNVERIFIED_TAG for part in parts):
+        parts.append(UNVERIFIED_TAG)
+    return ",".join(parts)[:500]
+
 # --- Caching layer for super fast loads ---
 _CACHE: dict[str, Any] = {
     "projects": None,  # (mtime, timestamp, data)
@@ -613,6 +633,7 @@ def _recording_payload(data: dict, *, with_steps: bool, published: bool | None =
         "source": "repository",
         "repository_path": recording_repo_path(data["project_id"], data["id"]),
         "resources": list(data.get("resources") or []),
+        "unverified": is_unverified(data.get("tags") or ""),
     }
     if published is not None:
         payload["published"] = published
@@ -620,6 +641,37 @@ def _recording_payload(data: dict, *, with_steps: bool, published: bool | None =
         payload["steps"] = [_step_payload(step) for step in steps]
         payload["execution_plan"] = data.get("execution_plan")
     return payload
+
+
+def catalog_recording_row(project_id: str, rec: dict, project_name: str | None = None) -> dict:
+    """One catalog.json recording entry shaped exactly like ``_recording_payload``.
+
+    Every reader of the catalog used to hand-roll this dictionary, and they had
+    already drifted: one dropped ``tags`` and ``parent_id``, another hardcoded an
+    empty ``start_url``. One shaper means a listing can no longer disagree with
+    the recording file it was built from.
+    """
+    tags = rec.get("tags") or ""
+    row = {
+        "id": rec.get("id"),
+        "project_id": project_id,
+        "parent_id": rec.get("parent_id"),
+        "name": rec.get("name") or "",
+        "start_url": rec.get("start_url") or "",
+        "status": "active",
+        "tags": tags,
+        # The catalog records when the recording was created; a fresh timestamp
+        # here made every row look equally new.
+        "created_at": rec.get("created_at") or _iso(datetime.utcnow()),
+        "step_count": rec.get("step_count") or 0,
+        "source": "repository",
+        "repository_path": rec.get("path") or recording_repo_path(project_id, rec.get("id")),
+        "resources": rec.get("resources") or [],
+        "unverified": is_unverified(tags),
+    }
+    if project_name is not None:
+        row["project_name"] = project_name
+    return row
 
 
 def _read_project(project_id: str) -> dict | None:
@@ -785,21 +837,13 @@ def list_recordings(project_id: str) -> list[dict]:
             if proj.get("id") == project_id:
                 rows = []
                 for rec in proj.get("recordings") or []:
-                    # Need full data for step_count etc, but catalog has it
-                    rows.append({
-                        "id": rec.get("id"),
-                        "project_id": project_id,
-                        "name": rec.get("name") or "",
-                        "start_url": "",
-                        "status": "active",
-                        # The catalog records when the recording was created; a
-                        # fresh timestamp here made every row look equally new.
-                        "created_at": rec.get("created_at") or _iso(datetime.utcnow()),
-                        "step_count": rec.get("step_count") or 0,
-                        "source": "repository",
-                        "repository_path": rec.get("path") or recording_repo_path(project_id, rec.get("id")),
-                        "resources": rec.get("resources") or [],
-                    })
+                    # The catalog is written by _write_catalog from recording.json,
+                    # so it already carries every field the list view needs. This
+                    # path used to hardcode start_url="" and drop tags/parent_id
+                    # entirely, which meant the fast listing disagreed with the
+                    # slow one: the Library showed untagged, ungrouped recordings
+                    # with no URL, and a project batch replayed with no start_url.
+                    rows.append(catalog_recording_row(project_id, rec))
                 # Sort by name or keep catalog order
                 rows.sort(key=lambda x: x.get("created_at") or "", reverse=True)
                 # Cache
@@ -1940,6 +1984,7 @@ def plan_catalog() -> dict:
             "project_name": item.get("project_name"), "name": item.get("name"),
             "start_url": item.get("start_url") or "", "tags": item.get("tags") or "",
             "parent_id": item.get("parent_id"), "step_count": item.get("step_count") or 0,
+            "unverified": bool(item.get("unverified")),
         })
     inputs = {}
     try:
@@ -2679,20 +2724,7 @@ def list_all_recordings_fast() -> list[dict]:
         pname = proj.get("name") or proj.get("id")
         pid = proj.get("id")
         for rec in proj.get("recordings") or []:
-            all_recs.append({
-                "id": rec.get("id"),
-                "project_id": pid,
-                "project_name": pname,
-                "name": rec.get("name") or "",
-                "start_url": rec.get("start_url") or "",
-                "tags": rec.get("tags") or "",
-                "parent_id": rec.get("parent_id"),
-                "created_at": rec.get("created_at"),
-                "step_count": rec.get("step_count") or 0,
-                "resources": rec.get("resources") or [],
-                "repository_path": rec.get("path") or "",
-                "source": "repository",
-            })
+            all_recs.append(catalog_recording_row(pid, rec, project_name=pname))
     return all_recs
 
 

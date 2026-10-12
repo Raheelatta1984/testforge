@@ -623,5 +623,188 @@ class VariableOnboardingTests(unittest.TestCase):
         self.assertEqual(cached['generated_at'], payload['generated_at'])
 
 
+def fake_run_plan(status='passed'):
+    """Stand in for the browser: the draft worker's own result shaping, no Chromium.
+
+    The real draft test needs a browser; these regressions are about the receipt
+    and the publication gate around it, not about replaying steps.
+    """
+    async def run(plan, values, artifact_dir, **options):
+        Path(artifact_dir).mkdir(parents=True, exist_ok=True)
+        total = len(plan['dataset']) * len(plan['matrix'])
+        cases = [{'case': i + 1, 'row': 1, 'browser': 'chromium', 'device': 'desktop',
+                  'status': status,
+                  'attempts': [{'attempt': 1, 'status': status,
+                                'steps': [{'stage': 'steps', 'step': n + 1, 'repeat': 1,
+                                           'action': step['action'], 'status': status}
+                                          for n, step in enumerate(plan['steps'])]}]}
+                 for i in range(total)]
+        return {'status': status, 'cases': cases, 'total': total, 'sequential': True}
+    return run
+
+
+class PublicationGateTests(unittest.TestCase):
+    """PASS -> SAVE TO LIBRARY, receipt recovery, and the explicit override."""
+
+    def draft(self, client, project_id, steps, name='Imported greeting', plan=None, status='passed'):
+        """Run a draft test to a terminal state and return its receipt."""
+        from app import import_drafts
+        body = {'project_id': project_id, 'name': name, 'tags': 'imported', 'steps': steps}
+        if plan is not None:
+            body['execution_plan'] = plan
+        with patch.object(import_drafts, 'run_plan', fake_run_plan(status)):
+            started = client.post('/api/imports/test', json=body)
+            self.assertEqual(started.status_code, 202, started.text)
+            draft_id = started.json()['id']
+            for _ in range(400):
+                receipt = client.get('/api/imports/tests/' + draft_id).json()
+                if receipt['status'] not in {'queued', 'running'}:
+                    break
+        self.assertEqual(receipt['status'], status, receipt)
+        return body, receipt
+
+    def test_UT_IMP_45_passing_receipt_is_listed_and_restorable(self):
+        from app import import_drafts
+        project = library_store.create_project('Receipt recovery', 'http://example.test')
+        other = library_store.create_project('Another project', 'http://example.test')
+        preview = parse_file('greeting.csv', CSV)
+        self.assertTrue(preview['can_save'], preview['diagnostics'])
+        with TestClient(app) as client, patch.object(library_store, '_finish', return_value=False):
+            body, receipt = self.draft(client, project['id'], preview['steps'])
+            # The panel keeps its draft in component state, which React discards on
+            # a tab switch; this listing is how it gets the passing test back.
+            listed = client.get('/api/imports/tests', params={'project_id': project['id']})
+            self.assertEqual(listed.status_code, 200, listed.text)
+            rows = listed.json()['drafts']
+            self.assertEqual([row['id'] for row in rows], [receipt['id']])
+            self.assertEqual(rows[0]['status'], 'passed')
+            self.assertEqual(rows[0]['name'], 'Imported greeting')
+            self.assertEqual(rows[0]['project_id'], project['id'])
+            self.assertGreater(rows[0]['expires_in_seconds'], 3000)
+            # A listing carries a summary, not every case of every attempt.
+            self.assertNotIn('result', rows[0])
+            self.assertEqual(rows[0]['summary'], {'total': 1, 'passed': 1, 'failed': 0})
+            # Another project must not see this receipt.
+            self.assertEqual(client.get('/api/imports/tests',
+                                        params={'project_id': other['id']}).json()['drafts'], [])
+            # The tested plan is what lets a reloaded panel rebuild a save payload
+            # that still fingerprints identically.
+            detail = client.get('/api/imports/tests/' + receipt['id'], params={'plan': 'true'}).json()
+            self.assertEqual([s['action'] for s in detail['plan']['steps']],
+                             [s['action'] for s in preview['steps']])
+            # ...and it is left out of the twice-a-second polling response.
+            self.assertNotIn('plan', client.get('/api/imports/tests/' + receipt['id']).json())
+            # The receipt is readable from disk, not only from the worker's memory:
+            # that is the state the panel is in after a reload.
+            import_drafts._active = None
+            saved = client.post('/api/imports/save', json={**body, 'draft_id': receipt['id'],
+                                                           'require_test': True})
+            self.assertEqual(saved.status_code, 201, saved.text)
+            self.assertTrue(saved.json()['tested'])
+            self.assertFalse(saved.json().get('unverified'))
+
+    def test_UT_IMP_46_refusals_name_their_cause(self):
+        project = library_store.create_project('Refusal wording', 'http://example.test')
+        preview = parse_file('greeting.csv', CSV)
+        with TestClient(app) as client, patch.object(library_store, '_finish', return_value=False):
+            body, failed = self.draft(client, project['id'], preview['steps'], status='failed')
+            response = client.post('/api/imports/save', json={**body, 'draft_id': failed['id']})
+            self.assertEqual(response.status_code, 422, response.text)
+            # "A passing test is required" told a user whose test had passed that
+            # the gate was broken; each cause now says what to do instead.
+            self.assertIn("'failed', not 'passed'", response.json()['detail'])
+            # Editing the inputs after a pass invalidates the receipt, and says so.
+            _body, passed = self.draft(client, project['id'], preview['steps'])
+            edited = {**body, 'steps': normalize_steps(preview['steps'][:-1]),
+                      'draft_id': passed['id']}
+            response = client.post('/api/imports/save', json=edited)
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertIn('changed since that test passed', response.json()['detail'])
+            # A receipt belongs to the project it was tested against.
+            other = library_store.create_project('Wrong project', 'http://example.test')
+            response = client.post('/api/imports/save', json={**body, 'project_id': other['id'],
+                                                              'draft_id': passed['id']})
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertIn('different project', response.json()['detail'])
+
+    def test_UT_IMP_47_unverified_override_is_explicit_and_marked(self):
+        project = library_store.create_project('Override save', 'http://example.test')
+        preview = parse_file('greeting.csv', CSV)
+        # _publish_unlocked rather than _finish: _finish also rewrites catalog.json,
+        # and a listing test that mocks the catalog write would prove nothing.
+        with TestClient(app) as client, patch.object(library_store, '_publish_unlocked', return_value=False):
+            body, failed = self.draft(client, project['id'], preview['steps'], status='failed')
+            # No reason, no save: the override has to be asked for in words.
+            refused = client.post('/api/imports/save', json={**body, 'allow_untested': True})
+            self.assertEqual(refused.status_code, 422, refused.text)
+            self.assertIn('override_reason', refused.json()['detail'])
+            self.assertEqual(library_store.list_recordings(project['id']), [])
+            # require_test:false is still not a bypass (UT-PLAN-12).
+            self.assertEqual(client.post('/api/imports/save',
+                                         json={**body, 'require_test': False}).status_code, 422)
+            saved = client.post('/api/imports/save', json={**body, 'draft_id': failed['id'],
+                                                           'allow_untested': True,
+                                                           'override_reason': 'Target UAT env is down'})
+            self.assertEqual(saved.status_code, 201, saved.text)
+            payload = saved.json()
+            self.assertTrue(payload['unverified'])
+            self.assertFalse(payload['tested'])
+            self.assertEqual(payload['override_reason'], 'Target UAT env is down')
+            self.assertEqual(payload['draft_status'], 'failed')
+            self.assertIn(library_store.UNVERIFIED_TAG, payload['tags'])
+            self.assertEqual(payload['step_count'], 4)
+            # The marker travels with the recording into every library view.
+            self.assertTrue(library_store.get_recording(payload['id'])['unverified'])
+            self.assertTrue(library_store.list_recordings(project['id'])[0]['unverified'])
+            listed = client.get('/api/library/recordings').json()
+            row = next(item for item in listed if item['id'] == payload['id'])
+            self.assertTrue(row['unverified'])
+            self.assertEqual(row['tags'], payload['tags'])
+            fast = client.get(f"/api/projects/{project['id']}/recordings",
+                              params={'fast': 'true'}).json()
+            self.assertTrue(next(item for item in fast if item['id'] == payload['id'])['unverified'])
+            self.assertTrue(next(item for item in client.get('/api/plans/catalog').json()['recordings']
+                                 if item['id'] == payload['id'])['unverified'])
+            # The uploaded source is still never executed: only canonical steps land.
+            self.assertEqual([s['action'] for s in library_store.get_recording(payload['id'])['steps']],
+                             ['navigate', 'fill', 'click', 'assert_text'])
+
+    def test_UT_IMP_48_library_listing_keeps_tags_parent_and_url(self):
+        """The catalog fast path used to drop the fields the catalog stores."""
+        project = library_store.create_project('Listing shape', 'http://example.test')
+        parent = library_store.create_recording(project['id'], 'Parent', 'http://example.test/a',
+                                                tags='smoke,imported')
+        child = library_store.create_recording(project['id'], 'Child', 'http://example.test/b',
+                                               parent_id=parent['id'], tags='regression')
+        with TestClient(app) as client:
+            # The catalog exists now, so both readers take the fast path.
+            self.assertTrue((library_store.library_dir() / 'catalog.json').is_file())
+            rows = {row['id']: row for row in library_store.list_recordings(project['id'])}
+            self.assertEqual(rows[parent['id']]['tags'], 'smoke,imported')
+            self.assertEqual(rows[parent['id']]['start_url'], 'http://example.test/a')
+            self.assertIsNone(rows[parent['id']]['parent_id'])
+            self.assertEqual(rows[child['id']]['parent_id'], parent['id'])
+            self.assertEqual(rows[child['id']]['start_url'], 'http://example.test/b')
+            self.assertFalse(rows[child['id']]['unverified'])
+            # The API and the store must not disagree about the same recording.
+            for endpoint in (f"/api/projects/{project['id']}/recordings",
+                             '/api/library/recordings'):
+                listed = {row['id']: row for row in client.get(endpoint).json()}
+                for rid in (parent['id'], child['id']):
+                    self.assertEqual(listed[rid]['tags'], rows[rid]['tags'], endpoint)
+                    self.assertEqual(listed[rid]['start_url'], rows[rid]['start_url'], endpoint)
+                    self.assertEqual(listed[rid]['parent_id'], rows[rid]['parent_id'], endpoint)
+
+    def test_UT_IMP_49_unverified_tag_helpers(self):
+        self.assertTrue(library_store.is_unverified('imported,unverified'))
+        self.assertTrue(library_store.is_unverified('UNVERIFIED'))
+        self.assertFalse(library_store.is_unverified('imported,smoke'))
+        self.assertFalse(library_store.is_unverified(''))
+        self.assertFalse(library_store.is_unverified(None))
+        self.assertEqual(library_store.mark_unverified('imported'), 'imported,unverified')
+        self.assertEqual(library_store.mark_unverified('imported,unverified'), 'imported,unverified')
+        self.assertEqual(library_store.mark_unverified(''), 'unverified')
+
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

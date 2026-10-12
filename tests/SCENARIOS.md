@@ -263,6 +263,11 @@ These unit/API cases live in `tests/test_imports.py` and are included by the har
 | UT-IMP-42 | `variable-plan`/`variables` on a recording rewrite stored steps and are idempotent on retry. |
 | UT-IMP-43 | Import `variable-plan`/`variables` endpoints propose and create variables without saving. |
 | UT-IMP-44 | `/api/plans/catalog` returns recordings, inputs and variables in one cached read. |
+| UT-IMP-45 | A passing receipt is listed by `GET /api/imports/tests`, carries its lifetime, and still authorises a save when read back from disk. |
+| UT-IMP-46 | Each refusal names its own cause: a non-passing test, inputs edited after the pass, and a receipt from another project. |
+| UT-IMP-47 | The unverified override needs `allow_untested` **and** a written reason, marks the recording in every library view, and still never executes the source. |
+| UT-IMP-48 | The catalog fast path keeps `tags`, `parent_id` and `start_url`, so the API and the store cannot disagree about one recording. |
+| UT-IMP-49 | The `unverified` tag helpers recognise and add the marker without duplicating it. |
 
 ## Onboarding formats, recorded labels and the template pack
 
@@ -296,6 +301,7 @@ HTTP server. Set `TF_TEST_BROWSER=1`; the export parity case also needs
 | BR-UI-01 | Actual dashboard CSV upload → preview → isolated test → save → replay → report, then a two-row synthetic domain plan → test → save; no browser console errors. |
 | BR-UI-02 | Scenario inputs, a secret variable and a PDF report on the live dashboard. |
 | BR-UI-03 | The reported recorded-label export is uploaded in the dashboard: zero errors, "ready to save", isolated test passes, the recording saves and replays to a passing run. |
+| BR-UI-04 | A failed test leaves SAVE locked *with the reason on screen*; the explicit override saves it marked UNVERIFIED; a passed test unlocks SAVE and keeps it unlocked after opening another tab and returning; the Library lists recordings from every project. |
 
 `BR-UI-01` lives in `tests/test_dashboard_import.py` and requires an isolated server via
 `TF_TEST_APP_URL`. It refuses a publishing-enabled instance. Never target production.

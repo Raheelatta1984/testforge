@@ -38,29 +38,81 @@ async def body_json(request):
         raise HTTPException(422, "Expected a bounded JSON object")
 
 
+MAX_OVERRIDE_REASON = 200
+
+
+def unverified_override(body):
+    """The operator's explicit reason for saving without a passing test, or None.
+
+    Deliberately not a boolean the dashboard can send by accident: the override has
+    to be asked for by name *and* carry a written reason, because the recording it
+    produces is published to the library marked as never having run. Omitting the
+    receipt, or sending ``require_test: false``, still refuses -- that gate is
+    unchanged (UT-PLAN-12).
+    """
+    if body.get('allow_untested') is not True:
+        return None
+    reason = body.get('override_reason')
+    if not isinstance(reason, str) or not reason.strip():
+        raise ValueError(
+            'Saving without a passing test needs a written reason in override_reason '
+            '(the recording is published marked "unverified").')
+    return reason.strip()[:MAX_OVERRIDE_REASON]
+
+
 def save_import(body):
     project_id = body.get("project_id")
     name = body.get("name")
     if not isinstance(project_id, str) or not isinstance(name, str) or not name.strip():
         raise ValueError("Select a project and provide a recording name")
-    if not body.get('draft_id'):
-        raise ValueError('Test the imported steps first; a passing draft_id is required')
     from app import import_drafts
-    receipt, tested_plan = import_drafts.verified(body['draft_id'], project_id,
-        body.get('execution_plan') or {'steps': body.get('steps')})
-    if receipt.get('saved_recording_id'):
-        existing = library_store.get_recording(receipt['saved_recording_id'])
-        if existing is None:
-            raise ValueError('Previously saved recording was deleted; test again')
-        return {**existing, 'published': False, 'publish_message': 'Already saved; inspect repository sync status', 'already_saved': True}
-    # Ordinary imported scripts keep the original single-run/batch representation.
     plan = body.get('execution_plan')
-    steps = normalize_steps(tested_plan['steps'] if plan else body.get("steps"))
+    override = unverified_override(body)
+    receipt = None
+    tested_plan = None
+    if override is None:
+        if not body.get('draft_id'):
+            raise ValueError('Test the imported steps first; a passing draft_id is required')
+        receipt, tested_plan = import_drafts.verified(body['draft_id'], project_id,
+            plan or {'steps': body.get('steps')})
+        if receipt.get('saved_recording_id'):
+            existing = library_store.get_recording(receipt['saved_recording_id'])
+            if existing is None:
+                raise ValueError('Previously saved recording was deleted; test again')
+            return {**existing, 'published': False, 'publish_message': 'Already saved; inspect repository sync status', 'already_saved': True}
+    elif body.get('draft_id'):
+        # Keep the audit trail even though this receipt did not authorise the save.
+        try:
+            receipt = import_drafts.read(body['draft_id'])
+        except ValueError:
+            receipt = None
+    # Ordinary imported scripts keep the original single-run/batch representation.
+    if tested_plan is not None:
+        steps = normalize_steps(tested_plan['steps'] if plan else body.get("steps"))
+    elif plan:
+        from app.plan_runtime import normalize_plan
+        # No receipt means nothing validated this plan yet: expand it here so the
+        # saved steps are exactly what a run would execute. Still never executed.
+        steps = normalize_steps(normalize_plan(plan)['steps'])
+    else:
+        steps = normalize_steps(body.get("steps"))
     # No partial imported script is silently saved: clients must supply a reviewed
     # canonical step list. Save never runs or publishes the uploaded source code.
     start_url = next((s["value"] for s in steps if s["action"] == "navigate"), "")
-    result = library_store.create_recording(project_id, name, start_url, steps=steps, tags=str(body.get("tags") or "imported"), execution_plan=plan)
-    if receipt:
+    tags = str(body.get("tags") or "imported")
+    if override is not None:
+        tags = library_store.mark_unverified(tags)
+    result = library_store.create_recording(project_id, name, start_url, steps=steps, tags=tags, execution_plan=plan)
+    if override is not None:
+        result['unverified'] = True
+        result['override_reason'] = override
+        result['tested'] = False
+        result['draft_status'] = (receipt or {}).get('status')
+        result['notice'] = (
+            f"Saved without a passing test ({override}). It is published to the library marked "
+            f"'{library_store.UNVERIFIED_TAG}'; run it before trusting its result.")
+    elif receipt is not None:
+        result['tested'] = True
         receipt['saved_recording_id'] = result['id']
         import_drafts.write(receipt)
     return result
@@ -128,18 +180,40 @@ async def test_draft(request: Request):
     from app import import_drafts
     body = await body_json(request)
     try:
-        return await import_drafts.start(body.get('project_id'), body.get('execution_plan') or {'steps': body.get('steps')})
+        return await import_drafts.start(body.get('project_id'),
+                                         body.get('execution_plan') or {'steps': body.get('steps')},
+                                         body.get('name'))
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
     except (ValueError, TypeError) as exc:
         raise HTTPException(422, str(exc)) from exc
 
 
-@router.get('/api/imports/tests/{draft_id}')
-def draft_status(draft_id: str):
+@router.get('/api/imports/tests')
+def draft_receipts(project_id: str | None = None):
+    """Receipts this instance still holds, so a passing test survives a tab switch.
+
+    The import panel keeps its draft in component state, which React throws away
+    when another tab is opened. Without this the user comes back to a disabled
+    SAVE button an hour before the receipt actually expires.
+    """
     from app import import_drafts
     try:
-        return import_drafts.public(import_drafts.read(draft_id))
+        if project_id:
+            library_store.require_id(project_id, 'project id')
+        return {'drafts': import_drafts.recent(project_id), 'ttl_seconds': import_drafts.TTL}
+    except library_store.LibraryError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except (ValueError, OSError) as exc:
+        # Misconfigured draft storage or an unreadable folder: say so, list nothing.
+        raise HTTPException(422, str(exc)) from exc
+
+
+@router.get('/api/imports/tests/{draft_id}')
+def draft_status(draft_id: str, plan: bool = False):
+    from app import import_drafts
+    try:
+        return import_drafts.detail(draft_id, include_plan=plan)
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
 
