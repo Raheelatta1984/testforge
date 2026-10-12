@@ -55,6 +55,12 @@ function ImportScripts({ project, onSaved, onRun }) {
   const [draft,setDraft] = useState(null);
   const [planOptions,setPlanOptions] = useState('{}');
   const [packs,setPacks]=useState([]);
+  // Template pack: one downloadable example per supported format. Loading one runs
+  // the same preview as an upload, so a team can see the parsed steps before they
+  // replace them with their own (and see that onboarding reports no errors).
+  const [templates,setTemplates]=useState([]);
+  const [templatesNotice,setTemplatesNotice]=useState('');
+  const [templateId,setTemplateId]=useState('');
   // Input-review state. These declarations (and the three helpers below) belong
   // to this component: without them every render of the Library tab threw
   // `setVariablePlan is not defined` and the tab rendered nothing at all.
@@ -62,6 +68,35 @@ function ImportScripts({ project, onSaved, onRun }) {
   const [adopted,setAdopted] = useState([]);
   const [existingVars,setExistingVars] = useState([]);
   useEffect(()=>{API.get('/api/imports/packs').then(setPacks).catch(()=>{});},[]);
+  useEffect(()=>{API.get('/api/imports/templates').then(data=>{setTemplates(data.templates||[]);setTemplatesNotice(data.notice||'');}).catch(()=>{});},[]);
+  const base64ToBlob = (encoded, name) => {
+    const raw = atob(encoded || '');
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    return new File([bytes], name, {type:'application/octet-stream'});
+  };
+  const loadTemplate = async () => {
+    const entry = templates.find(item => item.id === templateId);
+    if (!entry) return;
+    setBusy(true); setError(''); setNotice(''); setSaved(null); setDraft(null); setVariablePlan(null);
+    const version = generation.current;
+    try {
+      const names = entry.files || [];
+      const built = names.map(name => base64ToBlob((entry.content||{})[name], name));
+      if (!built.length) throw new Error('This template has no files to preview');
+      setFiles(built);
+      const result = entry.bundle
+        ? await API.post('/api/imports/preview-bundle',{files:names.map(name=>({name,base64:(entry.content||{})[name]}))})
+        : await apiRequest('/api/imports/preview?filename='+encodeURIComponent(names[0]),
+            {method:'POST',headers:{'Content-Type':'application/octet-stream'},body:built[0]});
+      if (version !== generation.current) return;
+      const errors = (result.diagnostics || []).filter(item => item.severity !== 'note').length;
+      setPreview(result); setPlanOptions(JSON.stringify(result.execution_plan || {},null,2)); setName(result.name);
+      setNotice(`Template "${entry.name}" parsed: ${result.steps.length} step(s), ${errors} error(s). ${result.notice || ''}`);
+      if (errors) setError(`${errors} diagnostic(s) in this template — report it, the pack is meant to onboard cleanly.`);
+    } catch(err) { if(version===generation.current) setError(err.message); }
+    finally { setBusy(false); }
+  };
   const generation = useRef(0);
   const reviewVariables = async () => {
     if(!preview?.steps?.length) return;
@@ -160,7 +195,18 @@ function ImportScripts({ project, onSaved, onRun }) {
           setPreview(result);setName(result.name);setPlanOptions(JSON.stringify(result.execution_plan,null,2));setNotice(result.notice);
         } catch(err){if(version===generation.current)setError(err.message);} finally{setBusy(false);}
       }},e('option',{value:''},'Choose an example…'),packs.map(pack=>e('option',{key:pack.id,value:pack.id},pack.name)))),
-    e('a',{href:'/api/imports/template.csv',className:'text-indigo-300 underline text-xs'},'Download CSV template'),
+    e('div',{className:'border border-slate-700 bg-slate-950 p-3 rounded-xl space-y-2'},
+      e('p',{className:'text-xs font-bold text-indigo-300'},'START FROM A TEMPLATE (ANY FORMAT)'),
+      e('p',{className:'text-[11px] text-slate-400'},templatesNotice || 'Every template in this pack previews with zero errors. Load one to see its steps, then replace them with your own scenario.'),
+      e('div',{className:'flex flex-wrap gap-2 items-center'},
+        e('select',{'aria-label':'Onboarding template',value:templateId,disabled:busy,onChange:ev=>setTemplateId(ev.target.value),className:'bg-slate-800 p-2 rounded text-xs flex-1 min-w-[14rem]'},
+          e('option',{value:''},'Choose a template…'),
+          templates.map(item=>e('option',{key:item.id,value:item.id},`${item.name} — ${item.format}`))),
+        e('button',{type:'button',disabled:busy || !templateId,onClick:loadTemplate,className:'key-btn bg-indigo-700 disabled:opacity-50'},busy?'LOADING…':'PREVIEW THIS TEMPLATE'),
+        templateId && (()=>{const entry=templates.find(item=>item.id===templateId);if(!entry)return null;
+          return e('a',{href:'/api/imports/templates/'+entry.id,className:'text-indigo-300 underline text-xs'},entry.bundle?'DOWNLOAD (.zip)':`DOWNLOAD ${entry.files[0]}`);})(),
+        e('a',{href:'/api/imports/templates.zip',className:'text-indigo-300 underline text-xs'},'DOWNLOAD ALL (.zip)'),
+        e('a',{href:'/api/imports/template.csv',className:'text-indigo-300 underline text-xs'},'DOWNLOAD CSV TEMPLATE'))),
     e('input',{key:project.id,type:'file',multiple:true,accept:'.csv,.tsv,.psv,.tab,.txt,.md,.markdown,.log,.rst,.rtf,.xlsx,.xls,.xlsm,.json,.jsonc,.xml,.yaml,.yml,.har,.html,.htm,.docx,.doc,.pdf,.py,.js,.ts,.mjs,.jsx,.tsx,.cs,.java,.feature,.bdd,.gherkin,.robot,.resource,.side,.jenkins,.groovy,Jenkinsfile','aria-label':'Upload test scripts',disabled:busy || ['queued','running'].includes(draft?.status),onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);},className:'block w-full text-xs'}),
     e('button',{disabled:busy || !files.length || ['queued','running'].includes(draft?.status),onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'),
     error && e('p',{role:'alert',className:'text-red-300 text-xs'},error),

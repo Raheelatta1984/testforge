@@ -37,16 +37,27 @@ class FakeMouse:
     def __init__(self, page):
         self.page = page
 
-    async def click(self, x, y):
-        self.page.clicks.append(("mouse", float(x), float(y)))
+    async def click(self, x, y, button=None):
+        self.page.clicks.append(("mouse", float(x), float(y)) if not button or button == "left"
+                                else ("mouse:" + str(button), float(x), float(y)))
+
+    async def dblclick(self, x, y, button=None):
+        self.page.clicks.append(("mouse:dblclick", float(x), float(y)))
+
+    async def move(self, x, y):
+        self.page.clicks.append(("mouse:move", float(x), float(y)))
 
 
 class FakeKeyboard:
     def __init__(self, page):
         self.page = page
 
-    async def type(self, text):
+    async def type(self, text, delay=None):
         self.page.typed.append(text)
+
+    async def insert_text(self, text):
+        """What the runtime uses for a `fill` step with no element (focused input)."""
+        self.page.fills.append(("(focus)", text))
 
     async def press(self, key):
         self.page.pressed.append(key)

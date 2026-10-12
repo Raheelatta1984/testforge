@@ -13,6 +13,9 @@ from urllib.parse import urlparse
 from playwright.async_api import expect
 
 MAX_STEPS = 500
+# A vendor export (Azure DevOps, TestRail, Zephyr, HP ALM) carries 15-30 metadata
+# columns next to the steps; the row cap above still bounds the parse.
+MAX_COLUMNS = 40
 MAX_REPEAT = 100
 MAX_TEXT = 65536
 MAX_FILE = 512 * 1024
@@ -30,6 +33,14 @@ ACTIONS = BASIC | {
 NO_LOCATOR = {"navigate", "press", "assert_url", "assert_title", "new_page", "switch_page",
               "close_page", "api_request", "mock_route", "clear_routes"}
 KINDS = {"css", "role", "label", "text", "test_id", "placeholder"}
+# A recorded step can address a point on the page instead of an element: the browser
+# recorder stores x/y for every click, and coordinate-only labels ("Click 528,562")
+# come back through the importer. Only the pointer actions may.
+POINTER_ACTIONS = {"click", "dblclick", "right_click", "hover"}
+# A recorder `type` step keeps no selector when the field was already focused;
+# replaying it is "type into whatever has focus", which is a real action, not a
+# malformed one.
+FOCUS_ACTIONS = {"type", "fill"}
 
 
 def interpolate(text, variables):
@@ -76,6 +87,35 @@ OPTION_KEYS = {
 COMMON_KEYS = {"schema_version", "primary", "kind", "name", "exact", "frames", "page", "strict", "timeout_ms", "x", "y", "text", "tag"}
 
 
+def _target_spec(selector, action):
+    """Validate that a step targets an element, a point, or the focused element.
+
+    Order matters: a step that names an element is validated exactly as before, so
+    nothing about an ordinary locator changes. Only when no usable selector is
+    present does a recorded coordinate pair (pointer actions) or a
+    type-into-the-focused-element step become acceptable. Anything else keeps the
+    original message.
+    """
+    primary = selector.get("primary")
+    if isinstance(primary, str) and primary.strip():
+        _locator_spec(selector)
+        return
+    x, y = selector.get("x"), selector.get("y")
+    if x is not None or y is not None:
+        if action not in POINTER_ACTIONS:
+            raise ValueError(action + " cannot target screen coordinates; provide a locator")
+        for axis, value in (("x", x), ("y", y)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 20000:
+                raise ValueError("Coordinate " + axis + " must be a number from 0 to 20000")
+        selector["x"], selector["y"] = x, y
+        selector.pop("primary", None)
+        return
+    if action in FOCUS_ACTIONS:
+        selector.pop("primary", None)
+        return
+    raise ValueError("A nonempty locator.primary is required")
+
+
 def audit_selector(options):
     """Do not copy potentially sensitive/large payloads into every run log/event."""
     return {k: ("[omitted]" if k in {"headers", "body", "base64"} else v)
@@ -113,7 +153,7 @@ def normalize_step(raw, order=1):
     selector["schema_version"] = 1
     selector["strict"] = True
     if action not in NO_LOCATOR:
-        _locator_spec(selector)
+        _target_spec(selector, action)
     if action == "select_option" and selector.get("by", "value") not in {"value", "label"}:
         raise ValueError("select_option.by must be value or label")
     if action == "drag_to":
@@ -258,17 +298,34 @@ class StepRuntime:
                 raise ValueError("Unknown page: " + opts["page"])
             self.page = self.pages[opts["page"]]
         page = self.page
-        loc = locator(page, opts) if action not in NO_LOCATOR else None
+        loc = locator(page, opts) if action not in NO_LOCATOR and opts.get("primary") else None
         if action == "navigate":
             await page.goto(check_url(value), wait_until="domcontentloaded", timeout=opts.get("timeout_ms", 20000))
+        elif action in POINTER_ACTIONS and loc is None:
+            # A recorded coordinate click has no element to wait for; it clicks the
+            # point the operator actually clicked.
+            x, y = opts["x"], opts["y"]
+            button = "right" if action == "right_click" else "left"
+            if action == "hover":
+                await page.mouse.move(x, y)
+            elif action == "dblclick":
+                await page.mouse.dblclick(x, y, button=button)
+            else:
+                await page.mouse.click(x, y, button=button)
         elif action in {"click", "check", "uncheck", "hover", "dblclick"}:
             await getattr(loc, action)(timeout=timeout)
         elif action == "right_click":
             await loc.click(button="right", timeout=timeout)
         elif action == "fill":
-            await loc.fill(value, timeout=timeout)
+            if loc is None:
+                await page.keyboard.insert_text(value)
+            else:
+                await loc.fill(value, timeout=timeout)
         elif action == "type":
-            await loc.press_sequentially(value, delay=0, timeout=timeout)
+            if loc is None:
+                await page.keyboard.type(value, delay=0)
+            else:
+                await loc.press_sequentially(value, delay=0, timeout=timeout)
         elif action == "press":
             if opts.get("primary"):
                 await locator(page, opts).press(value, timeout=timeout)

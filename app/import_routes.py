@@ -153,6 +153,48 @@ async def cancel_draft(draft_id: str):
         raise HTTPException(404, str(exc)) from exc
 
 
+@router.get("/api/imports/templates")
+def templates():
+    """Every onboarding template, with its bytes, so the dashboard can preview one."""
+    from app.import_templates import NOTICE, catalog
+    return {"templates": catalog(), "notice": NOTICE}
+
+
+@router.get("/api/imports/templates.zip")
+def templates_zip():
+    from app.import_templates import zip_pack
+    return Response(zip_pack(), media_type="application/zip",
+                    headers={"Content-Disposition": 'attachment; filename="testforge-onboarding-templates.zip"'})
+
+
+@router.get("/api/imports/templates/{template_id}")
+def template_file(template_id: str, filename: str | None = None):
+    """One template file; a bundle (Jenkinsfile + script) is returned as a ZIP."""
+    import io
+    import zipfile
+    from app.import_templates import build
+    files = build(template_id)
+    if not files:
+        raise HTTPException(404, "Unknown template")
+    if filename:
+        if filename not in files:
+            raise HTTPException(404, "Unknown file in this template")
+        data, media = files[filename]
+        return Response(data, media_type=("text/plain" if media == "xlsx" else media),
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    if len(files) == 1:
+        name, (data, media) = next(iter(files.items()))
+        return Response(data, media_type=(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" if media == "xlsx" else media),
+            headers={"Content-Disposition": f'attachment; filename="{name}"'})
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, (data, _media) in files.items():
+            archive.writestr(name, data)
+    return Response(buffer.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{template_id}.zip"'})
+
+
 @router.get("/api/imports/template.csv")
 def template():
     # Quoted options use standard CSV encoding; no spreadsheet formulas/macros.

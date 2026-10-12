@@ -15,6 +15,7 @@ from app.db import fit_text
 from app.step_runtime import MAX_STEPS, normalize_step
 
 MAX_BYTES = 1024 * 1024
+MAX_COLUMNS = 40   # see app.step_runtime; vendor exports carry wide metadata
 MAX_UNPACKED = 8 * 1024 * 1024
 MAX_FILES = 8
 # Everything the onboarding understands. app.import_formats adds the market
@@ -62,6 +63,9 @@ class Preview:
         self.detected = None
         self.execution_plan = None
         self.variables = {}
+        # Optional observer every accepted step is reported to (the label grammar
+        # uses it to remember which element the flow clicked last). Never required.
+        self.on_step = None
 
     def error(self, line, message):
         self.diagnostics.append({"file": self.filename, "line": line, "severity": "error", "message": str(message)[:400]})
@@ -85,6 +89,11 @@ class Preview:
             self.steps.append(step)
             if step["action"] == "navigate" and not self.start_url:
                 self.start_url = step["value"]
+            if self.on_step is not None:
+                try:
+                    self.on_step(step, line)
+                except Exception:            # an observer must never break an import
+                    pass
         except (ValueError, TypeError, OverflowError) as exc:
             self.error(line, exc)
 
@@ -106,7 +115,26 @@ class Preview:
         return result
 
 
+STRICT_COLUMNS = {"action", "selector", "value", "input", "label", "description",
+                 "repeat_count", "order", "step", "test_case", "summary", "screenshot"}
+
+
+def strict_table_header(header):
+    """Is this the documented template? (action column, no unknown column)."""
+    names = [str(v or "").strip().lower().replace(" ", "_") for v in header]
+    return ("action" in names and len(set(names)) == len(names)
+            and not (set(names) - STRICT_COLUMNS))
+
+
 def parse_table(rows, preview):
+    """The canonical template: one action per row, optional locator/value columns.
+
+    The Action cell may also carry a step *label* ("Click add to cart",
+    "Type: {{password}}") because that is what TestForge's own azure-devops/jira/
+    testcomplete exports and other tools write there. app.import_formats owns that
+    grammar and the Selector/Input/Expected merging.
+    """
+    from app.import_formats import import_table_row
     rows = iter(rows)
     header = next(rows, None)
     if not header:
@@ -116,8 +144,7 @@ def parse_table(rows, preview):
         raise ImportProblem("Table requires an action column (optional: selector, value, label, repeat_count)")
     if len(set(names)) != len(names):
         raise ImportProblem("Duplicate column names are not supported")
-    allowed = {"action", "selector", "value", "input", "label", "description", "repeat_count", "order", "step", "test_case", "summary", "screenshot"}
-    unknown = set(names) - allowed
+    unknown = set(names) - STRICT_COLUMNS
     if unknown:
         raise ImportProblem("Unknown columns: " + ", ".join(sorted(unknown)))
     case_name = None
@@ -135,19 +162,35 @@ def parse_table(rows, preview):
             if case_name is not None and str(case) != case_name:
                 preview.error(line, "Multiple test cases must be uploaded separately, not flattened into one recording")
             case_name = str(case)
-        selector = values.get("selector") or {}
         try:
-            if isinstance(selector, str) and selector.strip().startswith("{"):
-                selector = json.loads(selector)
-            repeat = values.get("repeat_count")
-            if isinstance(repeat, float) and not repeat.is_integer():
-                raise ValueError("repeat_count must be an integer")
-            preview.add({"action": values.get("action"), "selector": selector,
-                         "value": values.get("value", values.get("input", "")),
-                         "label": values.get("label", values.get("description", values.get("action"))),
-                         "repeat_count": int(repeat) if repeat not in (None, "") else 1}, line)
+            import_table_row(preview, {
+                "action": values.get("action"),
+                "selector": values.get("selector"),
+                "value": values.get("value", values.get("input")),
+                "label": values.get("description", values.get("label")),
+                "repeat": values.get("repeat_count"),
+            }, line, "table")
         except (ValueError, TypeError) as exc:
             preview.error(line, exc)
+
+
+def parse_rows(rows, preview, source="table"):
+    """Template first, then the market/vendor headers, then the template error.
+
+    One entry point for CSV/TSV/PSV, .xlsx, .xls, Word tables and sniffed bodies so
+    a step table onboards the same way whatever file it arrived in.
+    """
+    rows = [list(row) for row in rows]
+    if strict_table_header(rows[0] if rows else []):
+        parse_table(rows, preview)
+        return
+    from app.import_formats import parse_table_smart
+    steps, diagnostics = list(preview.steps), list(preview.diagnostics)
+    if not parse_table_smart(rows, preview, source):
+        # Nothing recognised the header: report the template's own message rather
+        # than "no supported steps found".
+        preview.steps, preview.diagnostics = steps, diagnostics
+        parse_table(rows, preview)
 
 
 def parse_excel(data, preview):
@@ -163,14 +206,14 @@ def parse_excel(data, preview):
         if len(workbook.worksheets) != 1:
             raise ImportProblem("Use one worksheet per upload; multiple sheets must not be silently combined")
         sheet = workbook.worksheets[0]
-        if (sheet.max_row or 0) > MAX_STEPS + 1 or (sheet.max_column or 0) > 12:
-            raise ImportProblem("Excel is limited to 500 steps and 12 columns")
+        if (sheet.max_row or 0) > MAX_STEPS + 1 or (sheet.max_column or 0) > MAX_COLUMNS:
+            raise ImportProblem(f"Excel is limited to {MAX_STEPS} steps and {MAX_COLUMNS} columns")
         rows = []
         for row in sheet.iter_rows():
             if any(cell.data_type == "f" for cell in row):
                 raise ImportProblem("Excel formulas are not test data; replace them with literal values")
             rows.append([cell.value for cell in row])
-        parse_table(rows, preview)
+        parse_rows(rows, preview, "excel")
     finally:
         workbook.close()
 
@@ -389,14 +432,9 @@ def parse_bdd(source, preview):
 
 def _parse_delimited(source, suffix, preview):
     """A delimited table, strict template first, then the market headers."""
-    from app.import_formats import parse_table_smart
     delimiter = "\t" if suffix == ".tsv" else ("|" if suffix == ".psv" else ("," if suffix == ".csv" else "\t"))
     rows = list(csv.reader(io.StringIO(source), delimiter=delimiter))
-    try:
-        parse_table(iter(rows), preview)
-    except ImportProblem:
-        if not rows or not parse_table_smart(rows, preview, "table"):
-            raise
+    parse_rows(rows, preview, "table")
     return True
 
 
