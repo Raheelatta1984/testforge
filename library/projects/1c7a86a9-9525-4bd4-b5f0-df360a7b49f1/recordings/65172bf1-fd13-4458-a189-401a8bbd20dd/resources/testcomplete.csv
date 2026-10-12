@@ -1,7 +1,7 @@
 ﻿Step,Action,Selector,Input,Screenshot
-1,Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08,{},https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08,
+1,Open https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=426&date=2026-10-08,{},https://hfm-wholesale-app-dev.ashysand-8cabb4df.australiaeast.azurecontainerapps.io/daily-orders?storeNo=4{{Order_Qty}}6&date={{Order_Qty}}0{{Order_Qty}}6-10-08,
 2,"Click 152,303","{""primary"": ""div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)"", ""x"": 152, ""y"": 303, ""text"": """", ""tag"": ""input""}",,step-002.png
-3,Type: Sa,"{""primary"": ""div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)""}",Sa,step-003.png
+3,Type: Sa,"{""primary"": ""div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(1) > input:nth-of-type(1)""}",{{Ext_User_ID}},step-003.png
 4,"Click DEV
 Wholesale sign in
 
@@ -12,14 +12,14 @@ Use the account details issued for your store.
 6,Type: {{HFM_Ext_pass}},"{""primary"": ""div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > label:nth-of-type(2) > input:nth-of-type(1)""}",{{HFM_Ext_pass}},step-006.png
 7,Click Sign in,"{""primary"": ""#root > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > form:nth-of-type(1) > button:nth-of-type(1)"", ""x"": 204, ""y"": 519, ""text"": ""Sign in"", ""tag"": ""button""}",,step-007.png
 8,Click HFM Internal Production,"{""primary"": ""main:nth-of-type(1) > section:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(1) > select:nth-of-type(1)"", ""x"": 126, ""y"": 260, ""text"": ""HFM Internal Production"", ""tag"": ""select""}",,step-008.png
-9,Type: Hi-Tech,"{""primary"": ""input[placeholder=\""Search stores\""]""}",Hi-Tech,step-009.png
+9,Type: Hi-Tech,"{""primary"": ""input[placeholder=\""Search stores\""]""}",{{placeholder_stores1}},step-009.png
 10,"Click Hi-Tech
 Store 426","{""primary"": ""#\\:r2\\: > button:nth-of-type(1)"", ""x"": 118, ""y"": 381, ""text"": ""Hi-Tech\nStore 426"", ""tag"": ""button""}",,step-010.png
 11,Click Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY,"{""primary"": ""input[aria-label=\""Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY\""]"", ""x"": 654, ""y"": 407, ""text"": ""Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY"", ""tag"": ""input""}",,step-011.png
 12,"Click 649,420","{""primary"": ""section:nth-of-type(1) > div:nth-of-type(4) > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(6)"", ""x"": 649, ""y"": 420, ""text"": """", ""tag"": ""td""}",,step-012.png
 13,Click Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY,"{""primary"": ""input[aria-label=\""Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY\""]"", ""x"": 638, ""y"": 396, ""text"": ""Ordered quantity for ASIAN - BABY / SHANGHI BOK CHOY"", ""tag"": ""input""}",,step-013.png
-14,Type: 2,"{""primary"": ""div:nth-of-type(4) > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(6) > input:nth-of-type(1)""}",2,step-014.png
+14,Type: 2,"{""primary"": ""div:nth-of-type(4) > table:nth-of-type(1) > tbody:nth-of-type(1) > tr:nth-of-type(1) > td:nth-of-type(6) > input:nth-of-type(1)""}",{{Order_Qty}},step-014.png
 15,Click Comment for ASIAN - BABY / SHANGHI BOK CHOY,"{""primary"": ""input[aria-label=\""Comment for ASIAN - BABY / SHANGHI BOK CHOY\""]"", ""x"": 889, ""y"": 404, ""text"": ""Comment for ASIAN - BABY / SHANGHI BOK CHOY"", ""tag"": ""input""}",,step-015.png
-16,Type: Test order ignore,{},Test order ignore,step-016.png
+16,Type: Test order ignore,{},{{Orser_commwnta}},step-016.png
 17,"Click 829,165","{""primary"": ""#\\:r0\\:-1312\\%7C51-comment"", ""x"": 829, ""y"": 165, ""text"": """", ""tag"": ""td""}",,step-017.png
 18,Press ArrowUp ×18,{},ArrowUp,step-018.png
