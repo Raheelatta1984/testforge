@@ -1,0 +1,19 @@
+{
+  "completed_at": 1791797948.612951,
+  "duration_seconds": 11.602,
+  "expires_at": 1791970748.612951,
+  "id": "e81b45ac-4e5b-4945-aa49-33ee63ffdab3",
+  "kind": "run",
+  "recordings": [
+    {
+      "failed": 0,
+      "id": "e81b45ac-4e5b-4945-aa49-33ee63ffdab3",
+      "name": "testcomplete",
+      "status": "passed",
+      "steps": 4
+    }
+  ],
+  "remote_status": "disabled",
+  "status": "passed",
+  "steps": 4
+}
