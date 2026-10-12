@@ -4,7 +4,9 @@
 - **Demo tab:** the first tab. A guided walkthrough over the built-in sample app and the five synthetic domain fixtures, so recording, replay and evidence can be proved without pointing TestForge at a real application. It also carries a live demonstration of the voice input (🎤 browser speech recognition) and the deterministic text cleanup (✨) helpers. See below.
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
 - **Local helpers (no paid AI calls):** Browser-dependent voice input, deterministic text cleanup, and recording-variable association tagging. Autonomous AI execution is not connected.
-- **Tree Hierarchy:** Parent Group -> Sub-recording chunk organization.
+- **Tree Hierarchy:** Parent Group -> Sub-recording chunk organization. Parent/child, tags and
+  start URL survive the catalog fast path, so the Library, the Record tab's tree and
+  `GET /api/plans/catalog` all describe the same recording the same way.
 - **Entities (companies):** a company/entity is created before its projects and every project belongs to one; the registry is `library/entities.json`, the Projects tab groups and filters by it, and a project written before entities existed sits in an `Unassigned` bucket that can be moved at any time.
 - **Previous recordings tree (Record tab):** every recording in the library, grouped by project and nested by parent recording, with **RESUME** (open the old recording and append) and **RUN** (execute it as a run). **SCAN LIBRARY** / **RESCUE** list and re-export recordings that fell out of the catalog or exist only in the database, so nothing is lost.
 - **Run a recording inside a recording:** while a session is live, `POST /api/recordings/{id}/replay` executes another saved recording in that same browser; its steps are added to the recording being made (or run without being written, at the operator's choice).
@@ -25,7 +27,17 @@ access-token setup, and the roadmap items still outstanding.
   Playwright Python/JS/TS, BDD/Cucumber phrases, or a restricted Jenkins + script bundle.
   Uploaded source is never executed; unsupported statements block saving.
   Use **TEST BEFORE PUBLISHING** to run a private draft; the dashboard enables
-  publication only after a passing test of the reviewed execution inputs.
+  publication only after a passing test of the reviewed execution inputs. **A pass keeps
+  working:** the receipt is held for the project, so opening another tab, reloading the
+  page or losing one status poll no longer leaves **SAVE TO LIBRARY & PUBLISH** greyed out
+  against a test that already passed, and a lock always prints its reason. When a test
+  genuinely cannot pass, **SAVE WITHOUT A PASSING TEST** is an explicit, reasoned override
+  that publishes the recording tagged `unverified` and badged as such everywhere.
+- **Library tab lists the whole library:** every recording in `library/` grouped by
+  project — AI recordings from the Record tab and scripts published from an upload alike —
+  with the selected project first, plus search, tag/project filters, an "unverified only"
+  switch and per-recording EDIT / RUN / project-ZIP actions. It used to show only the
+  selected project, so anything recorded under another one looked unsaved.
 - **Advanced plans:** bounded datasets, setup/teardown, reusable named flows,
   environment-backed secret/auth references, sequential responsive profiles,
   explicit retries/flaky detection, and five local synthetic domain packs.

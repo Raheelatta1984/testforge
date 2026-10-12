@@ -12,4 +12,4 @@ for(const [pkg,file] of [['react','react.production.min.js'],['react-dom','react
 }
 licenses+='\n=== tailwindcss ===\n'+fs.readFileSync(path.join(path.dirname(require.resolve('tailwindcss/package.json')),'LICENSE'),'utf8');
 fs.writeFileSync(path.join(output,'LICENSES.txt'),licenses);
-execFileSync(process.execPath,[require.resolve('tailwindcss/lib/cli.js'),'-i',path.join(__dirname,'input.css'),'-o',path.join(output,'tailwind.css'),'--content',path.resolve(__dirname,'../../app/static/index.html')+','+path.resolve(__dirname,'../../app/static/import-components.js')+','+path.resolve(__dirname,'../../app/static/scenario-components.js'),'--minify'],{stdio:'inherit'});
+execFileSync(process.execPath,[require.resolve('tailwindcss/lib/cli.js'),'-i',path.join(__dirname,'input.css'),'-o',path.join(output,'tailwind.css'),'--content',[path.resolve(__dirname,'../../app/static/index.html'),...['import-components.js','scenario-components.js','demo-components.js'].map(f=>path.resolve(__dirname,'../../app/static',f))].join(','),'--minify'],{stdio:'inherit'});
