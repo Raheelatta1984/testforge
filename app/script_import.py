@@ -525,6 +525,9 @@ def parse_bundle(files):
     """One script, optionally wrapped by a restricted declarative Jenkinsfile.
 
     Reject non-test shell commands instead of giving a misleading green import.
+    A script may also bring the data file it replays (steps.json /
+    execution-plan.json): the runner is validated statically and the referenced
+    steps are what gets imported, because those are the actual test.
     """
     if not files or len(files) > MAX_FILES or sum(len(data) for _, data in files) > MAX_BYTES:
         raise ImportProblem("Bundle must contain 1–8 files totalling at most 1 MiB")
@@ -534,9 +537,30 @@ def parse_bundle(files):
     mapping = dict(zip(names, [data for _, data in files]))
     wrappers = [n for n in names if n.lower() == "jenkinsfile" or PurePosixPath(n).suffix.lower() in {".jenkins", ".groovy"}]
     if not wrappers:
-        if len(files) != 1:
-            raise ImportProblem("Upload one test script per recording, or a Jenkinsfile with one referenced script")
-        return parse_file(names[0], files[0][1])
+        if len(files) == 1:
+            return parse_file(names[0], files[0][1])
+        # Script + replay data: every extra file must be a referenced steps.json /
+        # execution-plan.json, and the script must mention it by name.
+        data_names = [n for n in names if n.lower() in {"steps.json", "execution-plan.json"}]
+        script_names = [n for n in names if n not in data_names]
+        if data_names and len(script_names) == 1:
+            script = script_names[0]
+            try:
+                source = mapping[script].decode("utf-8-sig")
+            except UnicodeDecodeError as exc:
+                raise ImportProblem(f"{script} is not readable text") from exc
+            referenced = [n for n in data_names if n in source]
+            if not referenced:
+                raise ImportProblem("Upload one test script per recording, or the script together with the steps.json / execution-plan.json it references")
+            if len(script_names) != len(names) - len(referenced):
+                raise ImportProblem("Unreferenced files would be ignored; remove them from this bundle")
+            result = parse_file(referenced[0], mapping[referenced[0]])
+            result["wrapper"] = script
+            result["notice"] = (
+                f"Runner {script} statically validated and not executed; imported the test steps "
+                f"from its referenced {referenced[0]}.")
+            return result
+        raise ImportProblem("Upload one test script per recording, or a Jenkinsfile with one referenced script")
     if len(wrappers) != 1:
         raise ImportProblem("Only one Jenkinsfile per bundle")
     source = mapping[wrappers[0]].decode("utf-8-sig")

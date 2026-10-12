@@ -4,7 +4,7 @@
 
 This change implements a working import → review → isolated browser test → save/publish → replay/report flow, an extended shared action runtime, authoring controls, and lower-overhead defaults. **It does not complete every item in the roadmap and has not been deployed to production by this session.** Remaining scope is listed below.
 
-No paid AI/API integration, additional server, parallel worker, scheduled test job, automatic CI workflow or hosting-plan upgrade has been added. The Docker/Render single-worker and one-browser limits remain unchanged. Playwright, React and the parsers run locally. **Zero charges and zero additional CPU cannot be guaranteed:** target pages, optional extra tabs, files, traffic, storage, provider quotas and externally triggered builds still consume resources. No claim of production latency or memory headroom is made from local tests.
+No additional server, parallel worker, scheduled test job, automatic CI workflow or hosting-plan upgrade has been added. The Docker/Render single-worker and one-browser limits remain unchanged. Playwright, React and the parsers run locally. **AI smart onboarding is now part of import:** when `ANTHROPIC_API_KEY` is configured and the static validator reports unsupported syntax, the Anthropic messages API is called (stdlib HTTP only, budgeted per import) to convert the script to canonical steps. Without the key everything stays fully offline and deterministic. Uploads are still never executed, and **zero charges and zero additional CPU cannot be guaranteed:** target pages, optional extra tabs, files, traffic, storage, provider quotas and externally triggered builds still consume resources. No claim of production latency or memory headroom is made from local tests.
 
 The Render blueprint now ignores `library/**` and `logs/**`-only changes for builds, so saving test data need not rebuild the entire service. **That filter is configuration in this branch, not proof it is active in Render.** Apply/verify it in the deployment before relying on it. Normal code changes can still trigger the existing deployment mechanism.
 
@@ -51,7 +51,7 @@ Do not upload literal passwords, personal data or production files: canonical st
 | Excel `.xlsx` / `.xlsm` | The same step table in one worksheet. Literal cells only. Formulas, macros, external links and multi-sheet workbooks are rejected. |
 | Legacy Excel `.xls` | The same step table read with `xlrd` (`.xlsm` also accepted). One worksheet, ≤12 columns, literal cells only. |
 | JSON | A canonical step array, `{ "name": "…", "steps": [...] }`, or `{ "name": "…", "execution_plan": {...} }`. Array order is execution order. Use this format for a lossless re-import of supported canonical steps. |
-| Playwright Python `.py` | Static straight-line `page` actions/expect assertions, simple literal constants/locator aliases, and one undecorated `test_*` function taking a `page` fixture. Sync/async action syntax is supported. Arbitrary imports, helpers, loops, branches, browser-bootstrap code and evaluated expressions are rejected. |
+| Playwright Python `.py` | Static straight-line `page` actions/expect assertions, simple literal constants/locator aliases, and one undecorated `test_*` function taking a `page` fixture. Sync/async action syntax is supported. Arbitrary imports, helpers, loops, branches, browser-bootstrap code and evaluated expressions are rejected by the static pass — then AI smart onboarding converts them (see below). A runner that replays an external `steps.json`/`execution-plan.json` can be uploaded **together with that data file** as a bundle: the runner is validated statically and the referenced steps are what gets imported. |
 | Playwright JavaScript / TypeScript | One standard `test('name', async ({ page }) => { ... })` wrapper or straight-line actions; one supported action/assertion per line. Literal role `name` or `exact` options are supported. Arbitrary JS/TS, POM imports, hooks and general TypeScript syntax are not executed or inferred. |
 | BDD / Cucumber `.feature` / `.bdd` | One scenario using the concrete phrases below. Custom step-definition code, outlines, data tables and arbitrary business-language phrases require explicit conversion. A feature file alone cannot define unknown business actions. |
 | Jenkinsfile / `.jenkins` / `.groovy` bundle | A restricted declarative wrapper using `pipeline`, `agent any`, `stages`, `stage`, `steps` and exactly one literal `sh` test command. Supply its referenced Python/JS/TS file. Accepted commands: `python`, `python3`, `pytest`, `node`, or `npx playwright test` followed by a simple filename. No installer, checkout, credential block, shell pipeline or post hook runs. |
@@ -67,10 +67,21 @@ Do not upload literal passwords, personal data or production files: canonical st
 | XML `.xml` / YAML `.yaml` | Canonical `<step action="…" selector="…" value="…"/>` elements or a `steps:`/`test:` list (or a full canonical YAML `execution_plan`), JUnit/TestNG `<testcase name="…">` case names, and step-text English lines. `safe_load` only: no Python object tags are constructed. |
 | HAR capture `.har` | Browser network capture converted to one `navigate` step plus **deduplicated** `api_request` steps for the captured calls (≤100). `Cookie`/`Authorization` headers are stripped, not stored. |
 | HTML page / legacy Selenium HTML suite `.html` | A `<table>` with Selenium command columns is read as a `.side` suite; otherwise the page's text is read as step lines. Headings become notes; scripts/styles are never executed. |
-| Any other extension | The content is sniffed (JSON, XML, YAML, HTML, PDF/Word/Excel signatures, step text). Nothing is guessed about binary payloads that match no known shape. |
-| Other formats / unsupported code | Rejected with diagnostics. There is no safe universal converter for arbitrary executable programs. No AI service guesses what omitted code was supposed to do. |
+| Any other extension | The content is sniffed (JSON, XML, YAML, HTML, PDF/Word/Excel signatures, step text). Nothing is guessed about binary payloads that match no known shape; with AI smart onboarding, text-based files the sniffing cannot place are handed to the conversion loop. |
+| Other formats / unsupported code | The static pass rejects them with diagnostics; AI smart onboarding then attempts an honest conversion (below). There is still no claim of a universal converter for arbitrary executable programs: what the AI cannot convert into validated canonical steps is named in the notes, never silently dropped or executed. |
 
 The generated Python/JS runners are executable artifacts, not input-language promises: **re-import their `steps.json` (ordinary recordings) or `execution-plan-source.json` (advanced plans)**, rather than their generic interpreter code. Vendor CSV/XLSX files remain mapping templates; they are not proprietary native test projects.
+
+### AI smart onboarding: validate → AI convert → re-validate, per step
+
+Uploads that the static parsers reject no longer dead-end. When `ANTHROPIC_API_KEY` is set, `POST /api/imports/preview` (`?smart=true`, the dashboard default) runs `app/ai_onboarding.py`:
+
+1. **Validate** — the file is parsed by the exact same static parsers as before. Passing files never touch the AI.
+2. **Convert** — the source (bounded to 48,000 characters) plus the static diagnostics are sent to the model with the canonical step grammar. It must answer with strict JSON: steps conforming to the same schema the static parsers emit.
+3. **Import & loop per step** — every returned step is re-validated with `app.step_runtime.normalize_step`, the same validator that guards recorded steps. A step that fails goes back to the AI with the exact validator error and is fixed and re-validated, looping per step until it passes or the budgets run out (3 attempts per step, 24 step-repairs per import, 24 model calls per import). A second conversion round reports what was missed.
+4. **Report** — the preview carries an `ai` object (`model`, `calls`, `step_fixes`, `converted_steps`, `unconverted`, per-step `trace`) and the dashboard renders the loop trace. Source diagnostics the conversion handled become explicit notes; what could **not** be converted is named in its own note.
+
+Invariants that do not change: uploaded code is never executed (the AI emits only data, and all of it is re-validated before it can be saved); saving still requires a passing draft test or the written unverified override; without the API key, on any AI/transport error, or when the AI converts nothing, the original static result is returned unchanged (`ai.available`/`ai.used` say which). Binary content is refused for AI conversion rather than mangled. A runner script that merely replays an external `steps.json`/`execution-plan.json` gets an honest note naming the data file, and uploading the pair as a bundle imports the referenced steps directly.
 
 ### Onboarding templates in every format
 
@@ -88,7 +99,7 @@ TestForge's own `azure-devops.xlsx`/`.csv`, `jira.csv`/`.xlsx` and `testcomplete
 - A label that quotes a whole page region (`Click search for products e.g. bread log in / sign up cart $0.00 0`) uses the leading phrase as its text locator and notes the shortening, instead of storing a whole paragraph as a locator.
 - `jira.csv` has no locator of its own on older exports; the locator is rebuilt from the description column, and the step keeps the description as its label.
 
-An unsupported verb or an unrecognised label is still an error: nothing is silently treated as tested, and no AI service guesses what a step meant.
+An unsupported verb or an unrecognised label is still an error in the static pass: nothing is silently treated as tested. With AI smart onboarding enabled (see below) those diagnostics feed the AI conversion, and anything the AI cannot convert is named in the notes instead of being guessed away.
 
 ### CSV example
 

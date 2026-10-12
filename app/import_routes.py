@@ -139,19 +139,26 @@ async def _exclusive(work, *args):
 
 @router.get("/api/imports/formats")
 def formats():
+    from app import ai_onboarding
     return {"formats": FORMATS, "actions": sorted(ACTIONS), "max_bytes": MAX_BYTES,
             "max_steps": MAX_STEPS, "sequential": True, "executes_source": False,
-            "notice": "Static supported-subset conversion, not arbitrary code execution. Preview errors must be corrected before saving. GitHub publication follows existing library settings."}
+            "ai_onboarding": {"available": ai_onboarding.available(), "model": ai_onboarding.MODEL},
+            "notice": "Static supported-subset conversion first; when the static validator reports unsupported syntax and an AI key is configured, AI smart onboarding converts the script to canonical steps and re-validates every single step (fix loop). Never code execution. Preview errors that AI could not resolve must still be corrected before saving. GitHub publication follows existing library settings."}
 
 
 @router.post("/api/imports/preview")
-async def preview(request: Request, filename: str):
+async def preview(request: Request, filename: str, smart: bool = True):
     data = await bounded_body(request, MAX_BYTES)
+    from app import ai_onboarding
+    if smart and ai_onboarding.available():
+        # Smart onboarding keeps the static parse as its first pass, so the same
+        # exclusive gate and worker-thread bounds apply to the whole loop.
+        return await _exclusive(ai_onboarding.smart_parse_file, filename[:255], data)
     return await _exclusive(parse_file, filename[:255], data)
 
 
 @router.post("/api/imports/preview-bundle")
-async def preview_bundle(request: Request):
+async def preview_bundle(request: Request, smart: bool = True):
     body = await body_json(request)
     files = body.get("files")
     if not isinstance(files, list) or not 1 <= len(files) <= 8:
@@ -160,6 +167,9 @@ async def preview_bundle(request: Request):
         decoded = [(str(f["name"])[:255], base64.b64decode(f["base64"], validate=True)) for f in files]
     except (KeyError, ValueError, TypeError) as exc:
         raise HTTPException(422, "Each file needs name and valid base64 fields") from exc
+    from app import ai_onboarding
+    if smart and ai_onboarding.available():
+        return await _exclusive(ai_onboarding.smart_parse_bundle, decoded)
     return await _exclusive(parse_bundle, decoded)
 
 
