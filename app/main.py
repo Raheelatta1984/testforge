@@ -69,8 +69,9 @@ try:
 except Exception as exc:
     print(f"LIBRARY LOAD FAILED: {redact(exc)}")
 RUN_STREAMS = {}
-# run_id -> whether that run was queued with the live window on. Bounded, so a
-# long-lived worker does not accumulate one entry per run forever.
+# run_id -> current live-window setting. The Runs tab can change this while a
+# single run is queued or executing. Bounded so a long-lived worker does not
+# accumulate one entry per run forever.
 RUN_WINDOWS = {}
 RUN_WINDOWS_MAX = 200
 
@@ -225,16 +226,29 @@ def _run_dict(run: Run, with_log: bool = True) -> dict:
 
 async def broadcast_run(run_id, payload):
     # Bounded: an unbounded buffer per run is a slow leak that only shows up as
-    # an OOM restart days later.
+    # an OOM restart days later. Under back-pressure, replace/drop a stale frame
+    # before a step/status event so the live screen never crowds out its log.
     guardrails.run_buffers.append(run_id, payload)
     for queue in list(RUN_STREAMS.get(run_id, [])):
-        try:
+        if not queue.full():
             queue.put_nowait(payload)
-        except asyncio.QueueFull:
-            # Retain the newest event (especially done) rather than accumulating
-            # frames for a slow/disconnected browser. HTTP provides full history.
+            continue
+        buffered = []
+        removed_frame = False
+        while not queue.empty():
+            event = queue.get_nowait()
+            if not removed_frame and event.get("type") == "frame":
+                removed_frame = True
+                continue
+            buffered.append(event)
+        for event in buffered:
+            queue.put_nowait(event)
+        if not removed_frame:
+            # A full queue of important events wins over a new preview frame.
+            if payload.get("type") == "frame":
+                continue
             queue.get_nowait()
-            queue.put_nowait(payload)
+        queue.put_nowait(payload)
 
 
 @app.on_event("startup")
@@ -1161,8 +1175,8 @@ async def queue_run(body: dict):
     target_id = body.get("target_id") or body.get("recording_id")
     if not target_id:
         raise HTTPException(status_code=422, detail="Recording id is required")
-    # The Runs tab toggle. Off means no live screencast at all: the replay is
-    # identical, only the picture is not produced.
+    # The Runs tab toggle controls live frames only; the replay and saved step
+    # evidence are identical. An active single run can change this setting later.
     display_window = True if body.get("display_window") is None else bool(body.get("display_window"))
     # Fast check
     rec = library_store.get_recording(target_id)
@@ -1210,8 +1224,15 @@ async def queue_run(body: dict):
         return len(RUN_STREAMS.get(rid, ()))
 
     async def task_wrapper():
-        async def on_frame(data):
-            await broadcast_run(rid, {"type": "frame", "data": data})
+        async def on_frame(data, order=None, step_index=None, label=None):
+            event = {"type": "frame", "data": data}
+            if order is not None:
+                event["order"] = order
+            if step_index is not None:
+                event["step_index"] = step_index
+            if label is not None:
+                event["label"] = label
+            await broadcast_run(rid, event)
 
         async def on_event(event):
             await broadcast_run(rid, event)
@@ -1219,7 +1240,9 @@ async def queue_run(body: dict):
         try:
             await execute_run_task(
                 rid, on_event, on_frame=on_frame,
-                display_window=display_window, viewer_count=viewer_count, screenshots=screenshots,
+                display_window=display_window,
+                window_enabled=lambda: RUN_WINDOWS.get(rid, display_window),
+                viewer_count=viewer_count, screenshots=screenshots,
             )
         except Exception as exc:
             from datetime import datetime
@@ -1247,6 +1270,35 @@ async def queue_run(body: dict):
         "message": "Execution queue started immediately",
         "display_window": display_window,
     }
+
+
+@app.post("/api/runs/{run_id}/window")
+async def set_run_window(run_id: str, body: dict):
+    """Change the live preview for an active single-recording run.
+
+    The setting is deliberately runtime-only: it controls screenshot work for
+    the worker already holding this run, without changing its recorded steps or
+    execution result. The same preference is remembered by the dashboard for
+    subsequent runs.
+    """
+    display_window = body.get("display_window")
+    if type(display_window) is not bool:
+        raise HTTPException(status_code=422, detail="display_window must be true or false")
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run.batch_id:
+            raise HTTPException(status_code=409, detail="A running batch's live-window setting cannot be changed here")
+        if run.status not in {"queued", "running"}:
+            raise HTTPException(status_code=409, detail="This run has finished; the setting applies to the next run")
+        recording = db.get(Recording, run.recording_id)
+        if recording and recording.execution_plan:
+            raise HTTPException(status_code=409, detail="Live browser preview is available for recording runs, not execution plans")
+    _remember_run_window(run_id, display_window)
+    await broadcast_run(run_id, {"type": "window", "display_window": display_window})
+    return {"run_id": run_id, "display_window": display_window,
+            "message": "Live browser preview updated for this run"}
 
 
 # --- Adaptive batch execution ---------------------------------------------
@@ -1629,12 +1681,12 @@ def get_runs(limit: int | None = None, full: bool = False):
 
 
 @app.get("/api/runs/{run_id}")
-def get_run(run_id: str):
+def get_run(run_id: str, full: bool = True):
     with SessionLocal() as db:
         run = db.get(Run, run_id)
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
-        return _run_dict(run)
+        return _run_dict(run, with_log=full)
 
 
 @app.get("/api/runs/queue/status")

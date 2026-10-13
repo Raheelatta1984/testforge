@@ -226,7 +226,7 @@ Locator options: `kind` of `css`, `role`, `label`, `text`, `test_id`, or `placeh
 ## Performance/resource changes
 
 1. Existing one-browser/single-process deployment guardrails remain in force; no parallel test implementation was introduced.
-2. New dashboard users default to live-run preview off. Previously saved user preferences are respected. The API's legacy `display_window` default is unchanged, but it still does not render frames without a viewer.
+2. New dashboard users default to live-run preview off. Previously saved user preferences are respected. The Runs tab can also enable/disable the preview of a queued or running single recording without restarting it; the API's legacy `display_window` default is unchanged. Preview frames are still skipped when no viewer is attached.
 3. The newer scenario/reporting extension supersedes this original performance default: API-started single and batch runs now enforce one low-quality JPEG per step, reused in logs/PDFs/live views. The old `none`/`failure` API settings no longer disable required evidence. Recorder step screenshots remain separate. See `scenarios-secrets-and-pdf-reports.md` for cost and security limits.
 4. Typing delay is zero in single/batch execution and the new runtime. Necessary Playwright actionability and assertion waits remain; removing them would create false failures or false passes.
 5. Recording autosaves write current canonical data without rebuilding CSV/XLSX/scripts on each debounce. Explicit SAVE/publish regenerates exports. Live recording GET reads current database steps rather than a lagging file snapshot.
