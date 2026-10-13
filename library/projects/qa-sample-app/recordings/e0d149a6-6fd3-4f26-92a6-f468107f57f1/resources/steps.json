@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "id": "efdd4ac2-6b1f-4952-8c28-704f65275aa0",
+    "order": 1,
+    "action": "navigate",
+    "value": "https://www.hm.com/",
+    "label": "Open https://www.hm.com/",
+    "selector": null
+  }
+]

@@ -9,6 +9,15 @@
   "project_id": "qa-sample-app",
   "start_url": "https://www.hm.com/",
   "status": "active",
-  "steps": [],
+  "steps": [
+    {
+      "action": "navigate",
+      "id": "efdd4ac2-6b1f-4952-8c28-704f65275aa0",
+      "label": "Open https://www.hm.com/",
+      "order": 1,
+      "selector": null,
+      "value": "https://www.hm.com/"
+    }
+  ],
   "tags": ""
 }
