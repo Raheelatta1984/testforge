@@ -89,6 +89,47 @@ function clearImportSession(projectId) {
   try { window.sessionStorage.removeItem(sessionKey(projectId)); } catch (_) {}
 }
 
+/* Paste/type instead of upload: the textarea is only another way to hand the
+   same bytes to the same preview pipeline, so both examples below preview
+   cleanly through the static parser (replace example.test with your own
+   authorised test URL before testing/saving). */
+const PASTE_FORMAT_OPTIONS = [
+  {id:'auto',label:'Auto-detect (recommended)'},
+  {id:'python',label:'Playwright Python (.py)'},
+  {id:'typescript',label:'Playwright TypeScript (.ts)'},
+  {id:'javascript',label:'Playwright JavaScript / Cypress (.js)'},
+  {id:'json',label:'JSON steps / Selenium IDE / Postman (.json)'},
+  {id:'csv',label:'CSV step table (.csv)'},
+  {id:'feature',label:'Gherkin / Cucumber (.feature)'},
+  {id:'robot',label:'Robot Framework (.robot)'},
+  {id:'yaml',label:'YAML steps (.yaml)'},
+  {id:'xml',label:'XML steps (.xml)'},
+  {id:'java',label:'Selenium Java (.java)'},
+  {id:'cs',label:'Selenium C# (.cs)'},
+  {id:'text',label:'Plain-English steps (.txt)'}
+];
+const PASTE_EXAMPLE_PYTHON = [
+  'from playwright.sync_api import expect',
+  '',
+  'def test_greeting(page):',
+  '    page.goto("https://example.test")',
+  '    page.get_by_label("Name").fill("Ada")',
+  '    page.get_by_role("button", name="Continue").click()',
+  '    expect(page.locator("#out")).to_have_text("Hello, Ada")',
+  ''
+].join('\n');
+const PASTE_EXAMPLE_TYPESCRIPT = [
+  "import { test, expect } from '@playwright/test';",
+  '',
+  "test('greeting', async ({ page }) => {",
+  "  await page.goto('https://example.test');",
+  "  await page.getByLabel('Name').fill('Ada');",
+  "  await page.getByRole('button', { name: 'Continue' }).click();",
+  "  await expect(page.locator('#out')).toHaveText('Hello, Ada');",
+  '});',
+  ''
+].join('\n');
+
 function ImportScripts({ project, onSaved, onRun }) {
   const [files, setFiles] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -126,9 +167,16 @@ function ImportScripts({ project, onSaved, onRun }) {
   // only invokes the AI repair loop when the static validator reports errors.
   const [smart,setSmart]=useState(true);
   const [aiInfo,setAiInfo]=useState(null);
+  // Paste/type area: an alternative to the file picker that feeds the exact
+  // same preview -> variables -> draft test -> save -> run flow below.
+  const [inputMode,setInputMode]=useState('upload');
+  const [pasteText,setPasteText]=useState('');
+  const [pasteFormat,setPasteFormat]=useState('auto');
+  const [pasteFilename,setPasteFilename]=useState('');
+  const [pasteFormats,setPasteFormats]=useState(PASTE_FORMAT_OPTIONS);
   const generation = useRef(0);
   useEffect(()=>{API.get('/api/imports/packs').then(setPacks).catch(()=>{});},[]);
-  useEffect(()=>{API.get('/api/imports/formats').then(d=>setAiInfo(d.ai_onboarding||null)).catch(()=>{});},[]);
+  useEffect(()=>{API.get('/api/imports/formats').then(d=>{setAiInfo(d.ai_onboarding||null);if(d.paste && Array.isArray(d.paste.formats) && d.paste.formats.length) setPasteFormats(d.paste.formats);}).catch(()=>{});},[]);
   useEffect(()=>{API.get('/api/imports/templates').then(data=>{setTemplates(data.templates||[]);setTemplatesNotice(data.notice||'');}).catch(()=>{});},[]);
 
   /* Restore whatever this project last had: the parsed steps, the plan options and
@@ -137,15 +185,27 @@ function ImportScripts({ project, onSaved, onRun }) {
   const restore = async (projectId) => {
     const session = loadImportSession(projectId);
     const version = generation.current;
-    if (session && session.preview) {
-      setPreview(session.preview);
-      setPlanOptions(session.planOptions || '{}');
-      setName(session.name || session.preview.name || '');
-      setTags(session.tags || 'imported');
-      setSaved(session.saved || null);
-      setDraft(session.draft || null);
-      setNotice('Restored your last import for this project, including its test receipt. ' +
-        'The uploaded file itself is not kept — only the parsed steps.');
+    if (session && (session.preview || session.pasteText)) {
+      if (session.preview) {
+        setPreview(session.preview);
+        setPlanOptions(session.planOptions || '{}');
+        setName(session.name || session.preview.name || '');
+        setTags(session.tags || 'imported');
+        setSaved(session.saved || null);
+        setDraft(session.draft || null);
+        setNotice('Restored your last import for this project, including its test receipt. ' +
+          (session.preview.input_method === 'paste'
+            ? 'Your pasted script text is restored below — edit and re-process it any time.'
+            : 'The uploaded file itself is not kept — only the parsed steps.'));
+      }
+      // A paste, unlike an upload, is just text the user typed: keep it with
+      // the session so switching tabs does not throw their script away.
+      if (session.pasteText !== undefined || session.inputMode) {
+        setInputMode(session.inputMode || (session.pasteText ? 'paste' : 'upload'));
+        setPasteText(session.pasteText || '');
+        setPasteFormat(session.pasteFormat || 'auto');
+        setPasteFilename(session.pasteFilename || '');
+      }
     }
     const draftId = session && session.draft && session.draft.id;
     try {
@@ -183,15 +243,18 @@ function ImportScripts({ project, onSaved, onRun }) {
     setPreview(null); setSaved(null); setFiles([]); setNotice(''); setError(''); setDraft(null);
     setPlanOptions('{}'); setVariablePlan(null); setAdopted([]); setPollNote('');
     setOverrideOpen(false); setOverrideReason(''); setOverrideAck(false);
+    setInputMode('upload'); setPasteText(''); setPasteFormat('auto'); setPasteFilename('');
     if (project && project.id) restore(project.id);
   }, [project && project.id]);
 
   /* Keep the session cache in step with what is on screen, so leaving the tab and
      coming back does not cost another upload and another test. */
   useEffect(() => {
-    if (!project || !project.id || (!preview && !draft && !saved)) return;
-    saveImportSession(project.id, { preview, planOptions, name, tags, draft, saved });
-  }, [project && project.id, preview, planOptions, name, tags, draft, saved]);
+    if (!project || !project.id || (!preview && !draft && !saved && !pasteText)) return;
+    saveImportSession(project.id, { preview, planOptions, name, tags, draft, saved,
+      inputMode, pasteText, pasteFormat, pasteFilename });
+  }, [project && project.id, preview, planOptions, name, tags, draft, saved,
+      inputMode, pasteText, pasteFormat, pasteFilename]);
 
   const base64ToBlob = (encoded, name) => {
     const raw = atob(encoded || '');
@@ -323,6 +386,43 @@ function ImportScripts({ project, onSaved, onRun }) {
     } catch(err) { if(version===generation.current) setError(err.message); }
     finally {setBusy(false);}
   };
+  /* Editing a paste after it was processed must not leave stale steps on
+     screen that no longer match the text: drop the old preview and say why,
+     exactly as choosing a different file drops an upload preview. */
+  const invalidatePastePreview = () => {
+    if (!preview || preview.input_method !== 'paste') return;
+    setPreview(null); setDraft(null); setSaved(null); setVariablePlan(null); setAdopted([]); setPollNote('');
+    setNotice('Script edited — process it again so the validated steps match the text.');
+  };
+  const inspectPaste = async () => {
+    setBusy(true); setError(''); setPreview(null); setSaved(null); setNotice('');setDraft(null);setVariablePlan(null);setAdopted([]);setPollNote('');
+    const version=generation.current;
+    try {
+      if(!pasteText.trim()) throw new Error('Paste or type a script first — the script area is empty.');
+      if(new Blob([pasteText]).size>1048576) throw new Error('The pasted script exceeds 1 MiB. Split it into one test per recording.');
+      const result=await API.post('/api/imports/preview-text'+(smart?'?smart=true':'?smart=false'),
+        {content:pasteText, format:pasteFormat, ...(pasteFilename.trim()?{filename:pasteFilename.trim()}:{}), smart});
+      if(version!==generation.current) return;
+      setPreview(result); setPlanOptions(JSON.stringify(result.execution_plan || {},null,2)); setName(result.name);
+      let note=result.notice || 'Pasted script processed — preview only: no browser launched, no source code executed, nothing saved or published.';
+      if(result.paste && result.paste.filename)
+        note=`Processed as ${result.paste.filename} (${result.paste.lines} line(s)). `+note;
+      if(result.ai && result.ai.used)
+        note=`AI SMART ONBOARDING: ${result.ai.converted_steps||result.steps.length} step(s) converted, ${result.ai.step_fixes||0} per-step repair loop(s), ${result.ai.calls} AI call(s). `+note;
+      setNotice(note);
+      if(result.can_save && result.variable_suggestions && Object.keys(result.variable_suggestions).length)
+        setNotice(note+` Detected ${Object.keys(result.variable_suggestions).length} declared variable(s) — review input values below.`);
+    } catch(err) { if(version===generation.current) setError(err.message); }
+    finally {setBusy(false);}
+  };
+  const loadPasteExample = (kind) => {
+    invalidatePastePreview();
+    setPasteText(kind==='typescript' ? PASTE_EXAMPLE_TYPESCRIPT : PASTE_EXAMPLE_PYTHON);
+    setPasteFormat(kind==='typescript' ? 'typescript' : 'python');
+    setPasteFilename(kind==='typescript' ? 'greeting.spec.ts' : 'greeting.py');
+    setError('');
+    setNotice('Example loaded — replace https://example.test with your authorised test URL, then PROCESS PASTED SCRIPT.');
+  };
   const save = async () => {
     if(!preview?.can_save) return;
     setBusy(true); setError(''); const version=generation.current;
@@ -353,7 +453,7 @@ function ImportScripts({ project, onSaved, onRun }) {
   /* Why SAVE is unavailable, in words. A greyed-out button with no reason is what
      made a passing test look like a broken gate. */
   const lockReason = !preview || saved ? '' :
-    !preview.can_save ? 'SAVE is locked: the preview still reports errors. Fix them and run VALIDATE & PREVIEW again.' :
+    !preview.can_save ? 'SAVE is locked: the preview still reports errors. Fix them and validate/process it again (VALIDATE & PREVIEW for a file, PROCESS PASTED SCRIPT for pasted text).' :
     !name.trim() ? 'SAVE is locked: give the recording a name.' :
     !draft ? 'SAVE is locked: nothing has been tested yet. Run TEST BEFORE PUBLISHING — a passing test is what authorises publication.' :
     testRunning ? `SAVE is locked while the test runs (${draft.percent || 0}%).` :
@@ -365,7 +465,7 @@ function ImportScripts({ project, onSaved, onRun }) {
   const canOverride = !!preview?.can_save && !!name.trim() && !saved && !testRunning;
   return e('details',{className:'border border-indigo-800 bg-slate-900 p-4 rounded-xl space-y-3'},
     e('summary',{className:'font-bold text-indigo-300 cursor-pointer'},'UPLOAD TEST SCRIPTS'),
-    e('p',{className:'text-xs text-slate-300'},'Any format you already have: plain text/Markdown/logs, CSV/TSV/PSV or any smart table, Excel (.xlsx/.xls), Word (.docx), PDF text layers, XML/YAML, JUnit-style case lists, Selenium IDE (.side) or legacy HTML suites, Postman collections, Robot Framework, Cypress, Playwright Python/JS/TS, restricted Java/C# Selenium, HAR captures, BDD/Cucumber (.feature), a restricted Jenkinsfile + its test script, or a runner script + its steps.json/execution-plan.json. The file is sniffed when the extension is unknown; unsupported syntax is converted by AI smart onboarding when enabled, and anything it cannot convert is named in the notes. Arbitrary code, shell commands, macros and custom step definitions never run.'),
+    e('p',{className:'text-xs text-slate-300'},'Upload a file — or use PASTE / TYPE SCRIPT below to type or paste the script directly, with no file at all. Any format you already have: plain text/Markdown/logs, CSV/TSV/PSV or any smart table, Excel (.xlsx/.xls), Word (.docx), PDF text layers, XML/YAML, JUnit-style case lists, Selenium IDE (.side) or legacy HTML suites, Postman collections, Robot Framework, Cypress, Playwright Python/JS/TS, restricted Java/C# Selenium, HAR captures, BDD/Cucumber (.feature), a restricted Jenkinsfile + its test script, or a runner script + its steps.json/execution-plan.json. The file is sniffed when the extension is unknown; a paste is auto-detected or parsed as the format you pick. Unsupported syntax is converted by AI smart onboarding when enabled, and anything it cannot convert is named in the notes. Arbitrary code, shell commands, macros and custom step definitions never run.'),
     e('p',{className:'text-xs text-amber-300'},'Use {{variables}} instead of passwords. Saving uses the existing GitHub publication settings. Unsupported source is never silently treated as tested. AI smart onboarding: the static validator runs first; if it reports unsupported syntax and an AI key is configured, the AI converts the script to canonical steps and every step is re-validated (validate → AI fix → re-validate, looping per step). Uploaded code is still never executed, and publishing still requires a passing test.'),
     e('label',{className:'block text-xs'},'Or start with a synthetic domain pack',
       e('select',{'aria-label':'Synthetic domain pack',defaultValue:'',disabled:busy || testRunning,className:'block bg-slate-800 p-2 rounded',onChange:async ev=>{
@@ -396,12 +496,44 @@ function ImportScripts({ project, onSaved, onRun }) {
         setFiles([]);setPreview(null);setSaved(null);setDraft(null);setNotice('');setError('');setPollNote('');
         setPlanOptions('{}');setVariablePlan(null);setAdopted([]);
         setOverrideOpen(false);setOverrideReason('');setOverrideAck(false);
+        setPasteText('');setPasteFormat('auto');setPasteFilename('');
       }},'CLEAR AND START A NEW IMPORT'),
       saved && e('span',{className:'text-[10px] text-emerald-300'},
         `Saved as "${saved.name}"${saved.unverified ? ' · UNVERIFIED (no passing test)' : ' · tested before publishing'}`)),
-    e('input',{key:project.id,type:'file',multiple:true,'aria-label':'Upload test scripts',disabled:busy || testRunning,onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);setPollNote('');clearImportSession(project.id);},className:'block w-full text-xs'}),
+    e('div',{className:'flex flex-wrap gap-2',role:'group','aria-label':'Provide a script by upload or paste'},
+      e('button',{type:'button','aria-pressed':inputMode==='upload',disabled:busy || testRunning,onClick:()=>setInputMode('upload'),
+        className:'key-btn '+(inputMode==='upload'?'bg-indigo-700 text-white border-indigo-500':'')},'📁 UPLOAD FILE'),
+      e('button',{type:'button','aria-pressed':inputMode==='paste',disabled:busy || testRunning,onClick:()=>setInputMode('paste'),
+        className:'key-btn '+(inputMode==='paste'?'bg-indigo-700 text-white border-indigo-500':'')},'⌨️ PASTE / TYPE SCRIPT')),
+    inputMode==='upload' && e('div',{className:'space-y-3'},
+      e('input',{key:project.id,type:'file',multiple:true,'aria-label':'Upload test scripts',disabled:busy || testRunning,onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);setPollNote('');clearImportSession(project.id);},className:'block w-full text-xs'}),
+      e('button',{disabled:busy || !files.length || testRunning,onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW')),
+    inputMode==='paste' && e('div',{className:'border border-indigo-800 bg-slate-950 p-3 rounded-xl space-y-2'},
+      e('p',{className:'text-xs font-bold text-indigo-300'},'PASTE OR TYPE A SCRIPT — NO FILE NEEDED'),
+      e('p',{className:'text-[11px] text-slate-400'},'Paste a Playwright Python or JS/TS script (a bare page.* snippet works too), Cypress, canonical JSON steps, a CSV step table, Gherkin, Robot, YAML/XML or plain-English steps. PROCESS PASTED SCRIPT runs the same AI-powered validation as an upload: static validation first, AI conversion + per-step re-validation when needed, then review variables → TEST BEFORE PUBLISHING → SAVE TO LIBRARY & PUBLISH → RUN SAVED STEPS below. The pasted source is never executed.'),
+      e('div',{className:'flex flex-wrap gap-2'},
+        e('select',{'aria-label':'Pasted script format',value:pasteFormat,disabled:busy || testRunning,
+          onChange:ev=>{setPasteFormat(ev.target.value);invalidatePastePreview();},
+          className:'bg-slate-800 p-2 rounded text-xs flex-1 min-w-[14rem]'},
+          pasteFormats.map(item=>e('option',{key:item.id,value:item.id},item.label))),
+        e('input',{'aria-label':'Pasted script filename (optional)',value:pasteFilename,disabled:busy || testRunning,
+          onChange:ev=>{setPasteFilename(ev.target.value);invalidatePastePreview();},
+          placeholder:'File name (optional), e.g. login.spec.ts',className:'bg-slate-800 p-2 rounded text-xs flex-1 min-w-[12rem]'})),
+      e('textarea',{'aria-label':'Paste or type a test script',value:pasteText,disabled:busy || testRunning,spellCheck:false,
+        onChange:ev=>{setPasteText(ev.target.value);invalidatePastePreview();},
+        onKeyDown:ev=>{if((ev.ctrlKey || ev.metaKey) && ev.key==='Enter' && pasteText.trim() && !busy && !testRunning) inspectPaste();},
+        placeholder:'Paste your script here — e.g. a Playwright test:\n\ndef test_login(page):\n    page.goto("https://your-authorized-test-app.example")\n    page.get_by_label("Username").fill("{{username}}")\n    page.get_by_role("button", name="Sign in").click()',
+        rows:14,className:'w-full bg-slate-900 border border-slate-700 p-3 rounded text-xs font-mono leading-relaxed'}),
+      e('div',{className:'flex flex-wrap gap-2 items-center justify-between'},
+        e('span',{className:'text-[10px] text-slate-500'},
+          `${pasteText.length} character(s) · ${pasteText ? pasteText.split(/\r\n|\r|\n/).length : 0} line(s) · ${(new Blob([pasteText]).size/1024).toFixed(1)} KiB / 1024 KiB · Ctrl/Cmd+Enter to process`),
+        e('span',{className:'flex flex-wrap gap-2'},
+          e('button',{type:'button',disabled:busy || testRunning,onClick:()=>loadPasteExample('python'),className:'key-btn'},'PYTHON EXAMPLE'),
+          e('button',{type:'button',disabled:busy || testRunning,onClick:()=>loadPasteExample('typescript'),className:'key-btn'},'JS/TS EXAMPLE'),
+          pasteText && e('button',{type:'button',disabled:busy || testRunning,onClick:()=>{invalidatePastePreview();setPasteText('');clearImportSession(project.id);},className:'key-btn'},'CLEAR SCRIPT'))),
+      e('button',{type:'button',disabled:busy || !pasteText.trim() || testRunning,onClick:inspectPaste,
+        className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'PROCESSING…':'PROCESS PASTED SCRIPT')),
     e('div',{className:'flex flex-wrap items-center gap-3'},
-      e('button',{disabled:busy || !files.length || testRunning,onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'),
       e('label',{className:'flex items-center gap-1 text-xs text-slate-300'},
         e('input',{type:'checkbox','aria-label':'AI smart onboarding',checked:smart,disabled:busy,onChange:ev=>setSmart(ev.target.checked)}),
         'AI SMART ONBOARDING',
@@ -411,7 +543,7 @@ function ImportScripts({ project, onSaved, onRun }) {
     pollNote && e('p',{role:'status',className:'text-amber-300 text-xs'},pollNote),
     notice && e('p',{role:'status',className:'text-emerald-300 text-xs'},notice),
     preview && e('div',{className:'space-y-2'},
-      e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?(preview.ai&&preview.ai.used?'AI-repaired · ready to save':'ready to save'):'corrections required'} · sequential execution` + (preview.restored ? ' · recovered receipt' : '')),
+      e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?(preview.ai&&preview.ai.used?'AI-repaired · ready to save':'ready to save'):'corrections required'} · sequential execution` + (preview.restored ? ' · recovered receipt' : '') + (preview.input_method==='paste' ? ` · pasted script${preview.paste && preview.paste.filename ? ' ('+preview.paste.filename+')' : ''}` : '')),
       preview.detected && e('p',{className:'text-xs text-indigo-300'},`Detected as ${preview.detected.format} — ${preview.detected.why}`),
       e('button',{onClick:reviewVariables,disabled:busy || !preview.steps.length,className:'bg-amber-700 px-3 py-2 rounded text-xs disabled:opacity-50'},'REVIEW INPUT VALUES → VARIABLES'),
       adopted.length>0 && e('p',{role:'status',className:'text-xs text-emerald-300'},`Variables created: ${adopted.map(v=>v.name).join(', ')}`),
