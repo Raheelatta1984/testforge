@@ -140,9 +140,14 @@ async def _exclusive(work, *args):
 @router.get("/api/imports/formats")
 def formats():
     from app import ai_onboarding
+    from app.script_import import PASTE_FORMAT_LABELS
     return {"formats": FORMATS, "actions": sorted(ACTIONS), "max_bytes": MAX_BYTES,
             "max_steps": MAX_STEPS, "sequential": True, "executes_source": False,
             "ai_onboarding": {"available": ai_onboarding.available(), "model": ai_onboarding.MODEL},
+            "paste": {"supported": True, "endpoint": "/api/imports/preview-text",
+                      "max_bytes": MAX_BYTES,
+                      "formats": [{"id": key, "label": label} for key, label in PASTE_FORMAT_LABELS],
+                      "notice": "Paste or type a script instead of uploading a file. It is processed by the exact same static + AI-powered validation, draft-test and save flow as an upload; the pasted source is never executed."},
             "notice": "Static supported-subset conversion first; when the static validator reports unsupported syntax and an AI key is configured, AI smart onboarding converts the script to canonical steps and re-validates every single step (fix loop). Never code execution. Preview errors that AI could not resolve must still be corrected before saving. GitHub publication follows existing library settings."}
 
 
@@ -155,6 +160,82 @@ async def preview(request: Request, filename: str, smart: bool = True):
         # exclusive gate and worker-thread bounds apply to the whole loop.
         return await _exclusive(ai_onboarding.smart_parse_file, filename[:255], data)
     return await _exclusive(parse_file, filename[:255], data)
+
+
+def _pasted_display_name(content, current, resolved_filename):
+    """A human name for a paste whose parser only had the generic file name.
+
+    Uploads are named after their file; a paste has no meaningful file name, so
+    a Playwright test title (or ``test_*`` function) names the recording the
+    tester is about to create. The dashboard name field stays editable either
+    way, and a parser-supplied name (scenario, JSON ``name``...) always wins.
+    """
+    import re
+    from pathlib import PurePosixPath
+    stem = PurePosixPath(resolved_filename).stem
+    if current and current != stem and current.lower() not in {"pasted", "upload"}:
+        return current
+    match = re.search(r"""\btest(?:\.only|\.skip)?\s*\(\s*['"]([^'"\n]{1,200})['"]""", content)
+    if match:
+        return match.group(1).strip()[:200] or current
+    match = re.search(r"(?m)^\s*(?:async\s+)?def\s+(test_\w+)\s*\(", content)
+    if match:
+        return match.group(1).removeprefix("test_").replace("_", " ").strip().capitalize()[:200] or current
+    match = re.search(r"(?m)^\s*Scenario:\s*(.+)$", content)
+    if match:
+        return match.group(1).strip()[:200] or current
+    return current
+
+
+@router.post("/api/imports/preview-text")
+async def preview_text(request: Request, smart: bool = True):
+    """Paste/type a script: the upload preview, without the file.
+
+    The pasted text is given the filename an upload of the same script would
+    have had (explicit format, filename hint, or content detection), encoded
+    once, and run through the identical pipeline: static validation first,
+    AI smart onboarding (validate -> convert -> re-validate per step) when it
+    reports unsupported syntax, the same exclusive gate and size bounds, and
+    the same preview result -- so variable review, TEST BEFORE PUBLISHING,
+    SAVE TO LIBRARY & PUBLISH and RUN SAVED STEPS all work unchanged.
+    Pasted source is never executed, exactly like uploaded source.
+    """
+    from app.script_import import detect_pasted_filename
+    body = await body_json(request)
+    content = body.get("content", body.get("script", body.get("text")))
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(422, "Paste or type a script first (the script area is empty)")
+    try:
+        data = content.encode("utf-8")
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise HTTPException(422, "The pasted script could not be read as UTF-8 text") from exc
+    if len(data) > MAX_BYTES:
+        raise HTTPException(413, "Pasted script exceeds the 1 MiB import limit")
+    filename_hint = body.get("filename", body.get("file_name"))
+    if filename_hint is not None and not isinstance(filename_hint, str):
+        raise HTTPException(422, "filename must be a file name such as login.spec.ts")
+    format_hint = body.get("format", body.get("language"))
+    if format_hint is not None and not isinstance(format_hint, str):
+        raise HTTPException(422, "format must be one of the paste formats (or auto)")
+    try:
+        resolved = detect_pasted_filename(content, filename_hint, format_hint)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    use_smart = body.get("smart") if isinstance(body.get("smart"), bool) else smart
+    from app import ai_onboarding
+    if use_smart and ai_onboarding.available():
+        result = await _exclusive(ai_onboarding.smart_parse_file, resolved[:255], data)
+    else:
+        result = await _exclusive(parse_file, resolved[:255], data)
+    result = {**result,
+              "input_method": "paste",
+              "paste": {"filename": resolved,
+                        "format": str(format_hint or "auto").strip().lower() or "auto",
+                        "characters": len(content),
+                        "lines": content.count("\n") + 1,
+                        "smart": bool(use_smart)}}
+    result["name"] = _pasted_display_name(content, result.get("name") or "", resolved)
+    return result
 
 
 @router.post("/api/imports/preview-bundle")

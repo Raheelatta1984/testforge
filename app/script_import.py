@@ -42,6 +42,114 @@ LOCATORS = {"locator": "css", "get_by_role": "role", "getByRole": "role", "get_b
             "get_by_placeholder": "placeholder", "getByPlaceholder": "placeholder"}
 
 
+# --- Pasted / typed scripts -------------------------------------------------
+# The paste area in the dashboard is not a second importer: it only has to give
+# the pasted text the filename the existing parsers would have chosen for an
+# uploaded file, then hand the bytes to parse_file / smart_parse_file. Keeping
+# the detection here (pure, offline, testable) means an upload and a paste of
+# the same script always produce the same preview.
+PASTE_FORMATS = {
+    "auto": None,
+    "python": "pasted.py", "py": "pasted.py", "playwright-python": "pasted.py",
+    "javascript": "pasted.js", "js": "pasted.js", "playwright-javascript": "pasted.js",
+    "playwright": "pasted.js",
+    "typescript": "pasted.ts", "ts": "pasted.ts", "playwright-typescript": "pasted.ts",
+    "json": "pasted.json", "csv": "pasted.csv", "tsv": "pasted.tsv",
+    "feature": "pasted.feature", "gherkin": "pasted.feature", "bdd": "pasted.feature",
+    "robot": "pasted.robot", "yaml": "pasted.yaml", "yml": "pasted.yaml",
+    "xml": "pasted.xml", "java": "pasted.java",
+    "csharp": "pasted.cs", "cs": "pasted.cs", "c#": "pasted.cs",
+    "text": "pasted.txt", "txt": "pasted.txt", "plain": "pasted.txt",
+    "markdown": "pasted.md", "md": "pasted.md",
+}
+# Display labels for the paste-format picker, in picker order.
+PASTE_FORMAT_LABELS = [
+    ("auto", "Auto-detect (recommended)"),
+    ("python", "Playwright Python (.py)"),
+    ("typescript", "Playwright TypeScript (.ts)"),
+    ("javascript", "Playwright JavaScript / Cypress (.js)"),
+    ("json", "JSON steps / Selenium IDE / Postman (.json)"),
+    ("csv", "CSV step table (.csv)"),
+    ("feature", "Gherkin / Cucumber (.feature)"),
+    ("robot", "Robot Framework (.robot)"),
+    ("yaml", "YAML steps (.yaml)"),
+    ("xml", "XML steps (.xml)"),
+    ("java", "Selenium Java (.java)"),
+    ("cs", "Selenium C# (.cs)"),
+    ("text", "Plain-English steps (.txt)"),
+]
+_SNIFF_TO_FILENAME = {
+    "json": "pasted.json", "xml": "pasted.xml", "jenkins": "Jenkinsfile",
+    "robot": "pasted.robot", "feature": "pasted.feature", "js": "pasted.js",
+    "py": "pasted.py", "java": "pasted.java", "cs": "pasted.cs",
+    "yaml": "pasted.yaml", "text": "pasted.txt", "html": "pasted.html",
+}
+
+
+def _safe_paste_filename(name):
+    """A pasted filename hint as a bare file name (never a host path)."""
+    cleaned = PurePosixPath(str(name).replace("\\", "/")).name.strip()
+    return cleaned[:255] if cleaned and cleaned not in {".", ".."} else ""
+
+
+def detect_pasted_filename(content, filename=None, format_hint=None):
+    """Pick the upload filename a pasted script should be parsed as.
+
+    An explicit format (or a filename with an extension) always wins. With
+    neither, the content decides: strong Playwright markers first -- including
+    bare ``page.*`` snippets with no imports or test wrapper, which the generic
+    text sniffer would otherwise read as English -- then the same content
+    sniffing an unknown file extension gets. Detection only chooses which
+    existing parser runs; it never executes or rewrites the script.
+    """
+    hint = str(format_hint or "").strip().lower()
+    if hint and hint not in PASTE_FORMATS:
+        raise ImportProblem(
+            "Unknown script format %r; use one of: %s"
+            % (format_hint, ", ".join(key for key, _ in PASTE_FORMAT_LABELS)))
+    mapped = PASTE_FORMATS.get(hint) if hint else None
+    safe = _safe_paste_filename(filename) if filename else ""
+    if safe:
+        if PurePosixPath(safe).suffix:
+            return safe
+        if mapped:
+            return PurePosixPath(mapped).stem.replace("pasted", safe[:200]) + PurePosixPath(mapped).suffix
+        safe_stem = safe
+    else:
+        safe_stem = ""
+    if mapped:
+        return (safe_stem + PurePosixPath(mapped).suffix) if safe_stem else mapped
+
+    text = str(content or "").lstrip("\ufeff")
+    sample = text[:200_000]
+    # Bare Playwright snippets: page.* calls with no imports/wrapper around them.
+    js_markers = re.search(
+        r"getBy|@playwright/test|=>|\bcy\s*\.|\b(?:const|let|var)\s|await\s+page\s*\.", sample)
+    if re.search(r"\bpage\s*\.\s*get_by_", sample):
+        detected = "pasted.py"
+    elif re.search(r"\bpage\s*\.\s*(?:goto|locator|click|fill|type|check|hover|press)\s*\(", sample) \
+            and not js_markers:
+        detected = "pasted.py"
+    elif js_markers and re.search(r"\bpage\s*\.|\bcy\s*\.", sample):
+        detected = "pasted.ts" if re.search(r"\(\s*\{\s*page\s*\}\s*:\s*\{|\bpage\s*:\s*Page\b", sample) \
+            else "pasted.js"
+    elif re.search(r"(?m)^\s*(?:steps|test|tests)\s*:\s*$", sample) \
+            and re.search(r"(?m)^\s*-\s+\S", sample):
+        detected = "pasted.yaml"
+    else:
+        detected = None
+    if detected is None:
+        from app import import_formats
+        kind = import_formats.sniff(sample)["format"]
+        if kind == "table":
+            first = next((line for line in sample.splitlines() if line.strip()), "")
+            detected = "pasted.tsv" if "\t" in first else (
+                "pasted.psv" if "|" in first and "," not in first else "pasted.csv")
+        else:
+            detected = _SNIFF_TO_FILENAME.get(kind, "pasted.txt")
+    return (safe_stem + PurePosixPath(detected).suffix) if safe_stem else detected
+
+
 class ImportProblem(ValueError):
     pass
 
