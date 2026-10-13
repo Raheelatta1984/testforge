@@ -554,6 +554,9 @@
         "placeholder_stores1",
         "Order_Qty",
         "Orser_commwnta",
+        "store_picker_postcode",
+        "store_picker_postcode_2",
+        "store_picker_postcode_3",
         "HFM_Ext_pass",
         "div_nth_div"
       ]

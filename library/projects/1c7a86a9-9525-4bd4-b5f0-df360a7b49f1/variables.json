@@ -42,6 +42,27 @@
     "value": "Test order ignore"
   },
   {
+    "category": "Parameter",
+    "id": "0087e8f7-bb8e-45a2-803a-297be31dc600",
+    "is_secret": false,
+    "name": "store_picker_postcode",
+    "value": "0"
+  },
+  {
+    "category": "Parameter",
+    "id": "a1135a97-2b69-45cd-8114-fdc6d987c1e8",
+    "is_secret": false,
+    "name": "store_picker_postcode_2",
+    "value": "4"
+  },
+  {
+    "category": "Parameter",
+    "id": "fac1890a-164d-465b-bcd9-ea9f4d097ac8",
+    "is_secret": false,
+    "name": "store_picker_postcode_3",
+    "value": "7"
+  },
+  {
     "category": "General",
     "id": "c72221df-6cf4-4a70-a1cb-0c304315012c",
     "is_secret": true,
