@@ -78,8 +78,12 @@ ENV TF_ARTIFACTS=/app/artifacts \
 # deploy time to let this checkout-less container publish library/ through the
 # GitHub API; without them publishing is reported as disabled, and says why.
 
-EXPOSE 8000
+# Render's default web-service port is 10000. EXPOSE is only image metadata;
+# the runtime command below binds the port supplied by the platform, while the
+# image still defaults to 8000 for local Docker Compose use.
+EXPOSE 10000
 
 # Exactly one worker. The guardrails above are per-process, so a second worker
 # would silently double every limit and both would compete for the same memory.
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Bind the same PORT that browser_url()/playback_url() use for loopback replays.
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${PORT:-8000}\" --workers 1"]

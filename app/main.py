@@ -53,7 +53,7 @@ except Exception as exc:
     BATCH_ERROR = redact(exc)
     print(f"BATCH EXECUTOR UNAVAILABLE: {BATCH_ERROR}")
 
-app = FastAPI(title="TestForge Titan ERP - Optimized")
+app = FastAPI(title="TestForge Testing Tool")
 from app.access_control import AccessGate, router as access_router
 app.add_middleware(AccessGate)
 app.include_router(access_router)

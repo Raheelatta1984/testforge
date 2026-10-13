@@ -299,17 +299,35 @@ class ScenarioTests(unittest.TestCase):
         static = Path(library_store.__file__).resolve().parent / 'static'
         dashboard = (static / 'index.html').read_text()
         self.assertIn('/demo-components.js', dashboard)
-        self.assertIn('["demo","🧪"]', dashboard)
+        self.assertIn('/future-components.js', dashboard)
+        self.assertIn('["demo", "🧪", "Demo"]', dashboard)
+        self.assertIn('["future", "🗺️", "Future release planning"]', dashboard)
         self.assertIn('tab === "demo" && e(DemoTab', dashboard)
-        # Every tab needs a hover/assistive name: the bar is icon-only.
-        self.assertIn("title: k.toUpperCase()", dashboard)
+        self.assertIn('tab === "future" && e(FuturePlanningTab)', dashboard)
+        # Every tab has a visible name as well as native and assistive labels.
+        self.assertIn("title: label", dashboard)
+        self.assertIn("'aria-label': label", dashboard)
+        self.assertIn('className: "nav-btn-label"', dashboard)
         component = (static / 'demo-components.js').read_text()
         self.assertIn('function DemoTab', component)
+        self.assertIn('function LearningSitesPanel', component)
+        for url in ('https://www.amazon.com/', 'https://www.ebay.com/',
+                    'https://www.kroger.com/', 'https://www.instacart.com/',
+                    'https://www.zara.com/', 'https://www.hm.com/'):
+            self.assertIn(url, component)
+        self.assertIn('id: "rec-learning-site"', dashboard)
+        future = (static / 'future-components.js').read_text()
+        self.assertIn('function FuturePlanningTab', future)
+        for target in ('Oracle web applications', 'SAP · Fiori / web UI', 'JD Edwards',
+                       'Odoo', 'Salesforce', '.NET / C# desktop apps', 'C++ desktop apps',
+                       'WinForms · legacy and current', 'Android apps', 'iPhone / iPad apps',
+                       'Zebra rugged devices'):
+            self.assertIn(target, future)
         for fixture in ('/demo.html', '/domain-demo.html'):
             self.assertTrue((static / fixture.lstrip('/')).is_file(), fixture)
             self.assertIn(fixture, component)
         with TestClient(app) as client:
-            for path in ('/demo-components.js', '/demo.html', '/domain-demo.html'):
+            for path in ('/demo-components.js', '/future-components.js', '/demo.html', '/domain-demo.html'):
                 self.assertEqual(client.get(path).status_code, 200, path)
             packs = client.get('/api/imports/packs').json()
             self.assertEqual({p['id'] for p in packs},

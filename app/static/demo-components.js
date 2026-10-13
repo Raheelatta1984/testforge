@@ -1,6 +1,17 @@
-/* Demo tab: the built-in sample app and the synthetic domain fixtures.
-   Everything here is served by this instance - no external site, no account,
-   no real data, and no extra service. Loaded after index.html's API helpers. */
+/* Demo tab: the built-in sample app, public retail learning URLs and synthetic fixtures.
+   The local fixtures are deterministic; the external URLs are optional learning targets.
+   Loaded after index.html's API helpers. */
+
+const TESTFORGE_LEARNING_SITES = Object.freeze([
+  { category: 'Shopping', name: 'Amazon', url: 'https://www.amazon.com/' },
+  { category: 'Shopping', name: 'eBay', url: 'https://www.ebay.com/' },
+  { category: 'Grocery', name: 'Kroger', url: 'https://www.kroger.com/' },
+  { category: 'Grocery', name: 'Instacart', url: 'https://www.instacart.com/' },
+  { category: 'Fashion', name: 'Zara', url: 'https://www.zara.com/' },
+  { category: 'Fashion', name: 'H&M', url: 'https://www.hm.com/' },
+]);
+window.TESTFORGE_LEARNING_SITES = TESTFORGE_LEARNING_SITES;
+const DEMO_SITE_CATEGORIES = ['Shopping', 'Grocery', 'Fashion'];
 
 const DEMO_PACK_BLURB = {
   commerce: 'Order quantity → line total. Negative row rejects a zero quantity.',
@@ -43,6 +54,22 @@ function DemoFrame({ src, title, height = 320 }) {
     e('iframe', { key: nonce, src, title, className: 'w-full bg-white', style: { height: `${height}px`, border: '0' } }));
 }
 
+function LearningSitesPanel({ onUse }) {
+  return e('div', { className: 'grid grid-cols-1 md:grid-cols-3 gap-3' },
+    DEMO_SITE_CATEGORIES.map(category => e('section', {
+      key: category, className: 'bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2'
+    },
+      e('h4', { className: 'text-xs font-bold uppercase tracking-wide text-slate-300' }, category),
+      TESTFORGE_LEARNING_SITES.filter(site => site.category === category).map(site =>
+        e('div', { key: site.url, className: 'flex items-center justify-between gap-2 border-t border-slate-800 pt-2' },
+          e('div', { className: 'min-w-0' },
+            e('a', { href: site.url, target: '_blank', rel: 'noopener noreferrer',
+              className: 'text-xs font-bold text-indigo-300 underline' }, site.name),
+            e('p', { className: 'text-[10px] text-slate-500 break-all' }, site.url)),
+          e('button', { type: 'button', className: 'key-btn shrink-0', onClick: () => onUse(site),
+            title: `Use ${site.name} as the AI recording start URL` }, 'USE IN AI RECORDING'))))));
+}
+
 function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
   const [projects, setProjects] = useState([]);
   const [recordings, setRecordings] = useState([]);
@@ -56,6 +83,20 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
   const sample = projects.find(p => p.id === 'qa-sample-app')
     || projects.find(p => (p.base_url || '').endsWith('/demo.html'));
   const sampleActive = !!(project && sample && project.id === sample.id);
+
+  const useLearningSite = (site) => {
+    if (!project && !sample) {
+      setNotice('Choose or create a project before starting a learning-site recording.');
+      setTab('projects');
+      return;
+    }
+    if (!project && sample) {
+      setActiveProject(sample);
+      try { localStorage.setItem('tf_project', JSON.stringify(sample)); } catch (_) {}
+    }
+    try { localStorage.setItem('tf_pending_recorder_url', site.url); } catch (_) {}
+    setTab('record');
+  };
 
   useEffect(() => {
     API.get('/api/projects?fast=true').then(list => setProjects(Array.isArray(list) ? list : []))
@@ -82,7 +123,7 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
   const createSample = async () => {
     setBusy('project'); setError('');
     try {
-      const created = await API.post('/api/projects', { name: 'TestForge Sample App', base_url: '/demo.html' });
+      const created = await API.post('/api/projects', { name: 'TestForge Testing Tool', base_url: '/demo.html' });
       setProjects(prev => [created, ...prev.filter(p => p.id !== created.id)]);
       setActiveProject(created);
       localStorage.setItem('tf_project', JSON.stringify(created));
@@ -117,7 +158,7 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
     e('div', { className: 'bg-slate-900 border border-indigo-800 rounded-2xl p-4 space-y-2' },
       e('h2', { className: 'font-bold text-lg text-indigo-300' }, '🧪 Demo · try TestForge without a real application'),
       e('p', { className: 'text-xs text-slate-400' },
-        'Both pages below are static files served by this instance. Nothing here signs in anywhere, reaches an external site, or touches a real account, payment, policy, employee or booking. Use this tab to prove recording, replay and evidence work before you point TestForge at your own application.'),
+        'The built-in pages are static files served by this instance. The optional store links farther down open real public sites only when you choose them; no site is contacted automatically. Never use real accounts, submit purchases or enter payment details. Use this tab to prove recording, replay and evidence with the local sample before you point TestForge at your own application.'),
       !sample && e('p', { role: 'alert', className: 'text-xs text-amber-300' },
         'No sample project found in this library. Create it below to follow the walkthrough.'))),
 
@@ -168,13 +209,23 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
         e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('runs') }, 'OPEN RUNS TAB'),
         e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('artifacts') }, 'OPEN ARTIFACTS TAB')))),
 
+    e(GuideSection, { id: 'demo-learning-sites', label: 'Online store learning URLs',
+      action: 'Open a public site or choose USE IN AI RECORDING to prefill its URL in the recorder.' },
+    e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3' },
+      e('h3', { className: 'text-sm font-bold text-indigo-300' }, '🌐 Shopping, grocery and fashion learning sites'),
+      e('p', { className: 'text-xs text-slate-400' },
+        'These are public external websites for learning the recorder — they are not stable test fixtures and may vary by region, cookies, sign-in requirements or anti-automation rules.'),
+      e(LearningSitesPanel, { onUse: useLearningSite }),
+      e('p', { className: 'text-[10px] text-amber-300' },
+        'Use only pages and flows you are authorized to test. Do not sign in with customer accounts, place real orders or enter payment details. For deterministic runs, use the local sample app or your own staging site.'))),
+
     e(GuideSection, { id: 'demo-sample-app', label: 'The sample app itself',
       action: 'Type a name and press Continue — this is the exact page the server browser drives on replay.' },
     e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2' },
-      e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'The sample app · /demo.html'),
+      e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'TestForge Testing Tool · /demo.html'),
       e('p', { className: 'text-xs text-slate-400' },
         'This is the page your recordings drive. It is rendered here by your own browser so you can see what the steps are doing; replay drives the identical page in the server browser. Type a name and press Continue.'),
-      e(DemoFrame, { src: '/demo.html', title: 'TestForge sample app', height: 300 }))),
+      e(DemoFrame, { src: '/demo.html', title: 'TestForge Testing Tool', height: 300 }))),
 
     e(GuideSection, { id: 'demo-voice', label: 'Voice input + text cleanup',
       action: 'Tap 🎤, speak a sentence, then ✨. Speech recognition runs in your own browser, not here.' },

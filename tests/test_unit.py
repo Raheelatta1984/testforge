@@ -1096,6 +1096,29 @@ class DockerfileTests(unittest.TestCase):
             "found'): " + ", ".join(ignored),
         )
 
+    def test_UT_IMG_02_image_binds_the_port_used_by_browser_replay(self):
+        """The web process and the server-side browser must agree on PORT.
+
+        In a Render-style container PORT=10000 used to be converted to a
+        loopback URL while the fixed Docker CMD kept uvicorn on 8000. The sample
+        page then failed with net::ERR_CONNECTION_REFUSED. The runtime CMD must
+        bind the injected port, and URL normalization must use that same value.
+        """
+        import json
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        cmd_line = next(line.strip() for line in dockerfile.splitlines()
+                        if line.strip().startswith("CMD "))
+        command = json.loads(cmd_line[len("CMD "):])
+        self.assertEqual(command[:2], ["sh", "-c"])
+        self.assertIn("${PORT:-8000}", command[2])
+        self.assertIn("--host 0.0.0.0", command[2])
+        self.assertIn("--workers 1", command[2])
+        with patch.dict(os.environ, {"PORT": "10000"}):
+            self.assertEqual(
+                browser_url("/demo.html", Req("testforge.example")),
+                "http://127.0.0.1:10000/demo.html",
+            )
+
 
 class WorkflowRegressionTests(unittest.TestCase):
     """Record/save/edit/export regressions that do not require Chromium."""
@@ -3439,12 +3462,12 @@ class FrontendBootTests(unittest.TestCase):
     looks wrong. That is exactly how the guide-snapshot bug presented: a
     `getSnapshot` that returned a fresh `Set` on every call spun
     `useSyncExternalStore` into "Maximum update depth exceeded" and took all
-    twelve tabs with it. These checks pin the invariants that keep a single
+    thirteen tabs with it. These checks pin the invariants that keep a single
     component failure from becoming an unusable app.
     """
 
     STATIC = ROOT / "app" / "static"
-    COMPONENT_FILES = ("import-components.js", "scenario-components.js", "demo-components.js")
+    COMPONENT_FILES = ("import-components.js", "scenario-components.js", "demo-components.js", "future-components.js")
     # Allocations that are never Object.is-stable, so returning one from a
     # getSnapshot guarantees an infinite render loop.
     FRESH_RETURN = re.compile(r"return\s+(?:new\b|[{[])")
