@@ -1,7 +1,8 @@
-# TestForge AI Tracking
+# TestForge Testing Tool
 - **Database:** Permanently stored in Neon PostgreSQL / SQLite (Configured in config.py).
-- **Architecture:** 11-tab Persistent Dashboard (Optimized for Android 12). The bar is icon-only to fit a phone; every tab carries its name as a hover/long-press title and an accessible label.
-- **Demo tab:** the first tab. A guided walkthrough over the built-in sample app and the five synthetic domain fixtures, so recording, replay and evidence can be proved without pointing TestForge at a real application. It also carries a live demonstration of the voice input (🎤 browser speech recognition) and the deterministic text cleanup (✨) helpers. See below.
+- **Architecture:** 13-tab persistent dashboard (optimized for Android 12) with visible, horizontally scrollable tab names and accessible labels.
+- **Demo tab:** guided walkthrough over the built-in sample app and five synthetic fixtures, plus optional public shopping/grocery/fashion learning URLs.
+- **Future release planning tab:** a clearly labeled, non-committal roadmap view for browser ERP/CRM packs, Windows desktop (.NET/C#/C++/WinForms) and Android/iOS/Zebra device automation; proposed items are not described as current support.
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
 - **Local helpers (no paid AI calls):** Browser-dependent voice input, deterministic text cleanup, and recording-variable association tagging.
 - **AI smart onboarding for uploads:** the static import validator runs first; when it reports unsupported syntax and `ANTHROPIC_API_KEY` is set, the script is converted to canonical steps by a budgeted AI loop that re-validates **every single step** (validate → AI fix → re-validate). Uploaded source is still never executed, the save gate (passing test or written override) is unchanged, and without the key import stays fully offline. A runner script + its referenced `steps.json`/`execution-plan.json` can be uploaded as a bundle; the referenced steps are what gets imported.
@@ -199,27 +200,29 @@ Scenarios are documented in `tests/SCENARIOS.md`. Each run writes a timestamped 
 No test or harness run ever publishes to GitHub. The API publisher is exercised against a fake transport, and the harness strips `TF_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`, `TF_GITHUB_REPO`, `TF_GITHUB_BRANCH` and `TF_GIT_REMOTE` from the server environment it starts.
 
 ## Demo tab
-The **Demo** tab (🧪, first in the bar) is the no-setup route into the product. Everything it shows
-is a static file served by this instance: nothing signs in anywhere, reaches an external site, or
-touches a real account, payment, policy, employee or booking.
+The **Demo** tab (🧪, first in the bar) is the no-setup route into the product. Its built-in sample
+and synthetic domain fixtures are served locally. It also lists optional public shopping, grocery and
+fashion websites as external learning targets; no external site is embedded or contacted until a user
+opens one or chooses it for an AI recording. Never use a real account, submit an order or enter payment data.
 
-1. **Select the sample project** — `TestForge Sample App` ships in `library/projects/qa-sample-app`,
+1. **Select the sample project** — `TestForge Testing Tool` ships in `library/projects/qa-sample-app`,
    points at `/demo.html` and already defines `{{user}} = Ada`. If an instance was started against an
    empty `TF_LIBRARY_DIR` the tab offers to create it, as an ordinary project save.
 2. **Replay a ready-made test** — `Hello literal` types a fixed name; `Hello variable` types `{{user}}`,
    which demonstrates substitution at replay time. RUN queues the recording and jumps to **Runs**.
-3. **Record your own** — shortcuts into the Record and Library tabs. A blank URL in Record opens
-   `/demo.html` on the server browser.
+3. **Record your own** — shortcuts into the AI Recording and Library tabs. A blank URL opens
+   `/demo.html` on the server browser; the public learning URLs can also prefill the recording URL.
 4. **Check the evidence** — shortcuts into Runs and Artifacts.
 
-The sample app and the chosen domain fixture are also embedded in the tab, rendered by *your* browser
-so you can see what the steps do. That costs the service nothing: no server-side browser, no
-screencast and no run budget. The five synthetic packs (commerce, banking, insurance, HRMS, travel)
-are listed with their positive/negative dataset rows; saving one as a real test is still the explicit
-**Library → UPLOAD TEST SCRIPTS → synthetic domain pack** path, which tests before it publishes.
+The sample app and chosen domain fixture are also embedded in the tab, rendered by *your* browser so
+you can see what the steps do. That costs the service nothing: no server-side browser, no screencast
+and no run budget. The six public retailer links are optional examples, not stable fixtures: target
+sites can change, require region/cookie choices or block automation. The five synthetic packs
+(commerce, banking, insurance, HRMS, travel) remain deterministic and can be saved through
+**Library → UPLOAD TEST SCRIPTS → synthetic domain pack**, which tests before it publishes.
 
 ## Record and run
-Open a project, then the record tab. Leave the page blank to open the built-in sample app, or enter the application URL. The remote Chromium picture is polled over HTTP (so it still works when a proxy drops websockets). Click the picture to click in the browser, type with the text box, then SAVE. In the library, RUN replays those steps and the Runs tab shows the live browser plus each step.
+Open a project, then the AI Recording tab. Leave the page blank to open the built-in TestForge Testing Tool, choose a public shopping/grocery/fashion learning URL, or enter an authorized application URL. The remote Chromium picture is polled over HTTP (so it still works when a proxy drops websockets). Click the picture to click in the browser, type with the text box, then SAVE. In the library, RUN replays those steps and the Runs tab shows the live browser plus each step. External store pages can change, require region/cookie choices, or block automation; use permitted public flows only and never submit real purchases or payment details.
 
 The server needs Chromium: `playwright install chromium`. Docker already does this. If the browser cannot start, the record screen shows the error instead of a blank canvas.
 

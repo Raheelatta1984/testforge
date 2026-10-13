@@ -2,15 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no"/>
-<title>TestForge Titan ERP - Optimized</title>
+<title>TestForge Testing Tool</title>
 <link rel="stylesheet" href="/vendor/tailwind.css"/>
 <script crossorigin src="/vendor/react.production.min.js"></script>
 <script crossorigin src="/vendor/react-dom.production.min.js"></script>
 <style>
   body { background: #020617; color: #f8fafc; font-family: system-ui; overflow: hidden; height: 100vh; width: 100vw; }
-  /* Eleven tabs have to fit a phone, so the horizontal padding gives way first
-     rather than a tab being pushed off the bar. */
-  .nav-btn { flex: 1 1 0; min-width: 0; padding: 12px 2px; font-size: 11px; font-weight: bold; color: #64748b; border-top: 2px solid transparent; }
+  /* Labels stay visible on phones too; the named tab strip scrolls horizontally
+     instead of compressing 13 tabs into icons that new users have to guess. */
+  #main-tabs { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #4f46e5 #0f172a; }
+  #main-tabs::-webkit-scrollbar { height: 3px; }
+  #main-tabs::-webkit-scrollbar-thumb { background: #4f46e5; border-radius: 999px; }
+  .nav-btn { flex: 0 0 auto; min-width: 66px; padding: 7px 7px 8px; font-size: 10px; font-weight: bold; color: #64748b; border-top: 2px solid transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; white-space: nowrap; }
+  .nav-btn-icon { font-size: 16px; line-height: 18px; }
+  .nav-btn-label { font-size: 9px; line-height: 11px; }
   .nav-btn.active { color: #818cf8; border-top-color: #818cf8; background: rgba(30, 41, 59, 0.5); }
   .content-area { height: calc(100vh - 75px); overflow-y: auto; padding: 15px; padding-bottom: 90px; }
   .canvas-window { background: #000; border: 2px solid #1e293b; border-radius: 16px; overflow: hidden; aspect-ratio: 16/10; }
@@ -76,6 +81,7 @@
 <script src="/import-components.js"></script>
 <script src="/scenario-components.js"></script>
 <script src="/demo-components.js"></script>
+<script src="/future-components.js"></script>
 <script>
 const { useState, useEffect, useRef } = React;
 const e = React.createElement;
@@ -229,7 +235,7 @@ function GuideSection({ id, label, action, children }) {
 }
 
 // Switches every note in the app on or off. Living in the header keeps it
-// reachable from all twelve tabs, including ones that render no content yet.
+// reachable from all thirteen tabs, including ones that render no content yet.
 function GuideToggle() {
   const on = React.useSyncExternalStore(subscribeGuide, readGuideMode, readGuideMode);
   const hidden = React.useSyncExternalStore(subscribeGuide, readHiddenTags, readHiddenTags);
@@ -273,12 +279,20 @@ function App({ access }) {
     setLiveWindow(next);
     localStorage.setItem("tf_live_window", next ? "1" : "0");
   };
-  const tabs = [["demo","🧪"], ["projects","📁"], ["variables","🔤"], ["record","⏺"], ["plan","🧭"], ["library","📚"], ["runs","▶"], ["comparison","⚖️"], ["artifacts","🎥"], ["logs","📜"], ["github","🐙"], ["azure","☁️"]];
+  const tabs = [
+    ["demo", "🧪", "Demo"], ["projects", "📁", "Projects"],
+    ["variables", "🔤", "Variables"], ["record", "⏺", "AI Recording"],
+    ["plan", "🧭", "Test Plan"], ["library", "📚", "Test Library"],
+    ["runs", "▶", "Runs"], ["comparison", "⚖️", "Compare"],
+    ["artifacts", "🎥", "Artifacts"], ["logs", "📜", "Logs"],
+    ["github", "🐙", "GitHub"], ["azure", "☁️", "Azure"],
+    ["future", "🗺️", "Future release planning"]
+  ];
 
   return e('div', { className: "h-full flex flex-col" },
     e('header', { className: "p-4 border-b border-slate-800 flex justify-between bg-slate-950/80 backdrop-blur" },
       e('div', { className: "flex items-center gap-2" },
-        e('span', { className: "font-bold text-indigo-400 tracking-tighter" }, "⚡ TITAN ROG ERP"),
+        e('span', { className: "font-bold text-indigo-400 tracking-tighter" }, "⚡ TESTFORGE TESTING TOOL"),
         e('span', { className: "fast-badge" }, "FAST ⚡")
       ),
       e(GuideToggle, null),
@@ -298,14 +312,17 @@ function App({ access }) {
       tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId, liveWindow, setLiveWindow: toggleLiveWindow }),
       tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts),
       tab === "logs" && e(Logs), tab === "github" && e(Github),
-      tab === "azure" && e(Azure)
+      tab === "azure" && e(Azure),
+      tab === "future" && e(FuturePlanningTab)
     ),
-    e('nav', { className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex" },
-      // The bar is icon-only to fit a phone; the name is still reachable by
-      // hover, long-press and screen reader so no tab is a guess.
-      tabs.map(([k, icon]) => e('button', { key: k, onClick: () => setTab(k), title: k.toUpperCase(),
-        'aria-label': k, 'aria-current': tab === k ? 'page' : undefined,
-        className: `nav-btn ${tab===k?'active':''}` }, icon))
+    e('nav', { id: "main-tabs", 'aria-label': "Main navigation tabs",
+      title: "Swipe horizontally to see all named tabs",
+      className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex" },
+      tabs.map(([k, icon, label]) => e('button', { key: k, onClick: () => setTab(k), title: label,
+        'aria-label': label, 'aria-current': tab === k ? 'page' : undefined,
+        className: `nav-btn ${tab===k?'active':''}` },
+        e('span', { className: "nav-btn-icon", 'aria-hidden': true }, icon),
+        e('span', { className: "nav-btn-label" }, label)))
     )
   );
 }
@@ -321,6 +338,19 @@ function Recorder({ project, onRun, liveWindow }) {
   const [name, setName] = useState("");
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
+  const learningSites = window.TESTFORGE_LEARNING_SITES || [];
+  const selectedLearningSite = learningSites.find(site => site.url === url);
+
+  useEffect(() => {
+    // Demo → Record passes a selected public learning URL through a one-shot handoff.
+    try {
+      const pendingUrl = localStorage.getItem("tf_pending_recorder_url");
+      if (pendingUrl) {
+        setUrl(pendingUrl);
+        localStorage.removeItem("tf_pending_recorder_url");
+      }
+    } catch (_) {}
+  }, []);
   const [busy, setBusy] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [armed, setArmed] = useState(null);
@@ -634,7 +664,7 @@ function Recorder({ project, onRun, liveWindow }) {
       action: "Name the recording, leave the URL blank for the sample app, then press START." },
     e("div", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-3" },
       e("div", { className: "flex justify-between items-center" },
-        e("h2", { className: "font-bold text-lg text-indigo-300" }, "Record in remote browser ⚡ FAST"),
+        e("h2", { className: "font-bold text-lg text-indigo-300" }, "AI Recording · remote browser ⚡ FAST"),
         e("span", { className: "fast-badge" }, "OPTIMIZED")
       ),
       e("p", { className: "text-sm text-slate-400" }, "Opens Chromium on server (free-tier optimized, low CPU). Repeated actions merge into one editable step with a repeat count."),
@@ -656,6 +686,17 @@ function Recorder({ project, onRun, liveWindow }) {
       e("input", { id: "rec-name", value: name, onChange: (evt) => setName(evt.target.value), className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-url" }, "Page to open"),
       e("input", { id: "rec-url", value: url, onChange: (evt) => setUrl(evt.target.value), placeholder: "Leave blank for sample app", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-learning-site" }, "Learning URLs · shopping, grocery and fashion"),
+      e("select", { id: "rec-learning-site", value: selectedLearningSite ? selectedLearningSite.url : "",
+        onChange: evt => setUrl(evt.target.value),
+        className: "w-full bg-slate-800 rounded-lg px-3 py-2 text-xs border border-slate-700" },
+        e("option", { value: "" }, "Choose a public learning site…"),
+        ["Shopping", "Grocery", "Fashion"].map(category => e("optgroup", { key: category, label: category },
+          learningSites.filter(site => site.category === category).map(site => e("option", { key: site.url, value: site.url }, `${site.name} — ${site.url}`))))),
+      selectedLearningSite && e("a", { href: selectedLearningSite.url, target: "_blank", rel: "noopener noreferrer",
+        className: "inline-block text-xs text-indigo-300 underline" }, `Open ${selectedLearningSite.name} in a new tab`),
+      e("p", { className: "text-[10px] text-slate-500" },
+        "Public sites may show region/cookie prompts or block automation. Use permitted public pages only; do not place orders or enter payment details."),
       e("button", { type: "button", onClick: () => setUrl("/demo.html"), className: "text-xs text-indigo-300 underline" }, "Use sample app"),
       e("button", { type: "button", onClick: start, disabled: busy, className: "w-full bg-red-600 disabled:opacity-60 py-4 rounded-2xl font-bold text-lg" }, busy ? "OPENING BROWSER FAST…" : "● START AI RECORDING ⚡"),
       error && e("p", { role: "alert", className: "text-sm text-red-300" }, error),

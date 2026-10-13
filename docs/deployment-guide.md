@@ -22,7 +22,7 @@ what a reasonable reader would expect.
 One process. That is the whole design constraint, and it is not negotiable.
 
 ```
-uvicorn (1 worker, :8000)
+uvicorn (1 worker, binds $PORT; defaults to :8000)
 ├── FastAPI app  app/main.py            ~70 routes + 3 websockets
 ├── Playwright → ONE headless Chromium   (recording AND execution share it)
 ├── SQLAlchemy → SQLite  (default)  or  PostgreSQL (DATABASE_URL)
@@ -37,7 +37,7 @@ uvicorn (1 worker, :8000)
 | DB | SQLite unless `DATABASE_URL` is set | `app/config.py` |
 | Schema | created/repaired **at import time** | `init_db()` called at `app/main.py:56` |
 | Auth | Optional single-operator `TF_ACCESS_TOKEN` gate; unset means **none** | §2 |
-| Port | 8000, and the image CMD ignores `$PORT` | §7.3 ⚠ |
+| Port | `$PORT` (defaults to 8000; Render commonly supplies 10000) | §7.3 |
 | Python | 3.11-slim-bookworm | `Dockerfile` |
 
 **Do not add workers, replicas, or an autoscaling group.** `MAX_CONCURRENT_BROWSERS = 1` is hard-coded
@@ -556,7 +556,7 @@ grep -rhoE '"TF_[A-Z0-9_]+"' app/*.py | tr -d '"' | sort -u | wc -l    # 62
 | --- | --- | --- |
 | `DATABASE_URL` | unset → SQLite under `TF_ARTIFACTS` | §5.1 |
 | `TF_ARTIFACTS` | `~/testforge_titan_data` | root for runs/recordings/DB — **set it** (§5.1 ⚠) |
-| `PORT` | `8000` | honoured by `start.sh` only, **not** by the image CMD (§7.3 ⚠) |
+| `PORT` | `8000` | uvicorn bind and browser loopback base URL; container CMD honors the runtime value (§7.3) |
 | `RENDER_GIT_COMMIT` | `local` | the *only* source of `revision` in health/diagnostics (§7.2) |
 | `TF_LIBRARY_DIR` | `<repo>/library` | relocates the library tree (the harness uses a copy) |
 | `TF_LOGS_DIR` | `<repo>/logs` | local log reader root |
@@ -652,26 +652,23 @@ explicitly from your build:
 It is read at request time by `os.environ.get`, so no restart is needed to *use* it, but the container
 must be restarted to *change* it.
 
-### 7.3 ⚠ The image hard-codes port 8000; `PORT` is not honoured
+### 7.3 Container port and browser loopback URLs stay in sync
+
+The image starts uvicorn with the runtime `PORT` (default `8000` for local Compose; Render commonly
+provides `10000`):
 
 ```dockerfile
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port \"${PORT:-8000}\" --workers 1"]
 ```
 
-`start.sh` does honour `PORT`, but **`start.sh` is never `COPY`'d into the image** — only `app/`,
-`library/` and `logs/` are. So:
+`EXPOSE 10000` is Docker image metadata, not a port-forwarding rule. The important part is that the
+process listens on the same `PORT` that `browser_url()` and `playback_url()` use for same-instance
+pages such as `/demo.html`. If the browser URL is rewritten to `127.0.0.1:10000` while uvicorn is
+fixed to `8000`, recordings and sample-app replays fail with `net::ERR_CONNECTION_REFUSED`.
 
-* On a PaaS that assigns a random `PORT` (Render does), a Docker-based service will not bind it; it
-  works on Render because the platform maps the `EXPOSE 8000` container port.
-* In Kubernetes, if you set `targetPort: 8080` or `PORT=8080`, **nothing listens there**.
-* To change the port, override the command:
-  ```yaml
-  command: ["uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8080", "--workers", "1"]
-  ```
-  Keep `--workers 1` (§1). Loopback bind is §2's requirement.
-
-Consider adding `COPY start.sh /usr/local/bin/` + `ENTRYPOINT` upstream so `PORT` works as documented;
-until then, always pin 8000 in the service definition.
+For another deployment port, set its runtime `PORT` (for example `8080`) and route traffic to that
+port; do not replace the command with a fixed port. Keep `--workers 1` (§1). Host-run `start.sh`
+continues to honor `PORT` as well.
 
 ### 7.4 Reference proxy config (TLS + the only access control you have)
 
@@ -925,8 +922,8 @@ Documented so you don't waste hours, and because a deployment guide that hides t
    `mcp`, which were deliberately removed and fail on import
    (`cannot import name 'Scenario' from app.db`). Consequence: **`DEMO_MODE` has no runtime effect**,
    and AI-driven scenarios in the UI are not what the README's `TF_AGENT_*` vars suggest.
-3. **`start.sh` is not in the image** (§7.3), so it is host-run only and its `PORT` handling does not
-   apply to container deployments.
+3. **`start.sh` is not in the image** (§7.3), so it is host-run only; the Docker CMD independently
+   honors the same runtime `PORT` setting.
 4. **`logs/` and `library/` are baked into the image** (`Dockerfile`), which makes the image
    self-bootstrapping for the Logs and GitHub tabs but also means **the image is not reproducible**:
    the same commit built later differs if the working tree differed. Build from a clean checkout, and
@@ -961,7 +958,7 @@ constraints instead of rediscovering them (this is the highest-value single arti
 ## Deployment shape (never violate)
 - ONE uvicorn worker, ONE Chromium per process. `MAX_CONCURRENT_BROWSERS = 1` is hard-coded in
   app/config.py. Never add --workers, replicas, or an autoscaling group.
-- The image CMD hard-codes --port 8000 and ignores $PORT; start.sh is NOT in the image.
+- The image CMD binds the runtime $PORT (default 8000); start.sh is host-run only and is not copied into the image.
 - The app has NO authentication. `API_Key` in render.yaml is read by nothing. Never bind a container
   to 0.0.0.0 without a proxy-side access control in front.
 - TF_ARTIFACTS must be a persistent volume, and must be set explicitly, or SQLite lands outside it.
@@ -1057,9 +1054,8 @@ constraints instead of rediscovering them (this is the highest-value single arti
 > 1. Non-root runtime user. Verify nothing writes outside `TF_ARTIFACTS` — check every directory the
 >    process touches at import (`app/config.py` makedirs at import time) and the paths the image already
 >    creates, and set ownership accordingly. Tell me if any path would break.
-> 2. `--workers 1` must stay, and the port must stay 8000 unless you also fix that `$PORT` is ignored
->    (start.sh is not copied in). Decide: either copy `start.sh` and use it as ENTRYPOINT so `PORT`
->    works, or leave CMD alone and document it. Explain the tradeoff; do not do neither or both.
+> 2. `--workers 1` must stay. The Docker CMD must bind the runtime `${PORT:-8000}` so browser loopback
+>    URLs resolve to the same listener; keep 8000 as the local default and allow the platform to override it.
 > 3. Multi-stage to cut image size, keeping `playwright install --with-deps chromium` in the final stage
 >    with `rm -rf /var/lib/apt/lists/*`. Chromium is the point of the image — never drop it or add
 >    Firefox/WebKit.
