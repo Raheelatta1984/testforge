@@ -2,7 +2,7 @@
   "projects": [
     {
       "id": "qa-sample-app",
-      "name": "TestForge Sample App",
+      "name": "TestForge Testing Tool",
       "path": "library/projects/qa-sample-app/project.json",
       "recordings": [
         {
