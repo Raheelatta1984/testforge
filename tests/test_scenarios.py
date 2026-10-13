@@ -493,3 +493,59 @@ class ScenarioTests(unittest.TestCase):
         with TestClient(app) as client:
             meta = client.get(f'/api/reports/run/{rid}').json()
         self.assertEqual(meta['repository_path'], f'library/reports/run-{rid}.json')
+
+    def test_UT_SCENE_19_step_start_times_speed_and_pdf_timing_summary(self):
+        """Every step records when it started, a run records its speed, and the PDF shows both.
+
+        The 1x/2x/3x comparison depends on this: each step carries UTC start/finish
+        and a monotonic duration, each run keeps the speed it replayed at, the PDF
+        prints the start date and time with a per-recording and per-step timing
+        summary, and the committed summary carries the same start time and speed.
+        A batch run created before per-run speed existed falls back to the batch's.
+        """
+        from pypdf import PdfReader
+        from app.step_runtime import StepClock
+        clock = StepClock()
+        done = clock.finish()
+        self.assertRegex(clock.started_at, r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$')
+        self.assertRegex(done['finished_at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$')
+        self.assertGreaterEqual(done['finished_at'], clock.started_at)
+        self.assertGreaterEqual(done['duration_ms'], 0)
+
+        rec = self.recording('Timed checkout')
+        started = datetime(2026, 10, 13, 14, 2, 11, 123000)
+        with SessionLocal() as db:
+            run = Run(recording_id=rec['id'], status='failed', execution_speed=2.0, started_at=started,
+                      finished_at=started + timedelta(seconds=5),
+                      execution_log=[
+                          {'order': 1, 'action': 'navigate', 'label': 'Open', 'status': 'passed',
+                           'started_at': '2026-10-13T14:02:11.123Z', 'finished_at': '2026-10-13T14:02:11.456Z',
+                           'duration_ms': 333.0},
+                          {'order': 2, 'action': 'click', 'label': 'Save', 'status': 'failed', 'error': 'boom',
+                           'started_at': '2026-10-13T14:02:12.000Z', 'finished_at': '2026-10-13T14:02:12.250Z',
+                           'duration_ms': 250.0}])
+            db.add(run); db.commit(); rid = run.id
+        with patch.object(library_store, '_finish', return_value=True):
+            pdf_reports.finalize('run', rid)
+        path, meta = pdf_reports.generate('run', rid)
+        self.assertEqual(meta['started_at'], '2026-10-13T14:02:11.123Z')
+        self.assertEqual(meta['execution_speeds'], [2.0])
+        self.assertEqual(meta['recordings'][0]['execution_speed'], 2.0)
+        self.assertEqual(meta['recordings'][0]['duration_seconds'], 5.0)
+        text = '\n'.join(page.extract_text() for page in PdfReader(str(path)).pages)
+        for needle in ('Started: 2026-10-13 14:02:11.123 UTC', 'Execution speed: 2x (fast)', 'Timing summary',
+                       'Step timing', 'Step started 2026-10-13 14:02:12.000 UTC'):
+            self.assertIn(needle, text)
+        index = (library_store.library_dir() / 'reports' / 'index.md').read_text()
+        self.assertIn('| 2026-10-13T14:02:11.123Z | 2x |', index)
+
+        # Batch: the run predates per-run speed, so the batch's own speed applies.
+        with SessionLocal() as db:
+            batch = Batch(status='passed', total=1, options={'execution_speed': 3.0})
+            db.add(batch); db.commit(); bid = batch.id
+            db.add(Run(recording_id=rec['id'], status='passed', batch_id=bid, sequence=0,
+                       started_at=started, finished_at=started + timedelta(seconds=2), execution_log=[]))
+            db.commit()
+        _, batch_meta = pdf_reports.generate('batch', bid)
+        self.assertEqual(batch_meta['execution_speeds'], [3.0])
+        self.assertEqual(batch_meta['recordings'][0]['execution_speed'], 3.0)

@@ -5,8 +5,10 @@ Locators use Playwright's actionability/expect waits, returning as soon as ready
 """
 import base64
 import binascii
+import datetime
 import json
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -345,6 +347,34 @@ def locator(page, spec):
     if kind in {"label", "text", "placeholder"}:
         return getattr(target, "get_by_" + kind)(primary, exact=exact)
     return target.locator(primary)
+
+
+def iso_utc(moment):
+    """Format a datetime as ``YYYY-MM-DDTHH:MM:SS.mmmZ`` (naive values are UTC)."""
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=datetime.timezone.utc)
+    return moment.astimezone(datetime.timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+class StepClock:
+    """Wall-clock stamps for one step: create it when the step starts, call ``finish()`` when the action returns.
+
+    ``started_at``/``finished_at`` are UTC ISO-8601 strings with millisecond precision, so they
+    survive the JSON execution log and sort as text. ``duration_ms`` uses a monotonic clock, so a
+    wall-clock adjustment mid-run cannot skew it. Finish is taken when the action returns, before
+    screenshot evidence is encoded, so durations compare the speed setting, not image work.
+    """
+
+    def __init__(self):
+        self._monotonic = time.perf_counter()
+        self.started_at = iso_utc(datetime.datetime.now(datetime.timezone.utc))
+
+    def finish(self):
+        return {
+            "started_at": self.started_at,
+            "finished_at": iso_utc(datetime.datetime.now(datetime.timezone.utc)),
+            "duration_ms": round((time.perf_counter() - self._monotonic) * 1000, 1),
+        }
 
 
 def json_field(data, path):
