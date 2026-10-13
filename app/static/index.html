@@ -98,6 +98,37 @@ const API = {
   del: (u, b) => apiRequest(u, {method:'DELETE', headers:{'Content-Type':'application/json'}, body: b ? JSON.stringify(b) : undefined})
 };
 
+/* --- Error boundary ---------------------------------------------------------
+   The last line of defence for the whole UI. Without it, a throw anywhere in
+   the tree makes React unmount everything below the root, and the operator is
+   left staring at a blank screen with no tabs and no clue what happened - the
+   backend is still perfectly healthy and serving every API call. This keeps
+   such a failure visible, names the error, and offers a way back. */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  componentDidCatch(error, info) {
+    try { console.error("TestForge UI failed to render:", error, info && info.componentStack); } catch (_) {}
+  }
+  render() {
+    if (!this.state.error) return this.props.children;
+    const message = String((this.state.error && this.state.error.message) || this.state.error);
+    return e('div', { className: "max-w-md mx-auto p-6 space-y-4" },
+      e('h1', { className: "text-lg font-bold text-red-300" }, "⚡ TestForge could not render this screen"),
+      e('p', { className: "text-xs text-slate-400" },
+        "The server and your data are fine - this is a problem in the interface only. ",
+        "The message below is what the interface reported, and it is also in the browser console."),
+      e('pre', { role: "alert",
+        className: "text-[11px] bg-slate-900 border border-red-900/50 text-red-200 rounded-xl p-3 overflow-x-auto whitespace-pre-wrap" },
+        message),
+      e('div', { className: "flex gap-2" },
+        e('button', { type: "button", className: "key-btn", onClick: () => this.setState({ error: null }) }, "TRY AGAIN"),
+        e('button', { type: "button", className: "key-btn", onClick: () => location.reload() }, "RELOAD PAGE")),
+      e('p', { className: "text-[10px] text-slate-500" },
+        "If this keeps happening, note the message above and reload. Reaching the API directly at /api/health still works."));
+  }
+}
+
 /* --- Guide tags -------------------------------------------------------------
    An opt-in annotation layer, built for demos, screenshots and walkthroughs.
    A GuideTag renders a hand-drawn yellow note plus a marker arrow that points
@@ -113,16 +144,39 @@ const guideListeners = new Set();
 const readGuideMode = () => {
   try { return localStorage.getItem(GUIDE_KEY) === "1"; } catch (_) { return false; }
 };
+/* useSyncExternalStore compares snapshots with Object.is and re-renders whenever
+   they differ, so getSnapshot MUST hand back the very same object until the
+   underlying data really changes. Building a fresh Set on every call made React
+   see an endless stream of "changes": it re-rendered, re-read the store, saw a
+   new Set again, and spun until it bailed out with "Maximum update depth
+   exceeded". Because nothing wrapped the tree in an error boundary, that throw
+   unmounted the whole app - a blank screen with no tabs at all. The Set is now
+   cached against the raw localStorage string, so it is only rebuilt when the
+   stored value actually changes. */
+let hiddenTagsRaw = Symbol("unread");
+let hiddenTagsCache = new Set();
 const readHiddenTags = () => {
-  try { return new Set(JSON.parse(localStorage.getItem(GUIDE_HIDDEN_KEY) || "[]")); }
-  catch (_) { return new Set(); }
+  let raw;
+  try { raw = localStorage.getItem(GUIDE_HIDDEN_KEY); } catch (_) { raw = null; }
+  if (raw === hiddenTagsRaw) return hiddenTagsCache;
+  let next;
+  try {
+    const parsed = JSON.parse(raw || "[]");
+    next = Array.isArray(parsed) ? new Set(parsed.filter(id => typeof id === "string")) : new Set();
+  } catch (_) { next = new Set(); }
+  hiddenTagsRaw = raw;
+  hiddenTagsCache = next;
+  return next;
 };
 const setGuideMode = (next) => {
   try { localStorage.setItem(GUIDE_KEY, next ? "1" : "0"); } catch (_) { /* private mode */ }
   guideListeners.forEach(fn => fn());
 };
 const hideGuideTag = (id) => {
-  const hidden = readHiddenTags();
+  // Copy first: readHiddenTags() now returns a cached snapshot that React is
+  // holding on to, and mutating it in place would both corrupt that snapshot
+  // and hide the change from the Object.is comparison below.
+  const hidden = new Set(readHiddenTags());
   hidden.add(id);
   try { localStorage.setItem(GUIDE_HIDDEN_KEY, JSON.stringify([...hidden])); } catch (_) {}
   guideListeners.forEach(fn => fn());
@@ -2261,7 +2315,7 @@ function Azure() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(e(AccessBoundary));
+ReactDOM.createRoot(document.getElementById("root")).render(e(ErrorBoundary, null, e(AccessBoundary)));
 </script>
 </body>
 </html>
