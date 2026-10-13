@@ -1,0 +1,19 @@
+{
+  "completed_at": 1791897068.139769,
+  "duration_seconds": 37.455,
+  "expires_at": 1792069868.139769,
+  "id": "f548ed45-e1f0-494f-a628-739aaa3d517a",
+  "kind": "run",
+  "recordings": [
+    {
+      "failed": 0,
+      "id": "f548ed45-e1f0-494f-a628-739aaa3d517a",
+      "name": "Amazon learning",
+      "status": "passed",
+      "steps": 3
+    }
+  ],
+  "remote_status": "disabled",
+  "status": "passed",
+  "steps": 3
+}
