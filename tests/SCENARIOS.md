@@ -45,6 +45,7 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-FLOW-10 | Run a saved recording inside a live session | `RecorderSession.replay()` drives the open browser with another recording's steps and writes each executed action into the recording being made. |
 | UT-FLOW-11 | A failed live replay reports its step | A step that raises stops the replay, reports its position and error, and only the steps that ran are recorded. |
 | UT-FLOW-12 | A closed session refuses a replay | A session that has been closed raises instead of running steps. |
+| UT-FLOW-13 | Fast recorder navigation survives external page timeouts | `RecorderSession` navigates with `wait_until="commit"`, halts hung loads with `window.stop()`, captures the first frame before going live, and never fails with `Page.goto: Timeout 30000ms exceeded`. |
 | UT-BOOT-01 | Import the recorder and the executor | Both modules load. This is the regression where `IS_TERMUX`, `interpolate`, and `CICD_INTERVAL` were missing and both features were offline. |
 | UT-BOOT-02 | Config contract | `IS_TERMUX` is a bool, `CICD_INTERVAL` is a positive int, and `interpolate` is `apply_variables`. |
 | UT-BOOT-03 | Run model columns | `recording_id`, `execution_log`, `progress_pct`, and `rog_monitor_log` exist. `target_id` and `rog_investigation` do not. |
@@ -86,6 +87,7 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-REP-08 | Unsupported action | An unknown action raises rather than being reported as passed. |
 | UT-REP-09 | Navigate without a URL | Raises before `goto`. |
 | UT-REP-10 | Relative navigate URL | `/demo.html` is opened on `127.0.0.1:$PORT`. `http://127.0.0.1:3000/app` is not rewritten. |
+| UT-REP-11 | Resilient replay navigation | A `navigate` step whose page already committed recovers cleanly when `domcontentloaded` times out on heavy external pages. |
 | UT-LIB-01 | Create a project | `project.json` is written and the list comes from that file. Publish is off in unit tests. |
 | UT-LIB-02 | Database-only project | A row that is not in `library/` is not listed, and materialize removes it. |
 | UT-LIB-03 | Create a recording | `recording.json` and `resources/Jenkinsfile` are written. |

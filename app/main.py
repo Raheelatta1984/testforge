@@ -809,13 +809,17 @@ async def start_recording_session(rid: str, request: Request):
         row = db.get(Recording, rid)
         if row and row.execution_plan:
             raise HTTPException(422, 'Execution plans are immutable snapshots; record a separate flow and re-import the plan')
+        present = row is not None
     if open_session is None:
         raise HTTPException(status_code=503, detail=f"Recorder is unavailable: {RECORDER_ERROR}")
-    # Fast path for recording existence
-    rec = library_store.get_recording(rid)
-    if rec is None:
-        if not library_store.materialize_recording(rid):
-            raise HTTPException(status_code=404, detail="Recording not found")
+    # Fast path for recording existence: skip disk scan when already in DB
+    if not present:
+        rec = library_store.get_recording(rid)
+        if rec is None:
+            if not library_store.materialize_recording(rid):
+                raise HTTPException(status_code=404, detail="Recording not found")
+        else:
+            library_store.materialize_recording(rid)
     with SessionLocal() as db:
         recording = db.get(Recording, rid)
         if recording is None:

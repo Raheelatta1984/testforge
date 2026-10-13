@@ -1757,7 +1757,12 @@ def create_recording(project_id: str, name: str, start_url: str, parent_id: str 
     with LOCK:
         if _read_project(project_id) is None:
             raise NotFound("Project not found")
-        _materialize_unlocked()
+        with SessionLocal() as db:
+            present = db.get(Project, project_id) is not None and (
+                not parent_id or db.get(Recording, parent_id) is not None
+            )
+        if not present:
+            _materialize_unlocked()
         recording_id = None
         try:
             with SessionLocal() as db:

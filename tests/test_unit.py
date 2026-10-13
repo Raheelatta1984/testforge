@@ -3711,6 +3711,86 @@ class FrontendBootTests(unittest.TestCase):
             + ", ".join(missing),
         )
 
+    def test_UT_FLOW_13_recorder_goto_commits_fast_and_survives_page_goto_timeout(self):
+        """AI recording must commit navigation fast and never die on `Page.goto: Timeout 30000ms exceeded`."""
+        from app import library_store
+        from app.db import RecordingStep, SessionLocal
+        from app.recorder import RecorderSession
+        from tests.fakes import FakePage, FakePlaywright
+
+        project = library_store.create_project("Fast recorder goto", "")
+        rec = library_store.create_recording(project["id"], "Kroger learning", "https://www.kroger.com/")
+
+        class SlowExternalPage(FakePage):
+            def __init__(self):
+                super().__init__(url="about:blank")
+                self.load_states = []
+                self.stopped = False
+
+            async def goto(self, url, wait_until=None, timeout=None):
+                self.gotos.append((url, wait_until, timeout))
+                raise RuntimeError("Page.goto: Timeout 30000ms exceeded.")
+
+            async def wait_for_load_state(self, state="domcontentloaded", timeout=None):
+                self.load_states.append((state, timeout))
+
+            async def evaluate(self, script, *args):
+                if "window.stop()" in str(script):
+                    self.stopped = True
+                return None
+
+        page = SlowExternalPage()
+        fake_pw = FakePlaywright(page)
+
+        class FakeAsyncPW:
+            async def start(self):
+                return fake_pw
+
+            async def stop(self):
+                return None
+
+        session = RecorderSession(rec["id"], "https://www.kroger.com/", 0)
+
+        async def exercise():
+            with patch("app.recorder.async_playwright", return_value=FakeAsyncPW()):
+                await session.start()
+                self.assertEqual(session.status, "live")
+                self.assertIsNone(session.error)
+                self.assertTrue(page.stopped, "window.stop() must halt a hung external navigation")
+                self.assertEqual(page.gotos[0][1], "commit", "recorder must use fast commit navigation")
+                self.assertIsNotNone(session.latest_jpeg, "an initial frame must be captured before going live")
+                await session.stop()
+
+        asyncio.run(exercise())
+        with SessionLocal() as db:
+            steps = db.query(RecordingStep).filter_by(recording_id=rec["id"]).all()
+            self.assertEqual(len(steps), 1)
+            self.assertEqual(steps[0].action, "navigate")
+            self.assertEqual(steps[0].value, "https://www.kroger.com/")
+
+    def test_UT_REP_11_replay_step_recovers_from_domcontentloaded_timeout_after_commit(self):
+        """A replay navigate step whose page already committed recovers if domcontentloaded times out."""
+        from tests.fakes import FakePage
+
+        class PartiallyLoadedPage(FakePage):
+            def __init__(self):
+                super().__init__(url="https://www.kroger.com/")
+                self.stopped = False
+
+            async def goto(self, url, wait_until=None, timeout=None):
+                self.gotos.append((url, wait_until, timeout))
+                if wait_until == "domcontentloaded":
+                    raise RuntimeError("Page.goto: Timeout 20000ms exceeded.")
+
+            async def evaluate(self, script, *args):
+                if "window.stop()" in str(script):
+                    self.stopped = True
+
+        page = PartiallyLoadedPage()
+        asyncio.run(replay_step(page, {"action": "navigate", "value": "https://www.kroger.com/"}, {}))
+        self.assertEqual(page.gotos[0][1], "domcontentloaded")
+        self.assertTrue(page.stopped)
+
 
 def AdaptivePacerForTest():
     """A pacer with no profile file, so tests never touch artifacts/batches."""

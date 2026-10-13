@@ -150,7 +150,23 @@ async def replay_step(page, step, variables, budgets=None, runtime=None):
             raise RuntimeError("Navigate step has no URL")
         # domcontentloaded, not networkidle: a replay does not need every analytics
         # request to settle, and waiting for them is the slowest part of a run.
-        await page.goto(url, wait_until="domcontentloaded", timeout=navigate_ms)
+        # If slow third-party scripts stall domcontentloaded after navigation has
+        # already committed, stop the hung stream and continue rather than failing
+        # with `Page.goto: Timeout ... exceeded`.
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=navigate_ms)
+        except Exception as exc:
+            if "Timeout" not in type(exc).__name__ and "Timeout" not in str(exc):
+                raise
+            current = getattr(page, "url", None) or ""
+            if current and current != "about:blank":
+                if hasattr(page, "evaluate"):
+                    try:
+                        await page.evaluate("() => { try { window.stop(); } catch (_) {} }")
+                    except Exception:
+                        pass
+            else:
+                await page.goto(url, wait_until="commit", timeout=min(max(navigate_ms, 1000), 15000))
         return
     if action == "click":
         await _click(page, selector, action_ms)

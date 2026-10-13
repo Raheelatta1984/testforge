@@ -1,0 +1,55 @@
+INFO:     Started server process [2751]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://127.0.0.1:49683 (Press CTRL+C to quit)
+--- TITAN ERP SYSTEM BOOTED ---
+LOGS: /tmp/tf-library-zdblfy5b/artifacts/system_logs
+ROG DATABASE INITIALIZED
+INFO:     127.0.0.1:52416 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52426 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52432 - "POST /api/projects HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:52442 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:52454 - "GET /api/projects HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52458 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38040 - "POST /api/variables HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38042 - "PATCH /api/variables/abc77c15-bf58-4cdd-b787-c944a01150a6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38044 - "DELETE /api/variables/abc77c15-bf58-4cdd-b787-c944a01150a6 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38054 - "POST /api/ai/rephrase HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38058 - "GET /api/runs/screenshot/not-a-run/../../etc/passwd HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:38068 - "GET /api/runs/screenshot/missing-run/step-1.jpg HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:38084 - "POST /api/runs HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:38098 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38114 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38116 - "POST /api/runs HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38122 - "GET /api/runs/240c903d-a8fa-448f-ad64-31f5eb163a4f HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38134 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38144 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38158 - "GET /api/recordings/dea797a1-9b5f-4871-9d01-4328533543f1 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38170 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38176 - "GET /api/diagnostics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38180 - "POST /api/projects HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38194 - "POST /api/recordings HTTP/1.1" 201 Created
+INFO:     127.0.0.1:38206 - "POST /api/recordings/a09ed13c-1f67-490a-97bd-84c9326a508c/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38216 - "POST /api/recordings/a09ed13c-1f67-490a-97bd-84c9326a508c/stop HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38226 - "GET /api/recordings/a09ed13c-1f67-490a-97bd-84c9326a508c/session HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38236 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38244 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38246 - "GET /api/runs/queue/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38258 - "POST /api/runs/queue/clear HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38268 - "GET /api/runs/queue/status HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38280 - "POST /api/runs/batch HTTP/1.1" 422 Unprocessable Entity
+INFO:     127.0.0.1:38292 - "POST /api/runs/batch HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:38296 - "GET /api/runs/batches HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38300 - "GET /api/runs/batch/not-a-batch HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:38304 - "GET /api/diagnostics HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38312 - "GET /api/logs/source HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38314 - "GET /api/logs/local/index HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38328 - "GET /api/logs/local/20261010-125245/results.md HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38332 - "GET /api/logs/local/../../etc/passwd HTTP/1.1" 404 Not Found
+INFO:     127.0.0.1:38346 - "GET /api/library HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38350 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38366 - "POST /api/sync/github HTTP/1.1" 503 Service Unavailable
+INFO:     Shutting down
+INFO:     Waiting for application shutdown.
+INFO:     Application shutdown complete.
+INFO:     Finished server process [2751]
