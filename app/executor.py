@@ -11,6 +11,7 @@ Optimized for:
 import asyncio
 import base64
 import datetime
+import inspect
 import os
 import time
 from pathlib import Path
@@ -249,12 +250,14 @@ async def _expand_steps_with_repeat(steps):
     return expanded
 
 
-async def execute_run(run_id, on_event, on_frame=None, display_window=True, viewer_count=None, screenshots="all"):
-    """Replay one recording.
+async def execute_run(run_id, on_event, on_frame=None, display_window=True, viewer_count=None,
+                      screenshots="all", window_enabled=None):
+    """Replay one recording and optionally stream a viewer-aware live preview.
 
-    `display_window=False` skips the live screencast entirely: no preview loop,
-    no frames, no per-frame CPU. `viewer_count` is a callable returning how many
-    clients are watching; while it reports zero the preview renders nothing.
+    ``display_window`` is the initial setting. ``window_enabled`` may be a
+    callable so the Runs tab can turn a live single run's preview on or off
+    without restarting it. No screenshots are rendered while it is off or while
+    nobody is watching; ``viewer_count`` reports attached clients.
     """
     # Plans have their own sequential contexts, but share the SAME global slot.
     with SessionLocal() as db:
@@ -289,8 +292,19 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             await on_event({'type': 'done', 'status': result['status'], 'percent': 100})
         return
     display_window = bool(display_window)
+
+    def window_is_enabled():
+        if callable(window_enabled):
+            try:
+                return bool(window_enabled())
+            except Exception:
+                return display_window
+        return display_window
+
     # Immediate queue display - broadcast queued status right away
-    await on_event({"type": "status", "status": "queued", "percent": 0, "message": "Queued, starting immediately..."})
+    await on_event({"type": "status", "status": "queued", "percent": 0,
+                    "message": "Queued, starting immediately...",
+                    "display_window": window_is_enabled()})
     _save(run_id, status="queued", progress_pct=0, execution_log=[])
 
     # One browser slot for the whole run, shared with the recorder: two Chromium
@@ -343,21 +357,10 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             await on_event({"type": "done", "status": status, "error": error_text})
             return
 
-        def publish(data: bytes):
-            live_frames.put(run_id, data)
-            try:
-                with open(os.path.join(run_dir, "live.jpg"), "wb") as handle:
-                    handle.write(data)
-            except OSError:
-                pass
-            if on_frame is not None:
-                payload = base64.b64encode(data).decode("ascii")
-                result = on_frame(payload)
-                if asyncio.iscoroutine(result):
-                    asyncio.create_task(result)
+        frame_state = {"order": None, "step_index": None, "label": None}
 
         def viewers_present() -> bool:
-            if not display_window:
+            if not window_is_enabled():
                 return False
             if viewer_count is None:
                 return True
@@ -366,17 +369,48 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             except Exception:
                 return True
 
-        # Broadcast running immediately so UI shows window
+        async def publish(data: bytes, frame_context=None):
+            # Frame callbacks can race with the switch or a websocket disconnect;
+            # don't spend encode/broadcast work for a viewer that has gone away.
+            if not viewers_present():
+                return
+            live_frames.put(run_id, data)
+            try:
+                with open(os.path.join(run_dir, "live.jpg"), "wb") as handle:
+                    handle.write(data)
+            except OSError:
+                pass
+            if on_frame is not None:
+                payload = base64.b64encode(data).decode("ascii")
+                context = frame_context if isinstance(frame_context, dict) else frame_state
+                metadata = {key: context.get(key) for key in ("order", "step_index", "label")
+                            if context.get(key) is not None}
+                try:
+                    parameters = inspect.signature(on_frame).parameters.values()
+                    accepts_kwargs = any(item.kind == inspect.Parameter.VAR_KEYWORD for item in parameters)
+                    names = {item.name for item in parameters}
+                    frame_kwargs = metadata if accepts_kwargs else {
+                        key: value for key, value in metadata.items() if key in names
+                    }
+                except (TypeError, ValueError):
+                    frame_kwargs = {}
+                result = on_frame(payload, **frame_kwargs) if frame_kwargs else on_frame(payload)
+                if inspect.isawaitable(result):
+                    await result
+
+        # Broadcast running immediately so the UI can show the monitor and the
+        # currently selected window mode before Chromium has finished launching.
+        active_window = window_is_enabled()
         await on_event({
             "type": "status",
             "status": "running",
             "percent": 1,
-            "message": "Browser launching..." if display_window else "Browser launching (live window off)...",
-            "display_window": display_window,
+            "message": "Browser launching..." if active_window else "Browser launching (live window off)...",
+            "display_window": active_window,
         })
         logger.info(
             "RUN START %s steps=%s (expanded from %s) window=%s",
-            run_id, len(steps), len(raw_steps), display_window,
+            run_id, len(steps), len(raw_steps), window_is_enabled(),
         )
 
         try:
@@ -392,14 +426,18 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                     context_kwargs["record_video_size"] = {"width": min(vw, 640), "height": min(vh, 400)}
                 context = await browser.new_context(**context_kwargs)
                 page = await context.new_page()
-                # The Preview always exists so replay and capture share one lock;
-                # its loop only runs when the live window is switched on.
+                # Keep the lightweight preview loop alive so an operator can
+                # switch it on mid-run. Its viewer/mode gate means no screenshot
+                # is rendered while the window is off or nobody is connected.
                 preview = Preview(
                     page,
-                    on_jpeg=publish if display_window else None,
+                    on_jpeg=publish,
                     should_capture=viewers_present,
+                    frame_metadata=lambda: dict(frame_state),
                 )
-                # Live execution views reuse step JPEGs; no second screencast loop.
+                preview.start()
+                # Step JPEGs are still the exact post-action evidence and are
+                # also pushed to the live view before the step-complete event.
                 shot_tasks = set()
                 video = page.video
                 runtime = StepRuntime(page, run_dir)
@@ -409,6 +447,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                         percent = int((index - 1) / total * 100)
                         entry = {
                             "order": step.get("order") or index,
+                            "step_index": index,
                             "action": step.get("action"),
                             "label": step.get("label") or step.get("action"),
                             "value": step.get("value"),
@@ -416,47 +455,57 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                             "status": "running",
                             "percent": percent,
                         }
-                        # Immediate broadcast for queue display
+                        # The same sanitized step identity tags every frame until
+                        # the next step starts. This keeps the screen and log in
+                        # the same order even when frames and step events overlap.
                         entry = scrub_entry(entry, sensitive)
+                        frame_state.update(order=entry.get("order"), step_index=index,
+                                           label=entry.get("label"))
+                        preview.touch()
                         await on_event(entry)
                         try:
-                            async with preview.lock:
-                                # Skip log actions
-                                if (step.get("action") or "").lower() == "log":
-                                    entry["status"] = "passed"
-                                    entry["percent"] = int(index / total * 100)
-                                else:
-                                    result = await replay_step(page, step, variables, runtime=runtime)
-                                    page = runtime.page
-                                    preview.page = page
-                                    if result:
-                                        entry["result"] = result
-                                    if screenshots == "all":
-                                        try:
-                                            from app.evidence import capture_once
+                            # Do not hold the screenshot lock across the action:
+                            # the preview loop must be able to show navigation and
+                            # other slow actions while Playwright is still running.
+                            if (step.get("action") or "").lower() == "log":
+                                entry["status"] = "passed"
+                                entry["percent"] = int(index / total * 100)
+                            else:
+                                result = await replay_step(page, step, variables, runtime=runtime)
+                                page = runtime.page
+                                preview.page = page
+                                if result:
+                                    entry["result"] = result
+                                if screenshots == "all":
+                                    try:
+                                        from app.evidence import capture_once
+                                        async with preview.lock:
                                             shot_name = await capture_once(page, run_dir, index, sensitive)
-                                            entry['screenshot'] = f'/api/runs/screenshot/{run_id}/{shot_name}'
-                                            if viewers_present():
-                                                publish((Path(run_dir) / shot_name).read_bytes())
-                                        except Exception as evidence_error:
-                                            entry['evidence_error'] = type(evidence_error).__name__
-                                    if RUN_EXCERPT:
-                                        try:
-                                            entry["excerpt"] = scrub(await page.inner_text("body"), sensitive)[:300]
-                                        except Exception:
-                                            pass
-                                    entry["status"] = "passed"
-                                    entry["percent"] = int(index / total * 100)
+                                        entry['screenshot'] = f'/api/runs/screenshot/{run_id}/{shot_name}'
+                                        if viewers_present():
+                                            await publish((Path(run_dir) / shot_name).read_bytes(),
+                                                          dict(frame_state))
+                                    except Exception as evidence_error:
+                                        entry['evidence_error'] = type(evidence_error).__name__
+                                if RUN_EXCERPT:
+                                    try:
+                                        entry["excerpt"] = scrub(await page.inner_text("body"), sensitive)[:300]
+                                    except Exception:
+                                        pass
+                                entry["status"] = "passed"
+                                entry["percent"] = int(index / total * 100)
                         except Exception as exc:
                             entry["status"] = "failed"
                             entry["error"] = scrub(str(exc), sensitive).splitlines()[0][:500]
                             if screenshots in {"all", "failure"}:
                                 try:
                                     from app.evidence import capture_once
-                                    shot_name = await capture_once(page, run_dir, index, sensitive)
+                                    async with preview.lock:
+                                        shot_name = await capture_once(page, run_dir, index, sensitive)
                                     entry['screenshot'] = f'/api/runs/screenshot/{run_id}/{shot_name}'
                                     if viewers_present():
-                                        publish((Path(run_dir) / shot_name).read_bytes())
+                                        await publish((Path(run_dir) / shot_name).read_bytes(),
+                                                      dict(frame_state))
                                 except Exception as evidence_error:
                                     entry['evidence_error'] = type(evidence_error).__name__
                             entry["percent"] = percent
@@ -516,6 +565,6 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
         _save(run_id, **fields)
         await on_event({
             "type": "done", "status": status, "error": error_text, "log": log_entries,
-            "elapsed": elapsed, "display_window": display_window,
+            "elapsed": elapsed, "display_window": window_is_enabled(),
         })
         logger.info("RUN DONE %s status=%s elapsed=%.1fs", run_id, status, elapsed)

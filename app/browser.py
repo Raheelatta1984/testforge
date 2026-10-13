@@ -147,12 +147,17 @@ class Preview:
       render time on frames that would be thrown away
     """
 
-    def __init__(self, page, on_jpeg=None, interval=None, should_capture=None):
+    def __init__(self, page, on_jpeg=None, interval=None, should_capture=None,
+                 frame_metadata=None):
         self.page = page
         self.on_jpeg = on_jpeg
         # `should_capture` returns False while the live window is switched off or
         # no client is attached. Capturing then is pure waste.
         self.should_capture = should_capture
+        # Optional snapshot of the step being replayed. It is read before the
+        # screenshot starts, so a frame finishing just as the next step begins
+        # cannot be mislabeled as belonging to that next step.
+        self.frame_metadata = frame_metadata
         # Fast default: 0.18s for snappy feel, configurable via env
         default_interval = float(os.environ.get("TF_PREVIEW_INTERVAL", "0.18"))
         self.base_interval = interval if interval is not None else default_interval
@@ -163,6 +168,7 @@ class Preview:
         self._task = None
         self._last_activity = time.time()
         self._last_hash = None
+        self._last_context = None
         self._jpeg_quality = int(os.environ.get("TF_JPEG_QUALITY", "35"))  # lower = faster, less CPU
         self.captures = 0
 
@@ -185,26 +191,38 @@ class Preview:
         self.interval = self.base_interval
 
     async def _shoot(self, force=False):
+        page = self.page
+        frame_context = None
+        if self.frame_metadata is not None:
+            try:
+                frame_context = self.frame_metadata()
+            except Exception:
+                frame_context = None
         try:
-            # Use lower quality for speed
-            data = await self.page.screenshot(type="jpeg", quality=self._jpeg_quality)
+            # Use lower quality for speed. Read page/context before awaiting the
+            # screenshot so the frame retains the step context it began with.
+            data = await page.screenshot(type="jpeg", quality=self._jpeg_quality)
             self.captures += 1
         except Exception:
-            # Page might be closed
+            # Page might be closed or navigating; the next live frame will retry.
             return None
 
-        # Skip duplicate frames to save bandwidth (unless forced)
-        if not force and self._last_hash is not None:
+        # Skip duplicate frames to save bandwidth (unless forced). A step change
+        # is meaningful even if the pixels are identical: emit that frame again
+        # with its new step tag so the screen/log remain visibly synchronized.
+        context_changed = frame_context is not None and frame_context != self._last_context
+        if not force and not context_changed and self._last_hash is not None:
             # Quick hash check - compare length and first bytes
             if len(data) == len(self._last_hash) and data[:100] == self._last_hash[:100]:
-                # Likely same frame, but still update latest for new clients
                 self.latest = data
                 return data
 
         self.latest = data
         self._last_hash = data
+        self._last_context = frame_context
         if self.on_jpeg is not None:
-            result = self.on_jpeg(data)
+            result = (self.on_jpeg(data, frame_context)
+                      if frame_context is not None else self.on_jpeg(data))
             if asyncio.iscoroutine(result):
                 await result
         return data

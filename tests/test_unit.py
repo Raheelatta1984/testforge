@@ -1893,7 +1893,54 @@ class PreviewCostTests(unittest.TestCase):
 
             response = client.post("/api/runs", json={"target_id": rec["id"]})
             self.assertEqual(response.status_code, 201)
-            self.assertTrue(response.json()["display_window"], "the window defaults to on")
+            self.assertTrue(response.json()["display_window"], "the API defaults to on")
+
+    def test_UT_RUN_10_active_single_run_window_can_be_toggled(self):
+        """The top-level Runs switch updates a live single run without requeueing."""
+        from fastapi.testclient import TestClient
+        from app import library_store
+        from app.db import Run, SessionLocal
+        import app.main as main
+
+        project = library_store.create_project("Mid-run window", "")
+        rec = library_store.create_recording(project["id"], "mid-run", "/demo.html")
+        with SessionLocal() as db:
+            run = Run(recording_id=rec["id"], status="queued")
+            db.add(run); db.commit(); db.refresh(run)
+            run_id = run.id
+        main._remember_run_window(run_id, False)
+        try:
+            with TestClient(main.app) as client:
+                response = client.post(f"/api/runs/{run_id}/window", json={"display_window": True})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertTrue(response.json()["display_window"])
+                self.assertTrue(main.RUN_WINDOWS[run_id])
+                self.assertEqual(main.guardrails.run_buffers.get(run_id)[-1], {
+                    "type": "window", "display_window": True,
+                })
+                with SessionLocal() as db:
+                    db.get(Run, run_id).status = "running"
+                    db.commit()
+                response = client.post(f"/api/runs/{run_id}/window", json={"display_window": False})
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertFalse(main.RUN_WINDOWS[run_id])
+                response = client.post(f"/api/runs/{run_id}/window", json={"display_window": "yes"})
+                self.assertEqual(response.status_code, 422)
+                with SessionLocal() as db:
+                    db.get(Run, run_id).status = "passed"
+                    db.commit()
+                response = client.post(f"/api/runs/{run_id}/window", json={"display_window": False})
+                self.assertEqual(response.status_code, 409)
+        finally:
+            main.RUN_WINDOWS.pop(run_id, None)
+
+    def test_UT_RUN_11_runs_preview_controls_are_at_top_and_step_tagged(self):
+        html = (ROOT / "app/static/index.html").read_text(encoding="utf-8")
+        runs = html[html.index("function Runs("):html.index("function QueueHygiene(")]
+        self.assertLess(runs.index('id: "runs-live"'), runs.index('id: "runs-queue"'))
+        self.assertIn("/window`, {display_window: next}", runs)
+        self.assertIn("step_index: message.step_index", runs)
+        self.assertIn("run-preview-image", runs)
 
 
 class LibraryDiagnosticsTests(unittest.TestCase):
@@ -2009,6 +2056,51 @@ class ExecutorWindowTests(unittest.TestCase):
         self.assertEqual(status, "passed")
         self.assertEqual(page.shots, ["jpeg", "jpeg"], "one JPEG per step only")
         self.assertEqual(frames, [], "unwatched evidence is not broadcast")
+
+    def test_UT_RUN_09_live_frames_stream_during_actions_and_follow_steps(self):
+        import time
+        import app.executor as executor
+        from tests.fakes import FakePage, FakePlaywright
+
+        page = FakePage(known=["#go"])
+        fake = FakePlaywright(page)
+        frames, events = [], []
+        async def on_event(event):
+            event = dict(event, at=time.monotonic())
+            events.append(event)
+        async def on_frame(payload, **metadata):
+            frames.append({**metadata, "at": time.monotonic()})
+
+        run_id = self._recording_with_steps("live-step-sync")
+        original_playwright = executor.async_playwright
+        original_replay = executor.replay_step
+        async def slow_replay(*args, **kwargs):
+            await asyncio.sleep(0.35)
+            return await original_replay(*args, **kwargs)
+        executor.async_playwright = lambda: fake
+        executor.replay_step = slow_replay
+        enabled = {"value": False}
+        try:
+            async def exercise():
+                task = asyncio.create_task(execute_run(
+                    run_id, on_event, on_frame=on_frame, display_window=False,
+                    window_enabled=lambda: enabled["value"], viewer_count=lambda: 1,
+                ))
+                await asyncio.sleep(0.05)
+                enabled["value"] = True
+                await task
+            asyncio.run(exercise())
+        finally:
+            executor.async_playwright = original_playwright
+            executor.replay_step = original_replay
+
+        first_done = next(event["at"] for event in events
+                          if event.get("step_index") == 1 and event.get("status") == "passed")
+        live_during_first = [frame for frame in frames
+                             if frame.get("step_index") == 1 and frame["at"] < first_done]
+        self.assertTrue(live_during_first, "the preview loop should stream before step 1 completes")
+        self.assertEqual({frame.get("step_index") for frame in frames}, {1, 2})
+        self.assertEqual(next(frame for frame in frames if frame.get("step_index") == 2).get("label"), "Go")
 
     def test_UT_RUN_08_merged_repeat_executes_every_occurrence(self):
         """A step recorded as x3 performs three actions on replay."""

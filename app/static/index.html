@@ -43,6 +43,8 @@
   .dot.red { background: #ef4444; } .dot.yellow { background: #eab308; } .dot.green { background: #22c55e; }
   .browser-viewport { position: relative; background: #000; min-height: 200px; }
   .browser-viewport img { width: 100%; height: auto; display: block; cursor: crosshair; user-select: none; -webkit-user-drag: none; }
+  .run-preview-viewport { min-height: 180px; max-height: 300px; display: flex; align-items: center; justify-content: center; }
+  .run-preview-image { width: 100%; max-height: 300px; height: auto; object-fit: contain; cursor: default; }
   .browser-wait { min-height: 180px; display: flex; align-items: center; justify-content: center; color: #94a3b8; text-align: center; padding: 24px; font-size: 13px; background: #000; }
   .fast-badge { background: linear-gradient(90deg, #22c55e, #16a34a); color: white; font-size: 8px; padding: 2px 6px; border-radius: 999px; font-weight: bold; }
   .var-chip { background: #1e1b4b; border: 1px solid #4338ca; color: #a5b4fc; padding: 2px 8px; border-radius: 999px; font-size: 10px; cursor: pointer; }
@@ -844,17 +846,35 @@ function Recorder({ project, onRun, liveWindow }) {
 }
 
 function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
-  /* Queue hygiene and batch execution live here: both are about what runs next. */
+  /* Keep the preview control and the active run together at the top of this tab. */
   const [runs, setRuns] = useState([]);
   const [activeLog, setActiveLog] = useState([]);
   const [frame, setFrame] = useState(null);
+  const [frameStep, setFrameStep] = useState(null);
+  const [currentStep, setCurrentStep] = useState(null);
   const [percent, setPercent] = useState(0);
   const [runStatus, setRunStatus] = useState("");
   const [runError, setRunError] = useState("");
+  const [windowError, setWindowError] = useState("");
   const [queueInfo, setQueueInfo] = useState(null);
   const [windowOff, setWindowOff] = useState(false);
+  const [runReady, setRunReady] = useState(false);
+  const [activeBatch, setActiveBatch] = useState(false);
+  const [streamState, setStreamState] = useState("connecting");
   const windowOffRef = useRef(false);
-  const frameUrl = useRef(null);
+
+  const mergeStep = (rows, incoming) => {
+    const sameStep = item => {
+      if (item.step_index != null && incoming.step_index != null)
+        return Number(item.step_index) === Number(incoming.step_index);
+      return item.order != null && incoming.order != null && Number(item.order) === Number(incoming.order);
+    };
+    return rows.filter(item => !sameStep(item)).concat([incoming]).sort((a, b) =>
+      (Number(a.step_index || a.order) || 0) - (Number(b.step_index || b.order) || 0));
+  };
+  const terminal = ["passed", "failed", "error", "cancelled"].includes(runStatus);
+  const canToggleCurrent = !!runId && runReady && !activeBatch && ["queued", "running"].includes(runStatus);
+  const toggleChecked = canToggleCurrent ? !windowOff : !!liveWindow;
 
   const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
   const loadQueue = () => API.get("/api/runs/queue/status").then(setQueueInfo).catch(() => {});
@@ -869,66 +889,270 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
   }, []);
 
   useEffect(() => {
-    if (!runId) return undefined;
-    setActiveLog([]); setPercent(0); setRunStatus("queued"); setRunError(""); setFrame(null);
-    setWindowOff(false); windowOffRef.current = false;
+    if (!runId) {
+      setActiveLog([]); setFrame(null); setFrameStep(null); setCurrentStep(null);
+      setRunReady(false); setRunStatus(""); setWindowError(""); setStreamState("connecting");
+      return undefined;
+    }
+    setActiveLog([]); setPercent(0); setRunStatus("queued"); setRunError(""); setWindowError("");
+    setFrame(null); setFrameStep(null); setCurrentStep(null); setRunReady(false); setActiveBatch(false);
+    setWindowOff(false); windowOffRef.current = false; setStreamState("connecting");
     let stop = false;
     let finished = false;
-    const ws = new WebSocket((location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + "/ws/runs/" + runId);
-    ws.onmessage = (ev) => {
-      const message = JSON.parse(ev.data);
-      // The server states the window mode on the first status event of the run.
-      if (message.display_window === false) { setWindowOff(true); windowOffRef.current = true; }
-      if (message.type === "frame" && message.data) setFrame("data:image/jpeg;base64," + message.data);
-      if (message.percent !== undefined) setPercent(message.percent);
-      if (message.type === "done") {
-        setRunStatus(message.status || "done");
-        if (message.error) setRunError(message.error);
-        if (message.status === "passed") setPercent(100);
-        if (message.log) setActiveLog(message.log);
-        finished = true;
-        load(); loadQueue();
-      } else if (message.status && (message.order !== undefined || message.type === "status")) {
-        if (message.type === "status") {
-          setRunStatus(message.status);
-          setPercent(message.percent || 0);
-        } else {
-          setActiveLog(prev => prev.filter(item => item.order !== message.order).concat([message]));
+    let socketReady = false;
+    let frameReceived = false;
+    let pollTimer = null;
+    let fallbackFrameUrl = null;
+    let ws = null;
+
+    const applyRun = (run) => {
+      if (stop || !run) return;
+      if (run.progress_pct != null) setPercent(run.progress_pct);
+      if (run.status) setRunStatus(run.status);
+      if (run.rog_monitor_log && run.status && !["running", "queued"].includes(run.status)) setRunError(run.rog_monitor_log);
+      if (run.display_window != null) {
+        const off = run.display_window === false;
+        setWindowOff(off); windowOffRef.current = off;
+      }
+      setActiveBatch(!!run.batch_id);
+      setRunReady(true);
+      const log = Array.isArray(run.log) ? run.log : Array.isArray(run.execution_log) ? run.execution_log : [];
+      if (log.length) {
+        setActiveLog(prev => log.reduce((merged, step) => mergeStep(merged, step), prev));
+        const lastImage = [...log].reverse().find(step => step.screenshot);
+        if (lastImage && run.display_window !== false && !frameReceived) {
+          setFrame(lastImage.screenshot);
+          setFrameStep({order: lastImage.order, step_index: lastImage.step_index, label: lastImage.label || lastImage.action});
         }
       }
+      if (["passed", "failed", "error", "cancelled"].includes(run.status)) {
+        finished = true;
+        load(); loadQueue();
+      }
     };
+
+    const loadSnapshot = async () => {
+      try { applyRun(await API.get("/api/runs/" + runId)); }
+      catch (err) { if (!stop) setRunError(err.message); }
+    };
+    loadSnapshot();
+
+    try {
+      ws = new WebSocket((location.protocol === "https:" ? "wss" : "ws") + "://" + location.host + "/ws/runs/" + runId);
+      ws.onopen = () => { socketReady = true; setStreamState("live"); };
+      ws.onclose = () => { socketReady = false; if (!finished) setStreamState("reconnecting"); };
+      ws.onerror = () => { socketReady = false; if (!finished) setStreamState("reconnecting"); };
+      ws.onmessage = (ev) => {
+        let message;
+        try { message = JSON.parse(ev.data); } catch (_) { return; }
+        if (message.display_window != null && (message.type === "status" || message.type === "window")) {
+          const off = message.display_window === false;
+          setWindowOff(off); windowOffRef.current = off;
+        }
+        if (message.type === "window") {
+          setStreamState("live");
+          return;
+        }
+        if (message.type === "frame" && message.data) {
+          frameReceived = true;
+          setFrame("data:image/jpeg;base64," + message.data);
+          setFrameStep({order: message.order, step_index: message.step_index, label: message.label});
+          setStreamState("live");
+          return;
+        }
+        if (message.percent !== undefined) setPercent(message.percent);
+        if (message.type === "done") {
+          setRunStatus(message.status || "done");
+          if (message.error) setRunError(message.error);
+          if (message.status === "passed") setPercent(100);
+          if (Array.isArray(message.log)) {
+            setActiveLog(prev => message.log.reduce((merged, step) => mergeStep(merged, step), prev));
+          }
+          finished = true;
+          load(); loadQueue();
+          return;
+        }
+        if (message.status && (message.order !== undefined || message.step_index !== undefined)) {
+          setCurrentStep(message);
+          setActiveLog(prev => mergeStep(prev, message));
+          if (message.screenshot && !windowOffRef.current) {
+            setFrame(message.screenshot);
+            setFrameStep({order: message.order, step_index: message.step_index, label: message.label || message.action});
+          }
+        } else if (message.status && message.type === "status") {
+          setRunStatus(message.status);
+          setPercent(message.percent || 0);
+        }
+      };
+    } catch (_) {
+      setStreamState("reconnecting");
+    }
+
     const poll = async () => {
       if (stop || finished) return;
-      if (document.hidden) { setTimeout(poll, 1000); return; }
+      if (document.hidden) {
+        pollTimer = setTimeout(poll, 1000);
+        return;
+      }
       try {
-        const run = await API.get("/api/runs/" + runId);
-        if (run.progress_pct != null) setPercent(run.progress_pct);
-        if (Array.isArray(run.log) && run.log.length) setActiveLog(run.log);
-        if (run.status) setRunStatus(run.status);
-        if (run.rog_monitor_log && run.status && run.status !== "running" && run.status !== "queued") setRunError(run.rog_monitor_log);
-        if (run.display_window === false) { setWindowOff(true); windowOffRef.current = true; }
-        if (["passed", "failed", "error", "cancelled"].includes(run.status)) { finished = true; load(); loadQueue(); return; }
-        // No point polling for a picture the run was told not to produce.
-        if (!windowOffRef.current) {
-        const img = await fetch("/api/runs/" + runId + "/live.jpg?t=" + Date.now());
-        if (img.ok && (img.headers.get("content-type") || "").indexOf("image") !== -1) {
-          const blob = await img.blob();
-          const next = URL.createObjectURL(blob);
-          if (frameUrl.current && frameUrl.current.indexOf("blob:") === 0) URL.revokeObjectURL(frameUrl.current);
-          frameUrl.current = next;
-          setFrame(next);
-        }
+        // The websocket carries ordered steps and frames. Keep HTTP as a lean
+        // status/recovery path, and fetch full logs only when the socket is down.
+        const run = await API.get(`/api/runs/${runId}?full=${socketReady ? "false" : "true"}`);
+        applyRun(run);
+        if (!socketReady && !windowOffRef.current && run.status === "running") {
+          const img = await fetch("/api/runs/" + runId + "/live.jpg?t=" + Date.now());
+          if (img.ok && (img.headers.get("content-type") || "").indexOf("image") !== -1) {
+            const blob = await img.blob();
+            if (fallbackFrameUrl && fallbackFrameUrl.indexOf("blob:") === 0) URL.revokeObjectURL(fallbackFrameUrl);
+            fallbackFrameUrl = URL.createObjectURL(blob);
+            setFrame(fallbackFrameUrl);
+          }
         }
       } catch (_) {}
-      if (!stop) setTimeout(poll, 500); // Faster poll for immediate display
+      if (!stop && !finished) pollTimer = setTimeout(poll, socketReady ? 1500 : 1000);
     };
     poll();
-    return () => { stop = true; ws.close(); };
+    return () => {
+      stop = true;
+      if (pollTimer) clearTimeout(pollTimer);
+      if (ws) ws.close();
+      if (fallbackFrameUrl && fallbackFrameUrl.indexOf("blob:") === 0) URL.revokeObjectURL(fallbackFrameUrl);
+    };
   }, [runId]);
 
+  const switchWindow = async () => {
+    const next = !toggleChecked;
+    setLiveWindow(next); // also remembered as the default for the next run/batch
+    setWindowError("");
+    if (canToggleCurrent) {
+      const previousOff = windowOff;
+      setWindowOff(!next); windowOffRef.current = !next;
+      try {
+        const result = await API.post(`/api/runs/${runId}/window`, {display_window: next});
+        const off = result.display_window === false;
+        setWindowOff(off); windowOffRef.current = off;
+      } catch (err) {
+        setWindowOff(previousOff); windowOffRef.current = previousOff;
+        setWindowError(err.message + " The preference is saved for the next run.");
+      }
+    } else if (runId && terminal && next) {
+      // A completed headless run cannot be made live retroactively. Let the
+      // operator inspect its last persisted step image while the next run uses
+      // the saved live-window preference.
+      const lastImage = [...activeLog].reverse().find(step => step.screenshot);
+      if (lastImage) {
+        setFrame(lastImage.screenshot);
+        setFrameStep({order: lastImage.order, step_index: lastImage.step_index, label: lastImage.label || lastImage.action});
+      }
+    }
+  };
+
+  const currentKey = currentStep && (currentStep.step_index || currentStep.order);
+  const frameNumber = frameStep && (frameStep.step_index || frameStep.order);
+  const frameInSync = !currentKey || !frameNumber || Number(currentKey) === Number(frameNumber);
+  const staticAfterRun = !!(runId && terminal && frame);
+
   return e("div", { className: "space-y-4" },
+    e(GuideSection, { id: "runs-live", label: "Execution monitor · live browser and steps",
+      action: "This stays at the top while a run is active. Switch the browser view on or off here; frames are tagged to the step they show." },
+    e("div", { className: "space-y-3" },
+      e("div", { className: "bg-slate-900 p-3 rounded-xl border border-indigo-800 flex items-center justify-between gap-3" },
+        e("div", { className: "min-w-0" },
+          e("div", { className: "text-xs font-bold text-indigo-300" }, "Live browser window"),
+          e("p", { className: "text-[10px] text-slate-400 mt-0.5" },
+            canToggleCurrent
+              ? (toggleChecked ? "ON · live frames stream with the current step." : "OFF · headless now; switch on to attach a live preview to this run.")
+              : activeBatch && ["queued", "running"].includes(runStatus)
+                ? "This is a batch run. The switch sets the live-window choice for the next run or batch."
+                : runId && terminal
+                  ? "This run has finished. The switch saves the setting for your next run."
+                  : (liveWindow ? "ON · new runs will show a live browser preview." : "OFF · new runs stay headless; step evidence is still saved.")
+          )
+        ),
+        e("div", { className: "flex items-center gap-2 shrink-0" },
+          e("span", { className: "text-[10px] font-bold " + (toggleChecked ? "text-emerald-300" : "text-slate-500") }, toggleChecked ? "ON" : "OFF"),
+          e("button", {
+            type: "button",
+            role: "switch",
+            "aria-checked": !!toggleChecked,
+            "aria-label": "Display live browser window during execution",
+            onClick: switchWindow,
+            className: "shrink-0 w-14 h-7 rounded-full relative transition-colors " + (toggleChecked ? "bg-emerald-500" : "bg-slate-700")
+          },
+            e("span", { className: "absolute top-1 w-5 h-5 bg-white rounded-full transition-all " + (toggleChecked ? "left-8" : "left-1") })
+          )
+        )
+      ),
+      windowError && e("p", { role: "alert", className: "text-[10px] text-amber-300" }, windowError),
+      runId
+        ? e("div", { className: "bg-slate-900 border-2 border-indigo-500 rounded-3xl p-4 shadow-2xl space-y-3" },
+            e("div", { className: "flex flex-wrap justify-between items-center gap-2 font-bold text-xs" },
+              e("span", {}, "EXECUTION · RUN #" + runId.slice(0, 8)),
+              e("span", { className: "flex items-center gap-2" },
+                e("span", { className: "text-slate-300" }, (runStatus || "queued") + " · " + percent + "%"),
+                e("span", { className: "fast-badge" }, "⚡ FAST"),
+                e("span", { className: "text-[9px] text-slate-500" }, streamState === "live" ? "LIVE SYNC" : "RECONNECTING")
+              )
+            ),
+            e("div", { className: "w-full bg-slate-800 h-2 rounded-full overflow-hidden" },
+              e("div", { className: "progress-bar", style: { width: percent + "%" } })
+            ),
+            runError && e("p", { className: "text-xs text-red-300" }, runError),
+            e("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3" },
+              e("div", { className: "browser-shell" },
+                e("div", { className: "browser-bar" },
+                  e("span", { className: "dot red" }), e("span", { className: "dot yellow" }), e("span", { className: "dot green" }),
+                  e("div", { className: "browser-url" }, frameStep
+                    ? `Step ${frameStep.step_index || frameStep.order || "—"} · ${frameStep.label || "Browser view"}`
+                    : "Live execution browser"),
+                  e("span", { className: "fast-badge" }, staticAfterRun ? "EVIDENCE" : "LIVE")
+                ),
+                windowOff && !staticAfterRun
+                  ? e("div", { className: "browser-wait" },
+                      e("div", {},
+                        e("div", { className: "text-2xl mb-2" }, "🖥️"),
+                        e("div", { className: "font-bold text-slate-300" }, "Live browser window is off"),
+                        e("div", { className: "text-[10px] text-slate-500 mt-1" },
+                          activeBatch ? "Batch preview is not streamed in this panel." : "Turn the switch on while the run is active to start the live feed.")
+                      )
+                    )
+                  : frame
+                    ? e("div", { className: "browser-viewport run-preview-viewport" },
+                        e("img", { src: frame, alt: frameStep ? `Browser at step ${frameStep.step_index || frameStep.order}` : "Execution browser", className: "run-preview-image" })
+                      )
+                    : e("div", { className: "browser-wait" },
+                        runStatus === "queued" ? "⏳ Queued · browser launching…" : "Waiting for the first browser frame…"
+                      )
+              ),
+              e("div", { className: "rounded-xl border border-slate-800 bg-slate-950 p-3" },
+                e("div", { className: "flex justify-between items-center gap-2 mb-2" },
+                  e("span", { className: "text-[10px] font-bold text-indigo-300" }, "LIVE STEP LOG"),
+                  frameStep && e("span", { className: "text-[9px] " + (frameInSync ? "text-emerald-300" : "text-amber-300") },
+                    frameInSync ? `SCREEN IN SYNC · STEP ${frameNumber}` : `SCREEN STEP ${frameNumber} · syncing to ${currentKey}`)
+                ),
+                e("div", { className: "max-h-64 overflow-y-auto space-y-1" },
+                  activeLog.length === 0 && e("p", { className: "text-[10px] text-slate-500 py-3" }, "Step updates appear here as the run advances."),
+                  activeLog.slice().sort((a, b) => (Number(a.step_index || a.order) || 0) - (Number(b.step_index || b.order) || 0)).map((step, i) => {
+                    const stepKey = step.step_index || step.order || i;
+                    const isCurrent = currentKey != null && Number(stepKey) === Number(currentKey);
+                    return e("div", { key: stepKey, className: "text-[10px] p-2 rounded border " + (isCurrent ? "border-indigo-700 bg-indigo-950/40" : "border-slate-900 bg-slate-900") },
+                      e("div", { className: "flex justify-between gap-2" },
+                        e("span", { className: "font-mono text-slate-500" }, "#" + (step.step_index || step.order || i + 1) + " · ", step.label || step.action),
+                        e("span", {}, step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏳")
+                      ),
+                      step.error && e("div", { className: "text-red-300 mt-1" }, step.error)
+                    );
+                  })
+                )
+              )
+            )
+          )
+        : e("div", { className: "bg-slate-900 border border-slate-800 rounded-2xl p-4 text-xs text-slate-400" },
+            "Start a recording from Test Library or AI Recording and its live browser/step monitor will open here."
+          )
+    )),
     e(GuideSection, { id: "runs-queue", label: "Queue · what is running now",
-      action: "Nothing to do — this shows how many runs are queued, running, passed and failed." },
+      action: "This shows how many runs are queued, running, passed and failed." },
     e("div", { className: "space-y-4" },
     queueInfo && e("div", { className: "bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs" },
       e("div", { className: "flex justify-between" },
@@ -941,65 +1165,10 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
     e(GuideSection, { id: "runs-batch", label: "Sequential batch execution",
       action: "Tick the recordings you want, choose session/screenshot options, then RUN BATCH — one browser for all of them." },
     e(BatchPanel, { onOpenRun: setRunId, liveWindow: liveWindow })),
-    e(GuideSection, { id: "runs-live", label: "Live browser window switch",
-      action: "Switch it on to watch the browser during a run; leave it off for the cheapest headless replay." },
-    e("div", { className: "space-y-4" },
-    e("div", { className: "bg-slate-900 p-3 rounded-xl border border-slate-800 flex items-center justify-between gap-3" },
-      e("div", {},
-        e("div", { className: "text-xs font-bold text-indigo-300" }, "Live browser window"),
-        e("p", { className: "text-[10px] text-slate-400 mt-0.5" },
-          liveWindow
-            ? "Streams the browser while a run executes."
-            : "Off: runs headless with no screencast. Replay is unchanged, CPU is lower.")
-      ),
-      e("button", {
-        type: "button",
-        role: "switch",
-        "aria-checked": !!liveWindow,
-        "aria-label": "Display live browser window during execution",
-        onClick: () => setLiveWindow(!liveWindow),
-        className: "shrink-0 w-14 h-7 rounded-full relative transition-colors " + (liveWindow ? "bg-emerald-500" : "bg-slate-700")
-      },
-        e("span", { className: "absolute top-1 w-5 h-5 bg-white rounded-full transition-all " + (liveWindow ? "left-8" : "left-1") })
-      )
-    ),
-    runId && e("div", { className: "bg-slate-900 border-2 border-indigo-500 rounded-3xl p-5 shadow-2xl" },
-      e("div", { className: "flex justify-between font-bold text-xs" },
-        e("span", {}, "EXECUTION ⚡ IMMEDIATE"),
-        e("span", {}, (runStatus || "running") + " · " + percent + "%")
-      ),
-      e("div", { className: "w-full bg-slate-800 h-2 rounded-full overflow-hidden mt-2" },
-        e("div", { className: "progress-bar", style: { width: percent + "%" } })
-      ),
-      runError && e("p", { className: "text-xs text-red-300 mt-2" }, runError),
-      windowOff
-        ? e("div", { className: "mt-3 rounded-xl border border-slate-800 bg-slate-950 min-h-[120px] flex flex-col items-center justify-center p-6 text-center" },
-            e("div", { className: "text-2xl" }, "🖥️"),
-            e("p", { className: "text-xs text-slate-300 font-bold mt-2" }, "Live browser window is off for this run"),
-            e("p", { className: "text-[10px] text-slate-500 mt-1" }, "Execution is running headless. Switch the toggle on to stream the browser on the next run.")
-          )
-        : e("div", { className: "mt-3 rounded-xl overflow-hidden border border-slate-800 bg-black min-h-[200px] flex items-center justify-center" },
-            frame
-              ? e("img", { src: frame, alt: "Execution browser", className: "w-full" })
-              : e("div", { className: "text-slate-400 text-sm p-8 text-center" },
-                  runStatus === "queued" ? "⏳ Queued - browser launching immediately..." : "Waiting for execution browser… (window displays immediately)"
-                )
-          ),
-      e("div", { className: "max-h-40 overflow-y-auto mt-3 space-y-1" },
-        activeLog.slice().sort((a, b) => (a.order || 0) - (b.order || 0)).map((step, i) => e("div", { key: step.order || i, className: "text-[10px] p-2 bg-slate-950 rounded border border-slate-900" },
-          e("div", { className: "flex justify-between gap-2" },
-            e("span", {}, step.label || step.action),
-            e("span", {}, step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏳")
-          ),
-          step.error && e("div", { className: "text-red-300 mt-1" }, step.error)
-        ))
-      )
-    ),
-    ))),
     e(GuideSection, { id: "runs-history", label: "Run history · the audit trail",
       action: "Click any run to reopen it above, and use HTML / JSON / PDF for the shareable report." },
     e("div", { className: "space-y-2" },
-    runs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-6" }, "No runs yet. Record a session, then press RUN in the library. Execution displays immediately."),
+    runs.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-6" }, "No runs yet. Record a session, then press RUN in the library."),
     runs.map(r => e("div", { key: r.id, onClick: () => setRunId(r.id), className: `p-4 bg-slate-900 rounded-2xl border ${runId===r.id?'border-indigo-500':'border-slate-800'} mb-2 cursor-pointer` },
       e("div", { className: "flex justify-between items-center" },
         e("span", { className: "font-bold text-indigo-400 text-xs font-mono" }, "RUN #" + r.id.slice(0, 8),
@@ -1011,11 +1180,10 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
         e(ReportLinks, {kind:"run",id:r.id}),
         e("a", {href:`/api/runs/${r.id}/report.html`, onClick:ev=>ev.stopPropagation(), className:"text-indigo-300 underline"}, "HTML REPORT"),
         e("a", {href:`/api/runs/${r.id}/report.json`, onClick:ev=>ev.stopPropagation(), className:"text-indigo-300 underline"}, "JSON REPORT")),
-      // Queue hygiene cancels runs it can never finish; say so on the row.
       r.cancel_reason && e("div", { className: "text-[9px] bg-amber-950/20 p-2 mt-2 rounded border border-amber-900/30 text-amber-200" },
         "🧹 " + r.cancel_reason),
       r.rog_monitor_log && e("div", { className: "text-[9px] bg-red-950/20 p-2 mt-2 rounded border border-red-900/30 text-red-200 font-mono" }, r.rog_monitor_log)
-    )))
+    ))))
   );
 }
 

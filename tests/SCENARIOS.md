@@ -108,6 +108,9 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-RUN-06 | Window on with a viewer | `execute_run(display_window=True)` captures JPEG frames while a viewer is attached. |
 | UT-RUN-07 | Window on, nobody watching | With a viewer count of zero the run passes and renders no frames. |
 | UT-RUN-08 | Repeat count on replay | A step stored with `repeat_count=3` produces three clicks. |
+| UT-RUN-09 | Live frames stay synchronized to execution | With a viewer attached, a live JPEG is streamed during a slow step, tagged with its step index/order, and the exact post-step image arrives before that step's completion event. |
+| UT-RUN-10 | Toggle the active run's live window | The Runs-tab switch can enable/disable preview for a queued or running single recording without requeueing it; finished and batch runs remain unchanged. |
+| UT-RUN-11 | Runs monitor stays discoverable | The live-window switch and compact browser/step monitor appear before queue hygiene and batch controls; step/frame labels make synchronization visible. |
 | UT-SAVE-01 | Slow export on save | `stop()` returns cleanly when the debounced export outlives its flush budget, the browser is closed, and the export is left to finish rather than cancelled mid-write. This is the regression that raised `AttributeError: 'NoneType' object has no attribute 'cancel'`. |
 | UT-SAVE-02 | Export raises on save | `stop()` still closes the browser and records the failure in the session save log. |
 | UT-PUB-01 | Disabled publishing promises no retry | `publish_outcome(False)` returns `publish_state=local-only`, `retry_scheduled=false`, `retry_in_seconds=null`, and a message that says publishing is disabled. This is the regression where the record tab showed "GitHub push will retry in 1 minute: GitHub publishing is disabled". |
