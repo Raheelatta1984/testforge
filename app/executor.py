@@ -293,12 +293,84 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
         from app.plan_runtime import normalize_plan, run_plan
         from app.evidence import callback
         logs = []
+        desktop_step_keys = set()
+
+        def step_key(case_number, attempt_number, step):
+            return (case_number, attempt_number, step.get('stage'), step.get('step'),
+                    step.get('repeat'), step.get('action'))
+
+        def plan_preview_enabled():
+            if callable(window_enabled):
+                try:
+                    return bool(window_enabled())
+                except Exception:
+                    return bool(display_window)
+            return bool(display_window)
+
+        async def desktop_step(event, screenshot_data=None):
+            entry = dict(event)
+            key = step_key(entry.get('case'), entry.get('attempt'), entry)
+            desktop_step_keys.add(key)
+            if entry.get('screenshot'):
+                entry['screenshot'] = f"/api/runs/screenshot/{run_id}/{Path(entry['screenshot']).name}"
+            entry = scrub_entry(entry, plan_sensitive)
+            logs.append(entry)
+            _save(run_id, status='running', progress_pct=entry.get('percent', 1), execution_log=list(logs))
+            await on_event(entry)
+
+            # Per-step PNG evidence is always persisted by plan_runtime. The
+            # optional live feed is a small JPEG using the same step identity.
+            if screenshot_data and plan_preview_enabled():
+                watching = True
+                if viewer_count is not None:
+                    try:
+                        watching = int(viewer_count()) > 0
+                    except Exception:
+                        watching = True
+                if watching:
+                    try:
+                        from io import BytesIO
+                        from PIL import Image
+                        with Image.open(BytesIO(screenshot_data)) as opened:
+                            image = opened.convert('RGB')
+                            image.thumbnail((1024, 640))
+                            output = BytesIO()
+                            image.save(output, format='JPEG', quality=48, optimize=True)
+                            frame = output.getvalue()
+                        live_frames.put(run_id, frame)
+                        live_path = Path(ARTIFACTS) / 'runs' / run_id / 'live.jpg'
+                        live_path.parent.mkdir(parents=True, exist_ok=True)
+                        live_path.write_bytes(frame)
+                        if on_frame is not None:
+                            metadata = {key: entry.get(key) for key in ('order', 'step_index', 'label')}
+                            payload = base64.b64encode(frame).decode('ascii')
+                            result = on_frame(payload, **metadata)
+                            if inspect.isawaitable(result):
+                                await result
+                    except Exception:
+                        # A thumbnail failure must not cancel a plan whose PNG
+                        # step evidence was safely stored.
+                        pass
+
         async def progress(done, total, case):
             for attempt in case['attempts']:
                 for step in attempt['steps']:
-                    logs.append({**step, 'order': len(logs) + 1, 'label': f"Case {done}, row {case['row']}, {case['browser']}/{case['device']}, attempt {attempt['attempt']}", 'error': step.get('error_type'), 'result': {'case_status': case['status']}})
-            _save(run_id, progress_pct=int(done / total * 100), execution_log=list(logs))
-            await on_event({'type': 'status', 'status': 'running', 'percent': int(done / total * 100)})
+                    if step_key(case.get('case'), attempt.get('attempt'), step) in desktop_step_keys:
+                        continue
+                    entry = {**step, 'order': len(logs) + 1,
+                             'label': f"Case {done}, row {case.get('row')}, "
+                                      f"{case.get('browser') or case.get('runner') or case.get('platform') or 'plan'}"
+                                      f"/{case.get('device') or case.get('device_model') or 'target'}, "
+                                      f"attempt {attempt['attempt']}",
+                             'error': step.get('error_type'),
+                             'result': {'case_status': case['status']}}
+                    if entry.get('screenshot'):
+                        entry['screenshot'] = f"/api/runs/screenshot/{run_id}/{Path(entry['screenshot']).name}"
+                    entry = scrub_entry(entry, plan_sensitive)
+                    logs.append(entry)
+            percent = int(done / total * 100)
+            _save(run_id, progress_pct=percent, execution_log=list(logs))
+            await on_event({'type': 'status', 'status': 'running', 'percent': percent})
         async with browser_budget.slot('plan:' + run_id):
             plan = normalize_plan(plan)
             if execution_speed is not None:
@@ -308,11 +380,12 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                 plan['execution_speed'] = factor
                 for profile in plan['matrix']:
                     profile['execution_speed'] = factor
-            from app.secrets_store import reveal_map
+            from app.secrets_store import reveal_map, scrub_entry
             values, _ = environment(project_id, plan, reveal_map(variable_snapshot) if variable_snapshot is not None else None)
             _save(run_id, status='running', started_at=datetime.datetime.utcnow())
             result = await run_plan(plan, values, Path(ARTIFACTS) / 'runs' / run_id,
                                     chromium_options=launch_kwargs(), on_progress=progress,
+                                    on_step=desktop_step,
                                     input_overrides=reveal_map(overrides), evidence=callback(Path(ARTIFACTS) / 'runs' / run_id, plan_sensitive))
             _save(run_id, status=result['status'], progress_pct=100, finished_at=datetime.datetime.utcnow(), execution_log=logs)
             await on_event({'type': 'done', 'status': result['status'], 'percent': 100})

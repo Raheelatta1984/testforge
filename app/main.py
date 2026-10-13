@@ -1,5 +1,5 @@
 import asyncio, os, tempfile, zipfile, base64, re, time
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlparse
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Response
@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import guardrails, logs_local, run_queue, secrets_store
+from app import desktop_recording, guardrails, logs_local, run_queue, secrets_store
 from app.config import ARTIFACTS
 from app.errors import redact
 from app.db import (
@@ -74,6 +74,31 @@ RUN_STREAMS = {}
 # accumulate one entry per run forever.
 RUN_WINDOWS = {}
 RUN_WINDOWS_MAX = 200
+
+# Interactive web and desktop recording sessions are mutually exclusive. The
+# pending set closes the small gap between the browser's create and session APIs.
+_INTERACTIVE_RECORDING_LOCK = asyncio.Lock()
+_PENDING_BROWSER_RECORDINGS: dict[str, float] = {}
+
+
+def _pending_browser_recording_ids() -> set[str]:
+    # A client can disconnect after creating a browser recording but before it
+    # opens its session. Expire that reservation so it cannot block recording
+    # modes forever; live sessions are tracked separately by the recorder.
+    now = time.monotonic()
+    for recording_id, created in list(_PENDING_BROWSER_RECORDINGS.items()):
+        if now - created > 10:
+            _PENDING_BROWSER_RECORDINGS.pop(recording_id, None)
+    return set(_PENDING_BROWSER_RECORDINGS)
+
+
+def _active_browser_recording_ids() -> set[str]:
+    try:
+        from app.recorder import SESSIONS as browser_sessions
+        return {str(rid) for rid, session in browser_sessions.items()
+                if getattr(session, "status", "live") in {"starting", "live"}}
+    except Exception:
+        return set()
 
 
 def _remember_run_window(run_id: str, display_window: bool) -> None:
@@ -160,6 +185,15 @@ def _project_dict(project: Project) -> dict:
     }
 
 
+def _iso_utc(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    stamp = value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
 def _step_dict(step: RecordingStep) -> dict:
     return {
         "id": step.id,
@@ -170,6 +204,9 @@ def _step_dict(step: RecordingStep) -> dict:
         "selector": step.selector,
         "repeat": getattr(step, "repeat_count", 1) or 1,
         "screenshot": os.path.basename(step.screenshot_path) if step.screenshot_path else None,
+        "started_at": _iso_utc(step.started_at),
+        "finished_at": _iso_utc(step.finished_at),
+        "duration_ms": step.duration_ms,
     }
 
 
@@ -181,6 +218,7 @@ def _recording_dict(recording: Recording, with_steps: bool = False) -> dict:
         "parent_id": recording.parent_id,
         "tags": recording.tags or "",
         "name": recording.name,
+        "purpose": recording.purpose or "",
         "start_url": recording.start_url,
         "status": recording.status,
         "created_at": recording.created_at,
@@ -192,26 +230,47 @@ def _recording_dict(recording: Recording, with_steps: bool = False) -> dict:
 
 
 def _run_dict(run: Run, with_log: bool = True) -> dict:
-    """Serialise a run.
-
-    `execution_log` holds every step with its selector, excerpt and screenshot
-    path, so it dominates the payload. The list endpoint leaves it out by
-    default; the dashboard polls that list every few seconds.
-    """
-    log = (run.execution_log or []) if with_log else []
+    """Serialise run state and the small recording summary used by audit tabs."""
+    all_log = list(run.execution_log or [])
+    log = all_log if with_log else []
+    recording = run.recording
+    plan = recording.execution_plan if recording and isinstance(recording.execution_plan, dict) else {}
+    profiles = plan.get("matrix") or []
+    desktop_profile = next((item for item in profiles
+                            if isinstance(item, dict) and item.get("runner") == "windows_desktop"), None)
+    last_step = next((item for item in reversed(all_log)
+                      if item.get("stage") == "steps" and item.get("finished_at")), None)
+    if last_step is None:
+        last_step = next((item for item in reversed(all_log) if item.get("finished_at")), None)
+    started = run.started_at
+    finished = run.finished_at
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    elapsed = None
+    if started is not None:
+        end = finished or now
+        start_naive = started.replace(tzinfo=None) if started.tzinfo else started
+        end_naive = end.replace(tzinfo=None) if end.tzinfo else end
+        elapsed = max(0.0, round((end_naive - start_naive).total_seconds(), 3))
     payload = {
         "id": run.id,
         "recording_id": run.recording_id,
+        "recording_name": recording.name if recording else "",
+        "recording_purpose": (recording.purpose or "") if recording else "",
+        "execution_target": "windows_desktop" if desktop_profile else "browser",
+        "windows_version": desktop_profile.get("windows_version") if desktop_profile else None,
+        "desktop_app": desktop_profile.get("desktop_app") if desktop_profile else None,
         "status": run.status,
         "progress_pct": run.progress_pct or 0,
-        "step_count": len(run.execution_log or []),
+        "step_count": len(all_log),
         "video_path": run.video_path,
         "rog_monitor_log": run.rog_monitor_log,
         "rog_devops_log": run.rog_devops_log,
         "rog_qa_log": run.rog_qa_log,
-        "created_at": run.created_at,
-        "started_at": run.started_at,
-        "finished_at": run.finished_at,
+        "created_at": _iso_utc(run.created_at),
+        "started_at": _iso_utc(started),
+        "finished_at": _iso_utc(finished),
+        "last_step_finished_at": _iso_utc(last_step.get("finished_at")) if last_step else None,
+        "elapsed_seconds": elapsed,
         "execution_speed": run.execution_speed,
         "batch_id": run.batch_id,
         # Set when queue hygiene cancelled a run: without it the row reads
@@ -711,6 +770,9 @@ def spawn_background_publish():
 async def create_rec(body: dict, request: Request):
     project_id = body.get("project_id")
     name = body.get("name")
+    purpose = body.get("purpose", "")
+    if not isinstance(purpose, str) or len(purpose.strip()) > 1000:
+        raise HTTPException(status_code=422, detail="Recording purpose must be text up to 1000 characters")
     if not project_id or not isinstance(name, str) or not name.strip():
         raise HTTPException(status_code=422, detail="Project and recording name are required")
     try:
@@ -723,19 +785,30 @@ async def create_rec(body: dict, request: Request):
         # `recordings.name` and `recordings.start_url` are bounded; a value the
         # column cannot hold is a clear 422 here instead of a failed insert.
         raise HTTPException(status_code=422, detail="Recording name or start URL is too long")
-    try:
-        # Files only, on a worker thread: START returns as soon as the recording
-        # exists. The GitHub push follows in the background (see below).
-        created = await asyncio.to_thread(
-            library_store.create_recording,
-            project_id,
-            name.strip(),
-            start_url,
-            parent_id=body.get("parent_id") or None,
-            publish=False,
-        )
-    except LibraryError as exc:
-        raise _library_http(exc) from exc
+    if "interactive_session" in body and not isinstance(body["interactive_session"], bool):
+        raise HTTPException(status_code=422, detail="interactive_session must be true or false")
+    interactive = body.get("interactive_session") is True
+    async with _INTERACTIVE_RECORDING_LOCK:
+        if interactive and desktop_recording.get_session() is not None:
+            raise HTTPException(status_code=409, detail="Windows desktop recording is active. Stop it before starting a browser recording.")
+        if interactive and (_active_browser_recording_ids() or _pending_browser_recording_ids()):
+            raise HTTPException(status_code=409, detail="Another browser recording is already active or starting.")
+        try:
+            # Files only, on a worker thread: START returns as soon as the recording
+            # exists. The GitHub push follows in the background (see below).
+            created = await asyncio.to_thread(
+                library_store.create_recording,
+                project_id,
+                name.strip(),
+                start_url,
+                parent_id=body.get("parent_id") or None,
+                purpose=purpose.strip(),
+                publish=False,
+            )
+        except LibraryError as exc:
+            raise _library_http(exc) from exc
+        if interactive:
+            _PENDING_BROWSER_RECORDINGS[created["id"]] = time.monotonic()
     spawn_background_publish()
     return created
 
@@ -785,7 +858,7 @@ def get_recording(rid: str):
     # Live inputs are committed to the DB immediately; their debounced file
     # snapshot may intentionally lag. Never show a truncated recording during
     # capture just to force an expensive export on every input.
-    if get_session(rid) is not None:
+    if get_session(rid) is not None or desktop_recording.get_session(rid) is not None:
         with SessionLocal() as db:
             row = db.get(Recording, rid)
             if row is not None:
@@ -830,7 +903,20 @@ async def start_recording_session(rid: str, request: Request):
             recording.start_url = start_url
             db.commit()
         seq = max((step.order for step in recording.steps), default=0)
-    session = await open_session(rid, start_url, seq)
+    async with _INTERACTIVE_RECORDING_LOCK:
+        if desktop_recording.get_session() is not None:
+            _PENDING_BROWSER_RECORDINGS.pop(rid, None)
+            raise HTTPException(status_code=409, detail="Windows desktop recording is active. Stop it before starting a browser recording.")
+        other = _active_browser_recording_ids() - {rid}
+        if other:
+            _PENDING_BROWSER_RECORDINGS.pop(rid, None)
+            raise HTTPException(status_code=409, detail="Another browser recording is already active.")
+        try:
+            session = await open_session(rid, start_url, seq)
+        except Exception:
+            _PENDING_BROWSER_RECORDINGS.pop(rid, None)
+            raise
+        _PENDING_BROWSER_RECORDINGS.pop(rid, None)
     return {"status": session.status, "error": session.error, "url": session.current_url, "optimized": True}
 
 
@@ -969,11 +1055,13 @@ async def replay_existing_recording(rid: str, body: dict):
 
 @app.post("/api/recordings/{rid}/stop")
 async def stop_recording(rid: str):
-    session = get_session(rid)
     save_logs = []
-    if session is not None:
-        save_logs = getattr(session, '_save_logs', [])[-10:]
-        await session.stop()
+    async with _INTERACTIVE_RECORDING_LOCK:
+        session = get_session(rid)
+        if session is not None:
+            save_logs = getattr(session, '_save_logs', [])[-10:]
+            await session.stop()
+        _PENDING_BROWSER_RECORDINGS.pop(rid, None)
     try:
         # Smooth save with detailed logs
         saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True)
@@ -1026,6 +1114,120 @@ async def stop_recording(rid: str):
             f"{saved.get('publish_branch') or 'the repository'}"
             if published else f"AI recording {name} finished and was saved locally"
         ),
+    }
+
+
+@app.get("/api/desktop/apps")
+def desktop_recording_apps():
+    """Profiles available to the Windows AI recorder; no executable path is exposed."""
+    return {"apps": desktop_recording.registered_apps(),
+            "mode": "agent" if desktop_recording.agent_configured() else "simulator"}
+
+
+@app.get("/api/desktop/recording/session")
+def desktop_recording_session_status():
+    session = desktop_recording.get_session()
+    return session.public_state() if session else {"active": False, "status": "absent"}
+
+
+@app.post("/api/desktop/recordings", status_code=201)
+async def start_desktop_recording(body: dict):
+    project_id = body.get("project_id")
+    name = body.get("name")
+    purpose = body.get("purpose", "")
+    app_id = body.get("app_id") or body.get("application_id")
+    windows_version = body.get("windows_version")
+    if not project_id or not isinstance(name, str) or not name.strip():
+        raise HTTPException(422, "Project and recording name are required")
+    if len(name.strip()) > 255:
+        raise HTTPException(422, "Recording name cannot exceed 255 characters")
+    if not isinstance(purpose, str) or len(purpose.strip()) > 1000:
+        raise HTTPException(422, "Recording purpose must be text up to 1000 characters")
+    if not isinstance(windows_version, str) or windows_version not in {"windows_10", "windows_11"}:
+        raise HTTPException(422, "Choose Windows 10 or Windows 11")
+    try:
+        # Validate the target before writing the recording row.
+        if not isinstance(app_id, str) or app_id not in {app.get("id") for app in desktop_recording.registered_apps()}:
+            raise ValueError("Choose a registered desktop application")
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    async with _INTERACTIVE_RECORDING_LOCK:
+        if desktop_recording.get_session() is not None:
+            raise HTTPException(409, "A Windows desktop recording is already active")
+        if _active_browser_recording_ids() or _pending_browser_recording_ids():
+            raise HTTPException(409, "Stop the browser recording before starting a Windows desktop recording")
+        try:
+            created = await asyncio.to_thread(
+                library_store.create_recording,
+                project_id,
+                name.strip(),
+                "",
+                tags="windows_desktop",
+                purpose=purpose.strip(),
+                publish=False,
+            )
+        except LibraryError as exc:
+            raise _library_http(exc) from exc
+        recording_id = created["id"]
+        try:
+            state = await desktop_recording.start_session(
+                recording_id, app_id, windows_version, purpose.strip())
+        except Exception as exc:
+            # Keep the unsaved row: it is evidence that START was attempted and
+            # avoids silently deleting any operator data. The UI will name it.
+            spawn_background_publish()
+            return {"active": False, "status": "error", "recording_id": recording_id,
+                    "recording_name": name.strip(), "purpose": purpose.strip(),
+                    "windows_version": windows_version,
+                    "error": f"Could not open the Windows target: {redact(exc)}"}
+    return {**state, "recording_id": recording_id, "recording_name": name.strip(),
+            "frame_mime": "image/png"}
+
+
+@app.get("/api/desktop/recordings/{rid}/frame")
+def desktop_recording_frame(rid: str):
+    frame = desktop_recording.frame_for(rid)
+    if frame is None:
+        return Response(status_code=204, headers={"Cache-Control": "no-store"})
+    return Response(content=frame, media_type="image/png",
+                    headers={"Cache-Control": "no-store", "X-Optimized": "true"})
+
+
+@app.post("/api/desktop/recordings/{rid}/input")
+async def desktop_recording_input(rid: str, body: dict):
+    session = desktop_recording.get_session(rid)
+    if session is None:
+        raise HTTPException(409, "Start the desktop recording before sending input")
+    try:
+        return await session.input(body)
+    except (ValueError, RuntimeError, AssertionError) as exc:
+        raise HTTPException(409, str(exc).splitlines()[0][:500]) from exc
+
+
+@app.post("/api/desktop/recordings/{rid}/stop")
+async def stop_desktop_recording(rid: str):
+    async with _INTERACTIVE_RECORDING_LOCK:
+        stopped = await desktop_recording.stop_session(rid)
+    try:
+        saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True)
+    except LibraryError as exc:
+        raise _library_http(exc) from exc
+    if saved is None:
+        raise HTTPException(404, "Desktop recording not found")
+    if saved.get("retry_scheduled"):
+        schedule_publish_retry()
+    return {
+        "ok": True,
+        "recording_id": rid,
+        "recording_name": saved.get("name") or rid,
+        "purpose": saved.get("purpose") or "",
+        "step_count": saved.get("step_count") or 0,
+        "status": "stopped",
+        "window_closed": not bool((stopped or {}).get("error")),
+        "window_close_note": (stopped or {}).get("error"),
+        "published": bool(saved.get("published")),
+        "publish_message": saved.get("publish_message") or "Recording saved locally.",
     }
 
 
@@ -1214,6 +1416,12 @@ async def queue_run(body: dict):
         recording = db.get(Recording, target_id)
         if recording is None:
             raise HTTPException(status_code=404, detail="Recording not found")
+        if recording.execution_plan and any(
+                isinstance(profile, dict) and profile.get("runner") == "windows_desktop"
+                for profile in (recording.execution_plan.get("matrix") or [])):
+            # Windows executions always stream their per-step screen frames; a
+            # hidden/headless desktop would violate the execution-monitor contract.
+            display_window = True
         from app.secrets_store import protect_overrides, protected, freeze_inputs, plan_secret_names
         try:
             overrides = protect_overrides([recording.project_id], body.get('variables', {}), set(k for k,v in (recording.input_defaults or {}).items() if protected(v)) | plan_secret_names(recording.execution_plan))

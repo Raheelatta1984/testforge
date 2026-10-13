@@ -7,9 +7,10 @@
 <script crossorigin src="/vendor/react.production.min.js"></script>
 <script crossorigin src="/vendor/react-dom.production.min.js"></script>
 <style>
-  body { background: #020617; color: #f8fafc; font-family: system-ui; overflow: hidden; height: 100vh; width: 100vw; }
+  html, body, #root { height: 100%; min-height: 0; }
+  body { background: #020617; color: #f8fafc; font-family: system-ui; overflow: hidden; height: 100vh; height: 100dvh; width: 100vw; }
   /* Labels stay visible on phones too; the named tab strip scrolls horizontally
-     instead of compressing 13 tabs into icons that new users have to guess. */
+     instead of compressing every tab into icons that new users have to guess. */
   #main-tabs { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #6366f1 #0f172a; }
   #main-tabs::-webkit-scrollbar { height: 8px; }
   #main-tabs::-webkit-scrollbar-track { background: #0f172a; }
@@ -32,7 +33,7 @@
   .nav-btn-icon { font-size: 16px; line-height: 18px; }
   .nav-btn-label { font-size: 9px; line-height: 11px; }
   .nav-btn.active { color: #818cf8; border-top-color: #818cf8; background: rgba(30, 41, 59, 0.5); }
-  .content-area { height: calc(100vh - 75px); overflow-y: auto; overflow-x: auto; padding: 15px; padding-bottom: 90px; }
+  .content-area { flex: 1 1 0%; min-height: 0; height: auto; overflow-y: auto; overflow-x: auto; padding: 15px; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
   .canvas-window { background: #000; border: 2px solid #1e293b; border-radius: 16px; overflow: hidden; aspect-ratio: 16/10; }
   .progress-bar { height: 100%; background: #6366f1; transition: width 0.4s ease; box-shadow: 0 0 15px #6366f1; }
   .key-btn { background: #1e293b; padding: 8px; border-radius: 6px; font-size: 10px; font-weight: bold; border: 1px solid #334155; }
@@ -252,7 +253,7 @@ function GuideSection({ id, label, action, children }) {
 }
 
 // Switches every note in the app on or off. Living in the header keeps it
-// reachable from all thirteen tabs, including ones that render no content yet.
+// reachable from every tab, including ones that render no content yet.
 function GuideToggle() {
   const on = React.useSyncExternalStore(subscribeGuide, readGuideMode, readGuideMode);
   const hidden = React.useSyncExternalStore(subscribeGuide, readHiddenTags, readHiddenTags);
@@ -285,6 +286,33 @@ function AiInput({ value, onChange, placeholder, isArea }) {
   );
 }
 
+function TabSupportFooter({ tab, setTab }) {
+  const support = {
+    demo: ["Demo runs use the active project. Open Runs for live progress or Artifacts for evidence.", "runs"],
+    projects: ["Project selection drives recording, plans, variables and the shared test library.", "library"],
+    variables: ["Secret values stay protected; use the Variables tab to manage reusable inputs.", "library"],
+    record: ["Browser recording is saved to the active project. Stop the session to save and review its steps.", "library"],
+    "desktop-record": ["Windows recording uses a configured Windows agent when available; otherwise it clearly runs in the deterministic simulator.", "future"],
+    plan: ["Execution plans are immutable snapshots. Use Test Library to review source recordings and run results.", "library"],
+    library: ["Open a recording to inspect or edit steps. Runs and Artifacts contain execution timing and evidence.", "artifacts"],
+    runs: ["Run status, live step events and the synchronized screen are shown here; compare completed runs in Compare.", "comparison"],
+    comparison: ["Compare preserves each run's step log and timing. Attach execution IDs when reporting an issue.", "artifacts"],
+    artifacts: ["Screenshots and video are linked to their run. The run summary includes recording purpose and timing.", "runs"],
+    logs: ["Logs fall back to this instance when a repository checkout is not available.", "github"],
+    github: ["Publishing status is shown above. A locally saved recording remains available even when sync is offline.", "library"],
+    azure: ["Keep the deployment guide and security runbook handy when configuring a hosted instance.", "future"],
+    future: ["Support Matrix distinguishes live agent integrations from deterministic local simulator coverage.", "desktop-record"]
+  }[tab] || ["Need help? Include the relevant project, recording or run ID so an issue can be traced.", "logs"];
+  return e("footer", { className: "mt-6 mb-4 rounded-2xl border border-indigo-900/60 bg-indigo-950/30 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3" },
+    e("div", { className: "min-w-0" },
+      e("div", { className: "text-[10px] font-bold tracking-widest text-indigo-300" }, "TESTFORGE SUPPORT · " + (tab === "desktop-record" ? "WINDOWS DESKTOP" : tab.toUpperCase())),
+      e("p", { className: "text-[11px] text-slate-300 mt-1" }, support[0])),
+    e("div", { className: "flex flex-wrap gap-2 shrink-0" },
+      e("button", { type: "button", onClick: () => setTab(support[1]), className: "text-[10px] font-bold px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:border-indigo-500" }, "OPEN " + (support[1] === "desktop-record" ? "WINDOWS DESKTOP" : support[1].toUpperCase())),
+      e("a", { href: "https://github.com/Raheelatta1984/testforge/issues", target: "_blank", rel: "noopener noreferrer", className: "text-[10px] font-bold px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:border-indigo-500 text-indigo-200" }, "GITHUB SUPPORT ↗"))
+  );
+}
+
 function App({ access }) {
   const [tab, setTab] = useState("projects");
   const [activeProject, setActiveProject] = useState(() => JSON.parse(localStorage.getItem("tf_project") || 'null'));
@@ -299,6 +327,7 @@ function App({ access }) {
   const tabs = [
     ["demo", "🧪", "Demo"], ["projects", "📁", "Projects"],
     ["variables", "🔤", "Variables"], ["record", "⏺", "AI Recording"],
+    ["desktop-record", "🖥️", "Windows Desktop"],
     ["plan", "🧭", "Test Plan"], ["library", "📚", "Test Library"],
     ["runs", "▶", "Runs"], ["comparison", "⚖️", "Compare"],
     ["artifacts", "🎥", "Artifacts"], ["logs", "📜", "Logs"],
@@ -325,13 +354,15 @@ function App({ access }) {
       tab === "variables" && e(Variables, { project: activeProject }),
       tab === "record" && e(Recorder, { project: activeProject, liveWindow,
         onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
+      tab === "desktop-record" && e(DesktopRecorder, { project: activeProject }),
       tab === "plan" && e(ExecutionPlan, { project: activeProject, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "library" && e(Library, { project: activeProject, liveWindow, onRun: (id) => { setActiveRunId(id); setTab("runs"); } }),
       tab === "runs" && e(Runs, { runId: activeRunId, setRunId: setActiveRunId, liveWindow, setLiveWindow: toggleLiveWindow }),
       tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts),
       tab === "logs" && e(Logs), tab === "github" && e(Github),
       tab === "azure" && e(Azure),
-      tab === "future" && e(FuturePlanningTab)
+      tab === "future" && e(FuturePlanningTab),
+      e(TabSupportFooter, { tab, setTab })
     ),
     e('nav', { id: "main-tabs", 'aria-label': "Main navigation tabs",
       title: "Swipe horizontally to see all named tabs",
@@ -354,6 +385,7 @@ function Recorder({ project, onRun, liveWindow }) {
   const [saveState, setSaveState] = useState("");
   const [steps, setSteps] = useState([]);
   const [name, setName] = useState("");
+  const [purpose, setPurpose] = useState("");
   const [url, setUrl] = useState("");
   const [text, setText] = useState("");
   const learningSites = window.TESTFORGE_LEARNING_SITES || [];
@@ -499,7 +531,9 @@ function Recorder({ project, onRun, liveWindow }) {
       const recording = await API.post("/api/recordings", {
         project_id: project.id,
         name: (name || "Session").trim(),
-        start_url: (url || "").trim() || "/demo.html"
+        purpose: purpose.trim(),
+        start_url: (url || "").trim() || "/demo.html",
+        interactive_session: true
       });
       initialStepsLoaded.current = false;
       setStatus("Launching browser… FAST ⚡"); setRecId(recording.id);
@@ -520,6 +554,7 @@ function Recorder({ project, onRun, liveWindow }) {
       setFrame(null);
       setStatus("Launching browser fast");
       setName(full.name || recording.name || "");
+      setPurpose(full.purpose || "");
       setUrl(full.start_url || recording.start_url || "");
       setSaveNote("");
       setRecId(recording.id);
@@ -802,6 +837,10 @@ function Recorder({ project, onRun, liveWindow }) {
       ),
       e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-name" }, "Recording name"),
       e("input", { id: "rec-name", value: name, onChange: (evt) => setName(evt.target.value), className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-purpose" }, "Recording purpose (optional)"),
+      e("textarea", { id: "rec-purpose", value: purpose, maxLength: 1000, rows: 2,
+        onChange: evt => setPurpose(evt.target.value), placeholder: "What should this recording verify?",
+        className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-url" }, "Page to open"),
       e("input", { id: "rec-url", value: url, onChange: (evt) => setUrl(evt.target.value), placeholder: "Leave blank for sample app", className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
       e("label", { className: "block text-xs text-slate-400", htmlFor: "rec-learning-site" }, "Learning URLs · shopping, grocery and fashion"),
@@ -849,6 +888,280 @@ function Recorder({ project, onRun, liveWindow }) {
   );
 }
 
+function desktopTimestamp(value) {
+  if (!value) return "Not recorded";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString(undefined, { timeZone: "UTC", dateStyle: "medium", timeStyle: "medium" }) + " UTC";
+}
+
+function DesktopRecorder({ project }) {
+  const [apps, setApps] = useState([]);
+  const [mode, setMode] = useState("simulator");
+  const [appId, setAppId] = useState("calculator");
+  const [windowsVersion, setWindowsVersion] = useState("windows_11");
+  const [name, setName] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [recordingId, setRecordingId] = useState(null);
+  const [session, setSession] = useState(null);
+  const [frame, setFrame] = useState(null);
+  const [steps, setSteps] = useState([]);
+  const [action, setAction] = useState("ui_click");
+  const [value, setValue] = useState("");
+  const [fieldName, setFieldName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [note, setNote] = useState("");
+  const [registerOpen, setRegisterOpen] = useState(false);
+  const [appDraft, setAppDraft] = useState({ name: "", window_title: "", process_name: "", framework: "dotnet", kind: "custom" });
+  const pollTimer = useRef(null);
+
+  const loadRecording = async (rid) => {
+    const recording = await API.get("/api/recordings/" + rid);
+    setName(recording.name || "");
+    setPurpose(recording.purpose || "");
+    setSteps((recording.steps || []).map(step => ({
+      ...step,
+      screenshot: step.id ? `/api/recordings/${rid}/steps/${step.id}/screenshot` : null
+    })).sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0)));
+  };
+
+  useEffect(() => {
+    let gone = false;
+    Promise.all([
+      API.get("/api/desktop/apps").catch(err => ({ apps: [], mode: "simulator", error: err.message })),
+      API.get("/api/desktop/recording/session").catch(() => ({ active: false }))
+    ]).then(([catalog, current]) => {
+      if (gone) return;
+      const available = catalog.apps || [];
+      setApps(available);
+      setMode(catalog.mode || "simulator");
+      if (available.length && !available.some(item => item.id === appId)) setAppId(available[0].id);
+      if (current.active && current.recording_id) {
+        setSession(current);
+        setRecordingId(current.recording_id);
+        setAppId(current.app_id || appId);
+        setWindowsVersion(current.windows_version || "windows_11");
+        setName(current.app_name || "Windows desktop session");
+        setPurpose(current.purpose || "");
+        setFrame(`/api/desktop/recordings/${current.recording_id}/frame?t=${Date.now()}`);
+        loadRecording(current.recording_id).catch(err => { if (!gone) setError("Could not restore desktop steps: " + err.message); });
+      }
+      if (catalog.error) setError("Desktop profiles could not be loaded: " + catalog.error);
+    }).finally(() => { if (!gone) setLoading(false); });
+    return () => { gone = true; clearTimeout(pollTimer.current); };
+  }, []);
+
+  useEffect(() => {
+    if (!recordingId || !session || !session.active) return undefined;
+    let cancelled = false;
+    let lastCount = Number(session.step_count || 0);
+    const poll = async () => {
+      try {
+        const current = await API.get("/api/desktop/recording/session");
+        if (cancelled) return;
+        if (!current.active || current.recording_id !== recordingId) {
+          setSession(null);
+          setFrame(null);
+          setNote("The desktop session ended in another view. Reopen Artifacts to review its saved evidence.");
+          return;
+        }
+        setSession(current);
+        if (Number(current.step_count || 0) > lastCount) {
+          lastCount = Number(current.step_count || 0);
+          setFrame(`/api/desktop/recordings/${recordingId}/frame?t=${Date.now()}`);
+          loadRecording(recordingId).catch(() => {});
+        }
+      } catch (_) { /* the next bounded poll will retry */ }
+      if (!cancelled) pollTimer.current = setTimeout(poll, 1000);
+    };
+    poll();
+    return () => { cancelled = true; clearTimeout(pollTimer.current); };
+  }, [recordingId, !!(session && session.active)]);
+
+  const start = async () => {
+    if (!project || !project.id) { setError("Select a project before starting a desktop recording."); return; }
+    if (!appId) { setError("Choose a registered desktop application."); return; }
+    setBusy(true); setError(""); setNote(""); setSteps([]); setFrame(null);
+    try {
+      const result = await API.post("/api/desktop/recordings", {
+        project_id: project.id,
+        name: (name || "Windows desktop session").trim(),
+        purpose: purpose.trim(),
+        app_id: appId,
+        windows_version: windowsVersion
+      });
+      if (!result.active || result.error) {
+        setRecordingId(result.recording_id || null);
+        setError(result.error || "The desktop session did not become active.");
+        return;
+      }
+      setRecordingId(result.recording_id);
+      setSession(result);
+      setName(result.recording_name || name);
+      setMode(result.mode || mode);
+      setFrame(result.frame ? `data:${result.frame_mime || "image/png"};base64,${result.frame}` : null);
+      setNote(`${result.app_name} opened on ${result.windows_version.replace("_", " ")}. Select an action, then click its target in the live desktop view.`);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const recordAt = async (event) => {
+    if (!recordingId || !session || !session.active || busy) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
+    setBusy(true); setError("");
+    try {
+      const result = await API.post(`/api/desktop/recordings/${recordingId}/input`, {
+        action, x, y, value, field_name: fieldName
+      });
+      if (result.step) setSteps(prev => [...prev.filter(step => step.id !== result.step.id), {
+        ...result.step,
+        screenshot: result.step.screenshot || null
+      }].sort((a, b) => (Number(a.order) || 0) - (Number(b.order) || 0)));
+      if (result.frame) setFrame(`data:image/png;base64,${result.frame}`);
+      setSession(prev => prev ? { ...prev, step_count: result.step ? result.step.order : prev.step_count } : prev);
+      setValue("");
+      setNote(result.matched_control && (result.matched_control.name || result.matched_control.automation_id)
+        ? `Captured exact desktop control: ${result.matched_control.name || result.matched_control.automation_id}.`
+        : "Step and screen evidence captured. Coordinates are retained as a fallback locator.");
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const stop = async () => {
+    if (!recordingId) return;
+    const id = recordingId;
+    setBusy(true); setError(""); setNote("Closing the desktop app and saving step evidence…");
+    try {
+      const result = await API.post(`/api/desktop/recordings/${id}/stop`, {});
+      setNote(`${result.recording_name || name} stopped · ${result.step_count || steps.length} step(s) saved. ` +
+        (result.publish_message || (result.published ? "Published." : "Saved locally.")) +
+        (result.window_close_note ? ` App close note: ${result.window_close_note}` : ""));
+      setSession(null); setRecordingId(null); setFrame(null);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const registerApp = async (event) => {
+    event.preventDefault();
+    if (!appDraft.name.trim()) { setError("Enter an application name to register it."); return; }
+    setBusy(true); setError("");
+    try {
+      const profile = {
+        name: appDraft.name.trim(),
+        window_title: (appDraft.window_title || appDraft.name).trim(),
+        process_name: (appDraft.process_name || "CustomApp.exe").trim(),
+        framework: appDraft.framework,
+        kind: appDraft.kind,
+        controls: []
+      };
+      const result = await API.post("/api/roadmap/desktop-apps", { profile });
+      const registered = result.app;
+      setApps(prev => [...prev.filter(app => app.id !== registered.id), registered]);
+      setAppId(registered.id);
+      setRegisterOpen(false);
+      setAppDraft({ name: "", window_title: "", process_name: "", framework: "dotnet", kind: "custom" });
+      setNote(`${registered.name} is registered and selected. Configure the Windows agent to launch the real application.`);
+    } catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+
+  const active = !!(session && session.active && recordingId);
+  const actionOptions = [
+    ["ui_click", "Click"], ["ui_double_click", "Double-click"], ["ui_right_click", "Right-click"],
+    ["ui_type", "Type text"], ["ui_select", "Select option"], ["ui_check", "Check / uncheck"]
+  ];
+  return e("div", { className: "space-y-4" },
+    e(GuideSection, { id: "desktop-recorder-intro", label: "Windows desktop AI Recording",
+      action: "Choose a Windows version and registered application, start the session, then select an action and click its target in the live screen." },
+    e("section", { className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 space-y-4" },
+      e("div", { className: "flex flex-wrap justify-between items-center gap-2" },
+        e("div", {},
+          e("h2", { className: "font-bold text-lg text-indigo-300" }, "Windows desktop AI Recording 🖥️"),
+          e("p", { className: "text-xs text-slate-400 mt-1" }, "The selected app opens for recording and is closed when you stop. Each action stores the exact control identity when available, a normalized coordinate fallback, UTC timestamps and a screenshot.")),
+        e("span", { className: "fast-badge" }, active ? "SESSION LIVE" : (mode === "agent" ? "WINDOWS AGENT" : "DETERMINISTIC SIMULATOR"))
+      ),
+      mode === "simulator" && e("p", { className: "text-[11px] text-amber-200 bg-amber-950/30 border border-amber-900/50 rounded-xl p-3" },
+        "No Windows agent is configured on this server. The screen below is the deterministic desktop simulator, not a native Windows desktop. To launch real applications and capture their UI, configure TF_WINDOWS_AGENT_URL and TF_WINDOWS_AGENT_TOKEN for an authenticated Windows host."),
+      e("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3" },
+        e("div", {},
+          e("label", { className: "block text-xs text-slate-400 mb-1", htmlFor: "desktop-app-select" }, "Suggested or registered desktop app"),
+          e("select", { id: "desktop-app-select", value: appId, disabled: active || busy || loading,
+            onChange: evt => setAppId(evt.target.value), className: "w-full bg-slate-800 rounded-lg px-3 py-3 text-sm border border-slate-700" },
+            apps.map(app => e("option", { key: app.id, value: app.id }, `${app.name} · ${app.builtin ? "suggested" : "registered"}`)))),
+        e("div", {},
+          e("label", { className: "block text-xs text-slate-400 mb-1", htmlFor: "desktop-windows-version" }, "Windows version"),
+          e("select", { id: "desktop-windows-version", value: windowsVersion, disabled: active || busy,
+            onChange: evt => setWindowsVersion(evt.target.value), className: "w-full bg-slate-800 rounded-lg px-3 py-3 text-sm border border-slate-700" },
+            e("option", { value: "windows_10" }, "Windows 10"), e("option", { value: "windows_11" }, "Windows 11")))),
+      e("label", { className: "block text-xs text-slate-400", htmlFor: "desktop-rec-name" }, "Recording name"),
+      e("input", { id: "desktop-rec-name", value: name, disabled: active || busy,
+        onChange: evt => setName(evt.target.value), placeholder: "Windows desktop test",
+        className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e("label", { className: "block text-xs text-slate-400", htmlFor: "desktop-rec-purpose" }, "Purpose (optional)"),
+      e("textarea", { id: "desktop-rec-purpose", value: purpose, maxLength: 1000, rows: 2, disabled: active || busy,
+        onChange: evt => setPurpose(evt.target.value), placeholder: "What should this recording verify?",
+        className: "w-full bg-slate-800 rounded-lg px-4 py-3 text-sm border border-slate-700" }),
+      e("div", { className: "flex flex-wrap gap-2 items-center" },
+        !active
+          ? e("button", { type: "button", onClick: start, disabled: busy || loading || !project,
+              className: "bg-red-600 hover:bg-red-500 disabled:opacity-50 px-5 py-3 rounded-xl font-bold" }, busy ? "OPENING DESKTOP APP…" : "● START WINDOWS RECORDING")
+          : e("button", { type: "button", onClick: stop, disabled: busy,
+              className: "bg-slate-700 hover:bg-red-700 disabled:opacity-50 px-5 py-3 rounded-xl font-bold" }, busy ? "SAVING & CLOSING…" : "■ STOP, SAVE & CLOSE APP"),
+        !project && !active && e("span", { className: "text-xs text-amber-300" }, "Select a project first."),
+        active && e("span", { className: "text-xs text-emerald-300" }, `${session.app_name} · ${session.windows_version.replace("_", " ")} · ${session.step_count || 0} step(s)`)),
+      e("details", { className: "rounded-xl border border-slate-800 bg-slate-950 p-3", open: registerOpen, onToggle: evt => setRegisterOpen(evt.currentTarget.open) },
+        e("summary", { className: "text-xs font-bold text-indigo-300 cursor-pointer" }, "REGISTER A DESKTOP APPLICATION"),
+        e("form", { className: "mt-3 grid grid-cols-1 md:grid-cols-2 gap-2", onSubmit: registerApp },
+          e("input", { value: appDraft.name, onChange: evt => setAppDraft(prev => ({ ...prev, name: evt.target.value })), placeholder: "Application name", className: "bg-slate-800 rounded-lg px-3 py-2 text-xs border border-slate-700" }),
+          e("input", { value: appDraft.window_title, onChange: evt => setAppDraft(prev => ({ ...prev, window_title: evt.target.value })), placeholder: "Window title (optional)", className: "bg-slate-800 rounded-lg px-3 py-2 text-xs border border-slate-700" }),
+          e("input", { value: appDraft.process_name, onChange: evt => setAppDraft(prev => ({ ...prev, process_name: evt.target.value })), placeholder: "Process name, e.g. Orders.exe", className: "bg-slate-800 rounded-lg px-3 py-2 text-xs border border-slate-700" }),
+          e("div", { className: "flex gap-2" },
+            e("select", { value: appDraft.framework, onChange: evt => setAppDraft(prev => ({ ...prev, framework: evt.target.value })), className: "flex-1 bg-slate-800 rounded-lg px-2 py-2 text-xs" }, ["dotnet", "cpp", "winforms"].map(item => e("option", { key: item, value: item }, item))),
+            e("select", { value: appDraft.kind, onChange: evt => setAppDraft(prev => ({ ...prev, kind: evt.target.value })), className: "flex-1 bg-slate-800 rounded-lg px-2 py-2 text-xs" }, ["custom", "access_vba", "foxpro", "cobol_terminal", "as400_terminal", "oracle_desktop", "winforms_legacy", "dotnet", "cpp", "winforms"].map(item => e("option", { key: item, value: item }, item)))),
+          e("button", { type: "submit", disabled: busy, className: "md:col-span-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 rounded-lg px-3 py-2 text-xs font-bold" }, "REGISTER & SELECT APPLICATION"))),
+      note && e("p", { role: "status", className: "text-xs text-emerald-200 bg-emerald-950/30 border border-emerald-900/40 rounded-xl p-3" }, note),
+      error && e("p", { role: "alert", className: "text-xs text-red-300 bg-red-950/30 border border-red-900/40 rounded-xl p-3" }, error),
+      e("div", { className: "grid grid-cols-1 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)] gap-4" },
+        e("section", { className: "rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden" },
+          e("div", { className: "flex flex-wrap justify-between items-center gap-2 p-3 bg-slate-900 border-b border-slate-800" },
+            e("span", { className: "text-xs font-bold text-indigo-300" }, "LIVE WINDOWS SCREEN"),
+            e("span", { className: "text-[10px] text-slate-500" }, active ? `SESSION · ${session.step_count || 0} STEPS` : "START A SESSION TO OPEN THE APP")),
+          frame
+            ? e("div", { className: "bg-black p-2" }, e("img", { src: frame, alt: "Live Windows desktop screen",
+                onClick: recordAt, className: "block w-full h-auto max-h-[70vh] object-contain mx-auto " + (active && !busy ? "cursor-crosshair" : "cursor-default"),
+                title: active ? "Select a control target to perform and capture the current action" : "Desktop screen" }))
+            : e("div", { className: "browser-wait" }, loading ? "Checking for an active desktop recording…" : "Start a desktop recording to show the Windows application here."),
+          active && e("div", { className: "p-3 border-t border-slate-800 space-y-2" },
+            e("div", { className: "grid grid-cols-1 sm:grid-cols-2 gap-2" },
+              e("label", { className: "text-[10px] text-slate-400" }, "Action",
+                e("select", { value: action, disabled: busy, onChange: evt => setAction(evt.target.value), className: "block w-full mt-1 bg-slate-800 rounded-lg px-3 py-2 text-xs" }, actionOptions.map(([key, label]) => e("option", { key, value: key }, label)))),
+              e("label", { className: "text-[10px] text-slate-400" }, "Meaningful field reference (used if UI metadata is unavailable)",
+                e("input", { value: fieldName, disabled: busy, onChange: evt => setFieldName(evt.target.value), placeholder: "e.g. Customer number", className: "block w-full mt-1 bg-slate-800 rounded-lg px-3 py-2 text-xs" }))),
+            ["ui_type", "ui_select", "ui_check"].includes(action) && e("label", { className: "block text-[10px] text-slate-400" }, action === "ui_type" ? "Text to type" : action === "ui_select" ? "Option to select" : "Checked state (true / false)",
+              e("input", { value, disabled: busy, onChange: evt => setValue(evt.target.value), placeholder: action === "ui_check" ? "true or false" : "Enter a value before clicking the target…", className: "block w-full mt-1 bg-slate-800 rounded-lg px-3 py-2 text-xs" })),
+            e("p", { className: "text-[10px] text-slate-500" }, "Choose the action and optional value, then click the control in the screen. Every recorded action updates the view and step list together.")),
+        e("section", { className: "rounded-2xl border border-slate-800 bg-slate-950 p-3 space-y-2 min-w-0" },
+          e("div", { className: "flex justify-between items-center" },
+            e("h3", { className: "text-xs font-bold text-indigo-300" }, "SYNCHRONIZED STEP EVIDENCE"),
+            e("span", { className: "text-[10px] text-slate-500" }, `${steps.length} step(s)`)),
+          steps.length === 0 && e("p", { className: "text-[10px] text-slate-500 py-4" }, "Each action will appear with start/finish time and its captured screen."),
+          steps.slice().reverse().map(step => e("article", { key: step.id || step.order, className: "rounded-xl border border-slate-800 bg-slate-900 p-3 space-y-2" },
+            e("div", { className: "flex justify-between gap-2" },
+              e("div", {}, e("div", { className: "text-xs font-bold text-slate-200" }, `#${step.order} · ${step.label || step.action}`),
+                e("div", { className: "text-[10px] text-slate-500 mt-1" }, `${step.started_at ? desktopTimestamp(step.started_at) : "Start time unavailable"} · ${step.duration_ms != null ? Number(step.duration_ms).toFixed(1) + " ms" : "duration unavailable"}`),
+                e("div", { className: "text-[10px] text-emerald-300 mt-1" }, "Finished · " + desktopTimestamp(step.finished_at))),
+              e("span", { className: "fast-badge whitespace-nowrap" }, step.action.replace(/^ui_/, "").toUpperCase())),
+            e("div", { className: "text-[10px] text-slate-400 break-all" }, "Target · " + ((step.selector && (step.selector.name || step.selector.automation_id || step.selector.field_name)) || "screen coordinate")),
+            step.screenshot && e("img", { src: step.screenshot, alt: `Windows screen after step ${step.order}`, className: "w-full rounded-lg border border-slate-800" })))
+      ))
+    )))
+  );
+}
+
 function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
   /* Keep the preview control and the active run together at the top of this tab. */
   const [runs, setRuns] = useState([]);
@@ -864,6 +1177,7 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
   const [windowOff, setWindowOff] = useState(false);
   const [runReady, setRunReady] = useState(false);
   const [activeBatch, setActiveBatch] = useState(false);
+  const [executionTarget, setExecutionTarget] = useState("browser");
   const [streamState, setStreamState] = useState("connecting");
   const windowOffRef = useRef(false);
 
@@ -877,8 +1191,8 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
       (Number(a.step_index || a.order) || 0) - (Number(b.step_index || b.order) || 0));
   };
   const terminal = ["passed", "failed", "error", "cancelled"].includes(runStatus);
-  const canToggleCurrent = !!runId && runReady && !activeBatch && ["queued", "running"].includes(runStatus);
-  const toggleChecked = canToggleCurrent ? !windowOff : !!liveWindow;
+  const canToggleCurrent = !!runId && runReady && !activeBatch && executionTarget !== "windows_desktop" && ["queued", "running"].includes(runStatus);
+  const toggleChecked = executionTarget === "windows_desktop" ? true : (canToggleCurrent ? !windowOff : !!liveWindow);
 
   const load = () => API.get("/api/runs").then(setRuns).catch(() => {});
   const loadQueue = () => API.get("/api/runs/queue/status").then(setQueueInfo).catch(() => {});
@@ -895,12 +1209,12 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
   useEffect(() => {
     if (!runId) {
       setActiveLog([]); setFrame(null); setFrameStep(null); setCurrentStep(null);
-      setRunReady(false); setRunStatus(""); setWindowError(""); setStreamState("connecting");
+      setRunReady(false); setRunStatus(""); setWindowError(""); setExecutionTarget("browser"); setStreamState("connecting");
       return undefined;
     }
     setActiveLog([]); setPercent(0); setRunStatus("queued"); setRunError(""); setWindowError("");
     setFrame(null); setFrameStep(null); setCurrentStep(null); setRunReady(false); setActiveBatch(false);
-    setWindowOff(false); windowOffRef.current = false; setStreamState("connecting");
+    setExecutionTarget("browser"); setWindowOff(false); windowOffRef.current = false; setStreamState("connecting");
     let stop = false;
     let finished = false;
     let socketReady = false;
@@ -918,6 +1232,7 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
         const off = run.display_window === false;
         setWindowOff(off); windowOffRef.current = off;
       }
+      if (run.execution_target) setExecutionTarget(run.execution_target);
       setActiveBatch(!!run.batch_id);
       setRunReady(true);
       const log = Array.isArray(run.log) ? run.log : Array.isArray(run.execution_log) ? run.execution_log : [];
@@ -1062,9 +1377,11 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
     e("div", { className: "space-y-3" },
       e("div", { className: "bg-slate-900 p-3 rounded-xl border border-indigo-800 flex items-center justify-between gap-3" },
         e("div", { className: "min-w-0" },
-          e("div", { className: "text-xs font-bold text-indigo-300" }, "Live browser window"),
+          e("div", { className: "text-xs font-bold text-indigo-300" }, executionTarget === "windows_desktop" ? "Live Windows desktop" : "Live browser window"),
           e("p", { className: "text-[10px] text-slate-400 mt-0.5" },
-            canToggleCurrent
+            executionTarget === "windows_desktop" && ["queued", "running"].includes(runStatus)
+              ? "ON · Windows frames are streamed with the matching completed step and saved to Artifacts."
+              : canToggleCurrent
               ? (toggleChecked ? "ON · live frames stream with the current step." : "OFF · headless now; switch on to attach a live preview to this run.")
               : activeBatch && ["queued", "running"].includes(runStatus)
                 ? "This is a batch run. The switch sets the live-window choice for the next run or batch."
@@ -1079,9 +1396,10 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
             type: "button",
             role: "switch",
             "aria-checked": !!toggleChecked,
-            "aria-label": "Display live browser window during execution",
+            "aria-label": executionTarget === "windows_desktop" ? "Windows desktop preview is always enabled" : "Display live browser window during execution",
+            disabled: executionTarget === "windows_desktop" && ["queued", "running"].includes(runStatus),
             onClick: switchWindow,
-            className: "shrink-0 w-14 h-7 rounded-full relative transition-colors " + (toggleChecked ? "bg-emerald-500" : "bg-slate-700")
+            className: "shrink-0 w-14 h-7 rounded-full relative transition-colors disabled:opacity-60 " + (toggleChecked ? "bg-emerald-500" : "bg-slate-700")
           },
             e("span", { className: "absolute top-1 w-5 h-5 bg-white rounded-full transition-all " + (toggleChecked ? "left-8" : "left-1") })
           )
@@ -1107,25 +1425,31 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
                 e("div", { className: "browser-bar" },
                   e("span", { className: "dot red" }), e("span", { className: "dot yellow" }), e("span", { className: "dot green" }),
                   e("div", { className: "browser-url" }, frameStep
-                    ? `Step ${frameStep.step_index || frameStep.order || "—"} · ${frameStep.label || "Browser view"}`
-                    : "Live execution browser"),
+                    ? `Step ${frameStep.step_index || frameStep.order || "—"} · ${frameStep.label || (executionTarget === "windows_desktop" ? "Windows desktop" : "Browser view")}`
+                    : (executionTarget === "windows_desktop" ? "Live Windows desktop" : "Live execution browser")),
                   e("span", { className: "fast-badge" }, staticAfterRun ? "EVIDENCE" : "LIVE")
                 ),
                 windowOff && !staticAfterRun
                   ? e("div", { className: "browser-wait" },
                       e("div", {},
                         e("div", { className: "text-2xl mb-2" }, "🖥️"),
-                        e("div", { className: "font-bold text-slate-300" }, "Live browser window is off"),
+                        e("div", { className: "font-bold text-slate-300" }, executionTarget === "windows_desktop" ? "Live desktop window is off" : "Live browser window is off"),
                         e("div", { className: "text-[10px] text-slate-500 mt-1" },
                           activeBatch ? "Batch preview is not streamed in this panel." : "Turn the switch on while the run is active to start the live feed.")
                       )
                     )
                   : frame
                     ? e("div", { className: "browser-viewport run-preview-viewport" },
-                        e("img", { src: frame, alt: frameStep ? `Browser at step ${frameStep.step_index || frameStep.order}` : "Execution browser", className: "run-preview-image" })
+                        e("img", { src: frame,
+                          alt: frameStep
+                            ? `${executionTarget === "windows_desktop" ? "Windows desktop" : "Browser"} at step ${frameStep.step_index || frameStep.order}`
+                            : (executionTarget === "windows_desktop" ? "Execution Windows desktop" : "Execution browser"),
+                          className: "run-preview-image" })
                       )
                     : e("div", { className: "browser-wait" },
-                        runStatus === "queued" ? "⏳ Queued · browser launching…" : "Waiting for the first browser frame…"
+                        runStatus === "queued"
+                          ? (executionTarget === "windows_desktop" ? "⏳ Queued · Windows application launching…" : "⏳ Queued · browser launching…")
+                          : (executionTarget === "windows_desktop" ? "Waiting for the first Windows desktop frame…" : "Waiting for the first browser frame…")
                       )
               ),
               e("div", { className: "rounded-xl border border-slate-800 bg-slate-950 p-3" },
@@ -1145,7 +1469,8 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
                         e("span", {}, step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏳")
                       ),
                       step.started_at && e("div", { className: "font-mono text-[9px] text-slate-500 mt-0.5" },
-                        "started " + String(step.started_at).replace("T", " ").replace("Z", " UTC") +
+                        "started " + desktopTimestamp(step.started_at) +
+                        (step.finished_at ? " · finished " + desktopTimestamp(step.finished_at) : "") +
                         (step.duration_ms != null ? " · " + Number(step.duration_ms).toFixed(1) + " ms" : "")),
                       step.error && e("div", { className: "text-red-300 mt-1" }, step.error)
                     );
@@ -1860,6 +2185,30 @@ function Projects({ setActiveProject, activeProject }) {
 
 function Variables(props) { return e(SecureVariables, props); }
 
+function runElapsedLabel(seconds) {
+  if (seconds == null || !Number.isFinite(Number(seconds))) return "Not recorded";
+  const total = Math.max(0, Math.round(Number(seconds)));
+  if (total < 60) return `${total}s`;
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+}
+
+function RunTimingSummary({ run }) {
+  return e("div", { className: "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-2 rounded-xl bg-slate-950 border border-slate-800 p-3" },
+    e("div", {}, e("div", { className: "text-[9px] uppercase tracking-wide text-slate-500" }, "Recording"),
+      e("div", { className: "text-[11px] font-semibold text-slate-200 break-words" }, run.recording_name || "Unnamed recording")),
+    e("div", {}, e("div", { className: "text-[9px] uppercase tracking-wide text-slate-500" }, "Purpose"),
+      e("div", { className: "text-[11px] text-slate-300 break-words" }, run.recording_purpose || "Not specified")),
+    e("div", {}, e("div", { className: "text-[9px] uppercase tracking-wide text-slate-500" }, "Elapsed"),
+      e("div", { className: "text-[11px] font-mono text-indigo-200" }, runElapsedLabel(run.elapsed_seconds))),
+    e("div", {}, e("div", { className: "text-[9px] uppercase tracking-wide text-slate-500" }, "Started"),
+      e("div", { className: "text-[10px] text-slate-300" }, desktopTimestamp(run.started_at))),
+    e("div", {}, e("div", { className: "text-[9px] uppercase tracking-wide text-slate-500" }, "Last step finished"),
+      e("div", { className: "text-[10px] text-slate-300" }, desktopTimestamp(run.last_step_finished_at)))
+  );
+}
+
 function Comparison() {
   const [runs, setRuns] = useState([]);
   const [sel, setSel] = useState(null);
@@ -1871,11 +2220,13 @@ function Comparison() {
     e('div', { className: "space-y-4" },
     runs.map(r => e('div', { key: r.id, className: "bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden" },
       e('button', { className: "p-4 w-full text-left flex justify-between", onClick: () => setSel(sel === r.id ? null : r.id) },
-        e('span', { className: "font-bold" }, `Audit: ${r.id.slice(0,8)} · ${r.status}`), e('span', {}, sel === r.id ? "Hide" : "Show steps")),
-      sel === r.id && e('div', { className: "space-y-2 p-3" },
+        e('span', { className: "font-bold" }, `Audit: ${r.id.slice(0,8)} · ${r.status}`), e('span', {}, sel === r.id ? "Hide steps" : "Show steps")),
+      e("div", { className: "px-3 pb-3" }, e(RunTimingSummary, { run: r })),
+      sel === r.id && e('div', { className: "space-y-2 p-3 border-t border-slate-800" },
         (r.log || []).map((step, i) => e('div', { key: i, className: "bg-slate-950 p-3 rounded border border-slate-800" },
           e('div', { className: "text-xs font-bold" }, `#${step.order} ${step.label || step.action} · ${step.status}`),
           e('div', { className: "text-xs break-all" }, `Input: ${step.value || "—"} · Selector: ${JSON.stringify(step.selector || {})}`),
+          step.started_at && e('div', { className: "text-[10px] text-slate-500 mt-1" }, `Started ${desktopTimestamp(step.started_at)} · Finished ${desktopTimestamp(step.finished_at)} · ${step.duration_ms != null ? Number(step.duration_ms).toFixed(1) + " ms" : "duration unavailable"}`),
           step.error && e('div', { className: "text-xs text-red-300" }, step.error),
           step.screenshot && e('img', { src: step.screenshot, alt: `Screenshot for step ${step.order}`, className: "mt-2 max-w-full rounded" })
         ))
@@ -1886,6 +2237,7 @@ function Comparison() {
 
 function Artifacts() {
   const [runs, setRuns] = useState([]);
+  const [expanded, setExpanded] = useState({});
   // Screenshots are fetched per run by the browser, so the list itself stays
   // short and the service only ever serves the images you scroll to.
   useEffect(() => { API.get("/api/runs?limit=10&full=true").then(setRuns).catch(() => {}); }, []);
@@ -1897,10 +2249,20 @@ function Artifacts() {
     withMedia.length === 0 && e("p", { className: "text-sm text-slate-500 text-center py-8" }, "No artifacts yet. Run a recording to capture screenshots. Execution window displays immediately."),
     withMedia.map(r => e("div", { key: r.id, className: "bg-slate-900 p-5 rounded-3xl border border-slate-800 shadow-2xl space-y-3" },
       e("div", { className: "text-xs font-bold text-indigo-300" }, "RUN #" + r.id.slice(0, 8) + " · " + r.status + " ⚡"),
+      e(RunTimingSummary, { run: r }),
+      e("button", { type: "button", onClick: () => setExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] })),
+        className: "text-[10px] font-bold text-indigo-300 underline" },
+        expanded[r.id] ? "Hide steps" : `Show steps · ${(r.log || []).length}`),
+      expanded[r.id] && e("div", { className: "max-h-72 overflow-y-auto space-y-1 rounded-xl border border-slate-800 bg-slate-950 p-3" },
+        (r.log || []).map((step, i) => e("div", { key: step.step_index || step.order || i, className: "border-b border-slate-900 pb-2 last:border-0" },
+          e("div", { className: "text-[10px] font-bold text-slate-200" }, `#${step.step_index || step.order || i + 1} · ${step.label || step.action || "Step"} · ${step.status || "recorded"}`),
+          e("div", { className: "text-[9px] text-slate-500 mt-0.5" },
+            `${step.started_at ? desktopTimestamp(step.started_at) : "Start time unavailable"} · finished ${desktopTimestamp(step.finished_at)} · ${step.duration_ms != null ? Number(step.duration_ms).toFixed(1) + " ms" : "duration unavailable"}`)))),
       r.video_path && e("video", { controls: true, className: "w-full rounded-2xl bg-black shadow-inner", src: "/api/runs/video/" + r.id }),
       e("div", { className: "grid grid-cols-2 gap-2" },
         (r.log || []).filter(step => step.screenshot).map((step, i) => e("div", { key: i },
           e("div", { className: "text-[9px] text-slate-400 mb-1" }, (step.label || step.action) + (step.repeat ? ` ×${step.repeat}` : "")),
+          step.started_at && e("div", { className: "text-[9px] text-slate-500 mb-1" }, `${desktopTimestamp(step.started_at)} · ${step.duration_ms != null ? Number(step.duration_ms).toFixed(1) + " ms" : "duration unavailable"}`),
           e("img", { src: step.screenshot, alt: step.label || "step", className: "rounded-lg border border-slate-800" })
         ))
       )

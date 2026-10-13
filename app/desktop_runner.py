@@ -5,10 +5,10 @@ Two execution modes share one validated step contract:
 * **Remote Windows Agent Mode** (``TF_WINDOWS_AGENT_URL`` +
   ``TF_WINDOWS_AGENT_TOKEN``): each step is POSTed as JSON to the agent's
   ``/commands`` endpoint over HTTPS (plain HTTP is only accepted for a
-  loopback agent under test).  The token is sent as a bearer credential and
-  is never returned, logged or written to disk by this module.  An agent may
-  answer with ``screenshot_base64`` (bounded to 512 KiB) which is kept in
-  memory as per-step evidence.
+  loopback agent under test). The token is sent as a bearer credential and
+  is never returned, logged or written to disk by this module. Screenshot
+  capture is requested explicitly for evidence-producing steps; the agent
+  returns ``screenshot_base64`` (bounded to 512 KiB) as per-step evidence.
 * **Deterministic Local Simulation Mode** (default everywhere else): steps
   run against an in-process simulated UI Automation control tree seeded from
   a catalog of testable desktop applications (Calculator, Settings, Notepad,
@@ -34,15 +34,17 @@ import urllib.request
 import zlib
 
 DESKTOP_ACTIONS = {
-    "window_attach", "ui_click", "ui_double_click", "ui_right_click", "ui_type",
-    "ui_select", "ui_check", "ui_menu_invoke", "ui_grid_read",
-    "assert_control_text", "assert_control_state", "wait_window_ready",
+    "window_launch", "window_attach", "window_close", "ui_click", "ui_double_click",
+    "ui_right_click", "ui_type", "ui_select", "ui_check", "ui_menu_invoke",
+    "ui_grid_read", "assert_control_text", "assert_control_state", "wait_window_ready",
 }
 DESKTOP_FRAMEWORKS = {"dotnet", "cpp", "winforms"}
 DESKTOP_LOCATOR_KEYS = {
     "automation_id", "control_type", "name", "class_name", "framework_id",
-    "window_title", "process_name", "row", "column", "checked",
+    "window_title", "process_name", "row", "column", "checked", "field_name",
+    "coordinate_fallback", "x", "y", "app_id",
 }
+WINDOWS_VERSIONS = {"windows_10", "windows_11"}
 # Application kinds a tester may register as a custom desktop target.  The
 # first three are the roadmap frameworks; the rest are the custom/legacy
 # applications operators asked to be able to add (Access/VBA, FoxPro, COBOL,
@@ -53,6 +55,33 @@ DESKTOP_APP_KINDS = {
     "winforms", "winforms_legacy",
 }
 MAX_SCREENSHOT_BYTES = 512 * 1024
+
+
+def normalize_screenshot(data):
+    """Convert a Windows-agent image to a compact, validated PNG."""
+    if not data or len(data) > MAX_SCREENSHOT_BYTES:
+        raise ValueError("Windows screenshot is missing or exceeds 512 KiB")
+    try:
+        from io import BytesIO
+        from PIL import Image
+        with Image.open(BytesIO(data)) as opened:
+            image = opened.convert("RGB")
+            image.thumbnail((1280, 800))
+            while True:
+                output = BytesIO()
+                image.quantize(colors=256, method=Image.Quantize.FASTOCTREE,
+                               dither=Image.Dither.NONE).save(output, format="PNG", compress_level=3)
+                payload = output.getvalue()
+                if len(payload) <= MAX_SCREENSHOT_BYTES:
+                    return payload
+                width, height = image.size
+                if width <= 320 or height <= 200:
+                    raise ValueError("Windows screenshot cannot be reduced below the evidence limit")
+                image = image.resize((max(320, int(width * .8)), max(200, int(height * .8))))
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError("Windows target returned an unreadable screenshot") from exc
 
 
 def _control(automation_id, name, text="", state="enabled", control_type="Edit", class_name=""):
@@ -200,21 +229,43 @@ def _locator_key(selector):
 
 
 def validate_desktop_selector(selector, action):
-    """Validate the structured UIA locator carried by a desktop step."""
+    """Validate a structured UIA locator or a normalized screen-coordinate target.
+
+    Coordinates are fractions of the captured window size (0..1), not fixed
+    pixels. That lets a fallback locator survive a different Windows resolution.
+    """
     if not isinstance(selector, dict):
         raise ValueError("Desktop locator must be an object")
-    if action == "window_attach":
-        if not (selector.get("window_title") or selector.get("process_name") or selector.get("class_name")):
-            raise ValueError("window_attach needs window_title, process_name or class_name")
+    if action in {"window_launch", "window_attach"}:
+        if not (selector.get("app_id") or selector.get("window_title") or
+                selector.get("process_name") or selector.get("class_name")):
+            raise ValueError(action + " needs app_id, window_title, process_name or class_name")
+        return
+    if action == "window_close":
         return
     if action == "wait_window_ready":
         return  # the attached window (or a window_title) is enough
     if action == "ui_menu_invoke":
-        if not (selector.get("automation_id") or selector.get("name") or selector.get("class_name")):
+        if not (selector.get("automation_id") or selector.get("name") or selector.get("class_name") or
+                selector.get("field_name") or _has_coordinates(selector)):
             return  # the menu path itself may be the step value
         return
-    if not any(selector.get(k) for k in ("automation_id", "name", "class_name", "control_type")):
-        raise ValueError(action + " needs a UIA locator (automation_id, name, class_name or control_type)")
+    if _has_coordinates(selector):
+        x, y = selector.get("x"), selector.get("y")
+        for axis, value in (("x", x), ("y", y)):
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 <= value <= 1:
+                raise ValueError("Desktop coordinate " + axis + " must be a normalized number from 0 to 1")
+        if selector.get("coordinate_fallback") and not str(selector.get("field_name") or "").strip():
+            raise ValueError("Coordinate fallback needs a field_name for reference")
+        return
+    if selector.get("x") is not None or selector.get("y") is not None:
+        raise ValueError("Desktop coordinate fallback needs both x and y")
+    if not any(selector.get(k) for k in ("automation_id", "name", "class_name", "control_type", "field_name")):
+        raise ValueError(action + " needs a UIA locator (automation_id, name, class_name or control_type) or screen coordinates")
+
+
+def _has_coordinates(selector):
+    return selector.get("x") is not None and selector.get("y") is not None
 
 
 def _safe_eval(expression):
@@ -269,11 +320,16 @@ def synthetic_png(title, lines, width=640, height=360):
 class DesktopSimulator:
     """In-process simulated UI Automation tree. One app attached at a time."""
 
-    def __init__(self, app_id=None, app_profile=None, framework=None, artifact_dir=None):
+    SCREEN_WIDTH = 1024
+    SCREEN_HEIGHT = 640
+
+    def __init__(self, app_id=None, app_profile=None, framework=None, artifact_dir=None,
+                 windows_version="windows_11"):
         self.catalog = catalog_with_custom([app_profile] if app_profile else [])
         self.artifact_dir = artifact_dir
         self.app = None
         self.framework = framework
+        self.windows_version = windows_version if windows_version in WINDOWS_VERSIONS else "windows_11"
         self.last_result = None
         self.screenshot_count = 0
         if app_id:
@@ -305,33 +361,111 @@ class DesktopSimulator:
             self.attach({"window_title": "Custom .NET Application"})
         return self.app
 
+    def _control_layout(self):
+        """Deterministic control rectangles used by both the screenshot and hit test."""
+        app = self._require_app()
+        rows = []
+        for index, control in enumerate(app["controls"][:8]):
+            y = 147 + index * 48
+            if control["control_type"] in {"Button", "MenuItem"}:
+                rect = (730, y, 912, y + 34)
+            elif control["control_type"] == "DataGrid":
+                rect = (154, y, 912, y + 34)
+            else:
+                rect = (154, y, 680, y + 34)
+            rows.append((control, rect))
+        return rows
+
+    def control_at(self, x, y):
+        """Return a copied UIA control when a normalized screen point hits one."""
+        width, height = self.SCREEN_WIDTH, self.SCREEN_HEIGHT
+        if 0 <= x <= 1 and 0 <= y <= 1:
+            x, y = x * width, y * height
+        for control, (left, top, right, bottom) in self._control_layout():
+            if left <= x <= right and top <= y <= bottom:
+                return dict(control)
+        return None
+
     def _find(self, selector):
         app = self._require_app()
-        for control in app["controls"]:
-            if selector.get("automation_id") and control["automation_id"] != selector["automation_id"]:
-                continue
-            if selector.get("name") and control["name"] != selector["name"]:
-                continue
-            if selector.get("class_name") and control["class_name"] != selector["class_name"]:
-                continue
-            if selector.get("control_type") and control["control_type"] != selector["control_type"]:
-                continue
-            return control
-        # Custom/generic targets: a first reference materialises the control, as
-        # a real tree would simply contain it. Seeded catalog controls above are
-        # matched strictly first, so assertions on seeded text stay meaningful.
-        control = _control(str(selector.get("automation_id") or selector.get("name") or "control")[:120],
-                           str(selector.get("name") or selector.get("automation_id") or "Control")[:120],
-                           "", control_type=str(selector.get("control_type") or "Edit")[:60],
+        if not selector.get("coordinate_fallback"):
+            for control in app["controls"]:
+                if selector.get("automation_id") and control["automation_id"] != selector["automation_id"]:
+                    continue
+                if selector.get("name") and control["name"] != selector["name"]:
+                    continue
+                if selector.get("class_name") and control["class_name"] != selector["class_name"]:
+                    continue
+                if selector.get("control_type") and control["control_type"] != selector["control_type"]:
+                    continue
+                return control
+        if _has_coordinates(selector):
+            hit = self.control_at(selector["x"], selector["y"])
+            if hit:
+                return next((item for item in app["controls"]
+                             if item["automation_id"] == hit["automation_id"]), hit)
+        control_name = (selector.get("field_name") or selector.get("name") or
+                        selector.get("automation_id") or "Control")
+        control = _control(str(selector.get("automation_id") or control_name)[:120],
+                           str(control_name)[:120], "",
+                           control_type=str(selector.get("control_type") or "Edit")[:60],
                            class_name=str(selector.get("class_name") or "")[:120])
         app["controls"].append(control)
         return control
 
     # -- evidence -----------------------------------------------------------
     def screenshot_bytes(self):
-        app = self._require_app()
-        lines = [f"{c['name']}: {c['text']}" for c in app["controls"][:10]]
-        return synthetic_png(app["window_title"], lines)
+        """Render a useful Windows 10/11-style app window using local Pillow only."""
+        from io import BytesIO
+        from PIL import Image, ImageDraw, ImageFont
+
+        app = self.app
+        width, height = self.SCREEN_WIDTH, self.SCREEN_HEIGHT
+        image = Image.new("RGB", (width, height), (27, 43, 66))
+        draw = ImageDraw.Draw(image)
+        font = ImageFont.load_default()
+        modern = self.windows_version == "windows_11"
+        if app is None:
+            draw.rounded_rectangle((64, 42, 960, 574), radius=14 if modern else 2,
+                                   fill=(248, 249, 251), outline=(180, 190, 204), width=1)
+            draw.text((112, 106), "Desktop application closed", fill=(71, 85, 105), font=font)
+            output = BytesIO()
+            image.save(output, format="PNG", optimize=True)
+            return output.getvalue()
+        accent = (36, 101, 183) if not modern else (25, 96, 168)
+        box = (64, 42, 960, 574)
+        draw.rounded_rectangle(box, radius=14 if modern else 2, fill=(248, 249, 251),
+                               outline=(180, 190, 204), width=1)
+        draw.rectangle((65, 43, 959, 83), fill=(242, 244, 247) if modern else (255, 255, 255))
+        draw.rectangle((65, 80, 959, 83), fill=accent)
+        draw.text((88, 57), app["window_title"][:90], fill=(30, 41, 59), font=font)
+        for x, glyph in ((882, "-"), (914, "[]"), (944, "x")):
+            draw.text((x, 56), glyph, fill=(71, 85, 105), font=font)
+        draw.text((112, 106), "Windows " + ("11" if modern else "10") + " - " + app["framework"].upper(),
+                  fill=(71, 85, 105), font=font)
+        for control, rect in self._control_layout():
+            left, top, right, bottom = rect
+            kind = control["control_type"]
+            if kind in {"Button", "MenuItem"}:
+                draw.rounded_rectangle(rect, radius=5 if modern else 2,
+                                       fill=(232, 240, 250), outline=(148, 163, 184))
+                draw.text((left + 10, top + 11), control["name"][:36], fill=(30, 41, 59), font=font)
+            elif kind == "DataGrid":
+                draw.rounded_rectangle(rect, radius=4, fill=(241, 245, 249), outline=(148, 163, 184))
+                draw.text((left + 9, top + 11), f"{control['name']}: {control['text']}"[:100], fill=(51, 65, 85), font=font)
+            else:
+                draw.text((left, top + 11), control["name"][:36], fill=(51, 65, 85), font=font)
+                draw.rounded_rectangle((left + 165, top, right, bottom), radius=4,
+                                       fill=(255, 255, 255), outline=(148, 163, 184))
+                value = control["text"] or ("Checked" if control.get("checked") else "")
+                draw.text((left + 174, top + 11), value[:54], fill=(15, 23, 42), font=font)
+        draw.rectangle((0, 600, width, height), fill=(18, 28, 43))
+        draw.rectangle((18, 610, 40, 632), fill=accent)
+        draw.text((51, 616), "Start", fill=(226, 232, 240), font=font)
+        draw.text((width - 165, 616), "Windows " + ("11" if modern else "10"), fill=(203, 213, 225), font=font)
+        output = BytesIO()
+        image.save(output, format="PNG", optimize=True)
+        return output.getvalue()
 
     def save_screenshot(self, directory, index):
         from pathlib import Path
@@ -351,8 +485,17 @@ class DesktopSimulator:
         validate_desktop_selector(selector, action)
         value = "" if step.get("value") is None else str(step.get("value"))
         self.last_result = None
-        if action == "window_attach":
+        if action == "window_launch":
+            app_id = selector.get("app_id")
+            if app_id and app_id in self.catalog:
+                selector = {**selector, "window_title": self.catalog[app_id]["window_title"]}
+            result = {"action": action, **self.attach(selector, value), "launched": True}
+        elif action == "window_attach":
             result = {"action": action, **self.attach(selector, value)}
+        elif action == "window_close":
+            title = (self.app or {}).get("window_title")
+            self.app = None
+            result = {"action": action, "window_title": title, "closed": True}
         elif action == "wait_window_ready":
             if selector.get("window_title") and self.app is None:
                 self.attach(selector, value)
@@ -463,17 +606,24 @@ class RemoteWindowsAgent:
         if parsed.scheme != "https" and not (parsed.scheme == "http" and parsed.hostname in {"127.0.0.1", "localhost"}):
             raise ValueError("TF_WINDOWS_AGENT_URL must be HTTPS (HTTP only for a loopback agent)")
 
-    def dispatch(self, step):
-        body = json.dumps({"step": step}).encode()
+    def dispatch(self, step, *, context=None, include_screenshot=False):
+        body = json.dumps({"step": step, "context": context or {},
+                           "capture_screenshot": bool(include_screenshot)}).encode()
         request = urllib.request.Request(
             self.url + "/commands", data=body, method="POST",
             headers={"Content-Type": "application/json", "Authorization": "Bearer " + self.token})
+        response_limit = MAX_SCREENSHOT_BYTES * 2 + 65536
         with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 - validated https/loopback
-            payload = json.loads(response.read(MAX_SCREENSHOT_BYTES + 65536))
+            raw = response.read(response_limit + 1)
+        if len(raw) > response_limit:
+            raise ValueError("Windows agent response exceeds the bounded screenshot payload limit")
+        payload = json.loads(raw)
         if not isinstance(payload, dict):
             raise ValueError("Windows agent returned a non-object response")
         encoded = payload.pop("screenshot_base64", None)
         if encoded:
+            if not isinstance(encoded, str):
+                raise ValueError("Windows agent returned invalid screenshot data")
             try:
                 data = base64.b64decode(encoded, validate=True)
             except (ValueError, binascii.Error) as exc:
@@ -481,6 +631,8 @@ class RemoteWindowsAgent:
             if len(data) > MAX_SCREENSHOT_BYTES:
                 raise ValueError("Windows agent screenshot exceeds 512 KiB")
             payload["screenshot_bytes"] = len(data)
+            if include_screenshot:
+                payload["_screenshot_data"] = data
         payload.pop("token", None)
         return payload
 
@@ -488,12 +640,19 @@ class RemoteWindowsAgent:
 class DesktopRunner:
     """Facade used by plan execution: agent when configured, else simulator."""
 
-    def __init__(self, mode="auto", app_id=None, app_profile=None, framework=None, artifact_dir=None):
+    def __init__(self, mode="auto", app_id=None, app_profile=None, framework=None,
+                 artifact_dir=None, windows_version="windows_11"):
         if mode not in {"auto", "agent", "simulator"}:
             raise ValueError("desktop mode must be auto, agent or simulator")
+        if windows_version not in WINDOWS_VERSIONS:
+            raise ValueError("windows_version must be windows_10 or windows_11")
         self.mode = mode
+        self.app_id = app_id
+        self.app_profile = app_profile
+        self.windows_version = windows_version
         self.simulator = DesktopSimulator(app_id=app_id, app_profile=app_profile,
-                                          framework=framework, artifact_dir=artifact_dir)
+                                          framework=framework, artifact_dir=artifact_dir,
+                                          windows_version=windows_version)
         self.artifact_dir = artifact_dir
         self._agent = None
 
@@ -504,12 +663,16 @@ class DesktopRunner:
     def _use_agent(self):
         return self.mode == "agent" or (self.mode == "auto" and self.live_configured)
 
-    async def perform(self, step, variables=None):
+    async def perform(self, step, variables=None, *, capture_screenshot=False):
         import asyncio
         if self._use_agent():
             if self._agent is None:
                 self._agent = RemoteWindowsAgent()
-            result = await asyncio.to_thread(self._agent.dispatch, step)
+            context = {"windows_version": self.windows_version, "app_id": self.app_id,
+                       "application": self.app_profile or {"app_id": self.app_id}}
+            result = await asyncio.to_thread(
+                self._agent.dispatch, step, context=context,
+                include_screenshot=capture_screenshot)
             result.setdefault("mode", "agent")
             return result
         result = self.simulator.perform(step, variables)
@@ -517,4 +680,6 @@ class DesktopRunner:
         if self.artifact_dir:
             result["screenshot"] = self.simulator.save_screenshot(
                 self.artifact_dir, self.simulator.screenshot_count)
+        if capture_screenshot:
+            result["_screenshot_data"] = self.simulator.screenshot_bytes()
         return result
