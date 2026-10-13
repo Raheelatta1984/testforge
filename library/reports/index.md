@@ -10,6 +10,7 @@ Newest first, newest 200 retained.
 
 | Finished (UTC) | Kind | Id | Outcome | Steps | Recordings | PDF asset |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-13T12:39:23Z | run | 47640b03-5d64-42d6-96a1-f05b84a1a55a | passed | 20 | Instacart | not uploaded |
 | 2026-10-13T11:13:16Z | run | 8ab2b37f-08bb-4d1f-bd31-683973ef7292 | failed | 1 | Hello variable | not uploaded |
 | 2026-10-12T21:18:31Z | batch | 75714cca-8b5f-4f80-83c1-d66465242944 | passed | 35 | Session 13/10/2026, 08:03:59 | not uploaded |
 | 2026-10-12T21:18:28Z | run | 2a0ba8ba-c97b-4fa3-882a-3663e7dd259c | passed | 35 | Session 13/10/2026, 08:03:59 | not uploaded |
