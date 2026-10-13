@@ -6,6 +6,7 @@ Scenario IDs match tests/SCENARIOS.md.
 
 import asyncio
 import os
+import re
 import unittest
 from unittest.mock import patch
 from pathlib import Path
@@ -3427,6 +3428,173 @@ class AzureGuideTests(unittest.TestCase):
         for topic in ("azure database for postgresql", "azure-pipelines.yml", "docker compose",
                       "azure repos", "key vault"):
             self.assertIn(topic, lowered, "the guide must actually cover " + topic)
+
+
+class FrontendBootTests(unittest.TestCase):
+    """The dashboard must actually paint something.
+
+    One throw during the first render unmounts the whole React tree. The
+    operator sees a blank screen - no tabs, no message, nothing to click - while
+    the API behind it answers every request with 200, so nothing server-side
+    looks wrong. That is exactly how the guide-snapshot bug presented: a
+    `getSnapshot` that returned a fresh `Set` on every call spun
+    `useSyncExternalStore` into "Maximum update depth exceeded" and took all
+    twelve tabs with it. These checks pin the invariants that keep a single
+    component failure from becoming an unusable app.
+    """
+
+    STATIC = ROOT / "app" / "static"
+    COMPONENT_FILES = ("import-components.js", "scenario-components.js", "demo-components.js")
+    # Allocations that are never Object.is-stable, so returning one from a
+    # getSnapshot guarantees an infinite render loop.
+    FRESH_RETURN = re.compile(r"return\s+(?:new\b|[{[])")
+
+    def frontend(self):
+        """Every script the browser runs, in load order, plus the raw page."""
+        index = (self.STATIC / "index.html").read_text()
+        inline = "\n".join(re.findall(r"<script(?![^>]*\bsrc=)[^>]*>(.*?)</script>", index, re.S))
+        components = [(name, (self.STATIC / name).read_text()) for name in self.COMPONENT_FILES]
+        # The component files are loaded by <script src> before the inline app
+        # script, so all of it shares one global scope at runtime.
+        return index, "\n".join(body for _name, body in components) + "\n" + inline
+
+    @staticmethod
+    def block_after(source, start):
+        """The {...} body that opens at or after `start`, brace-matched."""
+        open_at = source.index("{", start)
+        depth = 0
+        for i in range(open_at, len(source)):
+            if source[i] == "{":
+                depth += 1
+            elif source[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return source[open_at + 1:i]
+        raise AssertionError("unbalanced braces reading a function body")
+
+    def snapshot_functions(self, blob):
+        """Names passed as getSnapshot to useSyncExternalStore, with their bodies."""
+        found = {}
+        for subscribe, get_snapshot in re.findall(
+            r"useSyncExternalStore\s*\(\s*([^,()]+)\s*,\s*([^,()]+)", blob
+        ):
+            name = get_snapshot.strip()
+            if not re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name):
+                continue  # an inline arrow; nothing to look up
+            definition = re.search(r"(?:const|let|var)\s+" + re.escape(name) + r"\s*=", blob) or \
+                re.search(r"function\s+" + re.escape(name) + r"\s*\(", blob)
+            self.assertIsNotNone(definition, "getSnapshot %r is used but never defined" % name)
+            found[name] = (subscribe.strip(), self.block_after(blob, definition.end()))
+        self.assertTrue(found, "no useSyncExternalStore reads found - the check has gone stale")
+        return found
+
+    def test_UT_UI_01_getsnapshot_returns_a_cached_value(self):
+        """No getSnapshot allocates, or React re-renders forever.
+
+        `useSyncExternalStore` compares snapshots with Object.is and re-renders
+        whenever they differ. A reader that builds a new Set/Map/object/array on
+        every call therefore always looks "changed": React re-renders, re-reads,
+        sees a new instance again, and loops until it aborts with "Maximum
+        update depth exceeded" (minified React error #185) and unmounts the
+        tree. Returning a primitive is fine - primitives compare by value.
+        """
+        _index, blob = self.frontend()
+        offenders = []
+        for name, (_subscribe, body) in self.snapshot_functions(blob).items():
+            if self.FRESH_RETURN.search(body):
+                offenders.append(name)
+        self.assertFalse(
+            offenders,
+            "these getSnapshot functions return a freshly allocated value, which "
+            "makes useSyncExternalStore loop until the whole app unmounts "
+            "(blank screen): " + ", ".join(sorted(offenders)) + ". Cache the value "
+            "against the raw store contents and return the same instance until "
+            "they change.",
+        )
+
+    def test_UT_UI_02_a_cached_snapshot_is_invalidated_by_a_write(self):
+        """Caching must not freeze the store: a write still has to re-render.
+
+        The other half of UT-UI-01. A reader that returned one permanent object
+        would also stop the update loop - by never updating at all, so a
+        dismissed guide note would stay on screen. The cached reader has to key
+        its cache on the stored value, and the writer has to notify subscribers.
+        """
+        _index, blob = self.frontend()
+        reader = self.snapshot_functions(blob)["readHiddenTags"][1]
+        self.assertRegex(reader, r"localStorage\.getItem", "the reader must still read the store")
+        self.assertRegex(
+            reader, r"if\s*\([^)]*===\s*hiddenTagsRaw\s*\)\s*return\s+hiddenTagsCache",
+            "readHiddenTags must return the cached Set while the stored string is unchanged",
+        )
+        writer = self.block_after(blob, blob.index("const hideGuideTag"))
+        self.assertRegex(writer, r"localStorage\.setItem", "dismissing a note must persist")
+        self.assertRegex(writer, r"guideListeners\.forEach", "dismissing a note must notify subscribers")
+
+    def test_UT_UI_03_a_writer_never_mutates_the_cached_snapshot(self):
+        """hideGuideTag copies before it adds.
+
+        Mutating the instance React is holding would both corrupt that snapshot
+        and hide the change from the Object.is comparison, so the note would
+        look dismissed in the store while staying on screen.
+        """
+        _index, blob = self.frontend()
+        writer = self.block_after(blob, blob.index("const hideGuideTag"))
+        self.assertNotRegex(
+            writer, r"(?<!new Set\()readHiddenTags\(\)\s*;",
+            "hideGuideTag must not take the cached Set directly",
+        )
+        self.assertRegex(
+            writer, r"new Set\(\s*readHiddenTags\(\)\s*\)",
+            "hideGuideTag must copy the cached snapshot before adding to it",
+        )
+
+    def test_UT_UI_04_a_component_crash_cannot_blank_the_whole_app(self):
+        """The root render sits inside an error boundary.
+
+        Without one, a throw in any component - a bad snapshot, a null field
+        from the API, a typo - unmounts everything below the root and the
+        operator gets a blank screen with no clue what happened. With one, the
+        failure is named on screen and the rest of the deployment is still up.
+        """
+        index, blob = self.frontend()
+        # assertRegex would echo the whole 140 KiB bundle on failure, so these
+        # are plain booleans with a short message instead.
+        self.assertTrue(re.search(r"class\s+ErrorBoundary\s+extends\s+React\.Component", blob),
+                        "the dashboard must define `class ErrorBoundary extends React.Component`")
+        self.assertIn("getDerivedStateFromError", blob, "the boundary must catch render errors")
+        self.assertIn("componentDidCatch", blob, "the boundary must report what it caught")
+        # createRoot(document.getElementById("root")).render(...) - the lazy
+        # group has to step over the parens inside the argument.
+        root_render = re.search(r"createRoot\(.*?\)\.render\((.*)\);", index)
+        self.assertIsNotNone(root_render, "could not find the createRoot(...).render(...) call")
+        self.assertRegex(
+            root_render.group(1), r"e\(\s*ErrorBoundary\s*,",
+            "the root render must be wrapped in ErrorBoundary, or a single "
+            "component failure blanks every tab",
+        )
+
+    def test_UT_UI_05_every_component_rendered_is_defined(self):
+        """No `e(Component, ...)` names something that was never defined.
+
+        The other classic blank screen: an undefined component is a
+        ReferenceError at the first render, which kills the tree just as
+        thoroughly as a crash does. Every capitalised component passed to
+        `e(...)` across the page and the three component files must be defined
+        in one of them.
+        """
+        _index, blob = self.frontend()
+        defined = set(re.findall(r"function\s+([A-Z][A-Za-z0-9_$]*)\s*\(", blob))
+        defined |= set(re.findall(r"(?:const|let|var)\s+([A-Z][A-Za-z0-9_$]*)\s*=", blob))
+        defined |= set(re.findall(r"class\s+([A-Z][A-Za-z0-9_$]*)\s", blob))
+        referenced = set(re.findall(r"\be\(\s*([A-Z][A-Za-z0-9_$]*)\s*[,)]", blob))
+        missing = sorted(referenced - defined)
+        self.assertFalse(
+            missing,
+            "these components are rendered but never defined, so the first "
+            "render throws a ReferenceError and the app shows a blank screen: "
+            + ", ".join(missing),
+        )
 
 
 def AdaptivePacerForTest():
