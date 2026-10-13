@@ -103,10 +103,15 @@ def draw(path, data):
             c.showPage(); y = 794
             text(run['name'], 14)
             text(f"Step {step.get('order', step_count)} | {step.get('action', '')} | {step.get('status', '')}")
-            for field in ('label', 'stage', 'value', 'selector', 'result', 'error', 'error_type', 'excerpt', 'evidence_error'):
+            for field in ('label', 'stage', 'value', 'selector', 'result', 'error', 'error_type', 'excerpt', 'evidence_error', 'diagnostic', 'symbology'):
                 value = step.get(field)
                 if value is not None:
                     text(field + ': ' + (json.dumps(value, ensure_ascii=False) if isinstance(value, (dict, list)) else str(value))[:2000], 9)
+            result = step.get('result') if isinstance(step.get('result'), dict) else {}
+            for field in ('expected', 'actual'):
+                value = result.get(field, step.get(field))
+                if value is not None:
+                    text(field + ': ' + str(value)[:2000], 9)
             directory = (Path(ARTIFACTS) / 'runs' / run['id']).resolve()
             name = Path(str(step.get('screenshot') or '')).name
             image = directory / name

@@ -404,22 +404,42 @@ Outstanding pre-existing blockers: rotate real credentials already committed, im
 | Requirement | Current delivery / remaining work |
 | --- | --- |
 | R01 — step/locator contract | Versioned validated strict actions and basic structured/frame/page locators implemented. Arbitrary source-language conversion and every locator composition are not supported. |
-| R02 — assertions/waits | Core assertions, condition waits and missing-variable failure implemented and browser-tested. Full structured expected/actual diagnostics beyond current logs still need improvement. |
-| R03 — controls | Common controls and extended interactions implemented. Specialized autocomplete/table row helper UIs and exhaustive interaction matrices remain. |
+| R02 — assertions/waits | Core assertions, condition waits and missing-variable failure implemented and browser-tested. Assertion failures now carry structured expected-vs-actual diagnostics rendered in step logs, the HTML report and the PDF report (secret values stay scrubbed). |
+| R03 — controls | Common controls and extended interactions implemented, plus wait-aware suggestion selection (`pick_suggestion`) and scoped web-table row/cell helpers (`table_lookup`, `assert_table_cell`) in the Python and JS runtimes. Exhaustive vendor interaction matrices remain. |
 | R04 — dialogs/files | Explicit dialog, bounded synthetic upload and download steps implemented. General filesystem access is intentionally prohibited. |
 | R05 — pages/frames | Explicit page aliases, popup switching and frame targeting implemented. Automatic inference of arbitrary iframe/tab interactions from remote clicks is not complete. |
 | R06 — API/network | Basic HTTP response/JSON assertions, API-to-UI capture and scoped browser mocks implemented. Advanced response schemas, arbitrary request expressions and response-event authoring remain. |
 | R07 — target auth | Environment references, operator-provisioned expiring storage-state profiles, and the newer encrypted project-input/keyring support are implemented and Chromium-tested. No vault service, automatic login renewal, profile-capture GUI, RBAC or remediation of old committed secrets. |
-| R08 — data/fixtures/profiles | Bounded JSON datasets, variable overrides, setup/teardown, fresh contexts and profile matrices implemented through advanced plan options. Separate CSV/XLSX dataset-table management and a graphical environment-profile editor are not supplied. |
+| R08 — data/fixtures/profiles | Bounded JSON datasets, variable overrides, setup/teardown, fresh contexts and profile matrices implemented through advanced plan options, plus CSV/JSON dataset upload and per-row override editing in the Execution Plan and Import UIs (`POST /api/plans/dataset/parse`). A graphical environment-profile editor is not supplied. |
 | R09 — reusable framework | Named flow composition with cycle/size checks, retained source plans, portable Python/JS/TS plan runners and reusable Python/JS locator page-object facades implemented. This is not automatic generation of a domain-specific enterprise POM architecture. |
 | R10 — reports | Portable HTML/JSON, resource ZIPs, reusable per-step JPEGs and cached single/batch PDFs implemented; temporary GitHub attachment transport/retention is mocked, not live-provider verified. Rich trace analysis/history comparison remains. |
 | R11 — tags/retries | Tags and deterministic selection filters implemented. Plans default to zero retries, allow one explicitly requested retry, identify flaky recovery and reject it as a clean pass for publication. |
 | R12 — CI/release | Explicit sequential `tools/quality_gate.py` added; it fails on missing prerequisites/test failures. No automatic CI workflow, scheduled job or rollout is activated. Production deployment evidence and provider billing configuration remain outside local validation. |
-| R13 — browser/device matrix | Sequential Chromium/Firefox/WebKit selection and desktop/tablet/mobile viewport-touch profiles implemented. Chromium responsive profiles are browser-tested. Firefox/WebKit are disabled by default, not installed or tested here; operator installation/validation is required. These are not physical-device/cloud-device tests. |
+| R13 — browser/device matrix | Sequential Chromium/Firefox/WebKit selection and desktop/tablet/mobile viewport-touch profiles implemented. Chromium responsive profiles are browser-tested. Firefox/WebKit are disabled by default, not installed or tested here; operator installation/validation is required. The roadmap also adds Windows desktop (`windows_desktop`) and native mobile/Zebra (`mobile_device`) plan profiles executed simulator-first, with authenticated agent/hub bridges for real targets — see `GET /api/roadmap/support-matrix`; simulators are not physical-device evidence. |
 | R14 — parallel workers | **Intentionally excluded at the user's request.** Sequential execution remains. |
-| R15 — domain packs | Five local synthetic packs implemented and browser-tested: commerce, banking, insurance, HRMS and travel; each includes positive/negative data and teardown. They do not certify real business, financial or regulatory rules. |
+| R15 — domain packs | Five local synthetic packs implemented and browser-tested: commerce, banking, insurance, HRMS and travel; each includes positive/negative data and teardown. Seven ERP/CRM packs are added on the deterministic `/erp-crm-demo.html` fixture (Oracle, SAP Fiori, JD Edwards, Dynamics 365 F&O, Dynamics 365 Business Central, Odoo, Salesforce) with TF_SECRET_* sign-in references, reusable flows and reset teardowns. They do not certify real business, financial or regulatory rules, and no real enterprise system is contacted. |
 
 Autonomous AI and visual baseline comparison were not added; they were not part of the supplied roadmap, and paid model calls conflict with the requested cost posture.
+
+## Execution speed (slider) and the roadmap support matrix
+
+Every run can be paced with the dashboard **⚡ Speed** slider (25%–300%) or the
+`execution_speed` field of a plan or run request. `1.0` is the historical behaviour:
+faster values shrink bounded locator timeouts; slower values enlarge them and add a
+bounded per-step pace plus typing delay so a run can be watched. The same factor is
+honoured by the Python runtime, the JS runtime (`TF_EXECUTION_SPEED`) and exported
+plans. It never adds a new parallelism path: execution stays sequential.
+
+`GET /api/roadmap/support-matrix` reports, per roadmap target, whether the pack or
+adapter is registered, whether a local simulator is ready, whether an authenticated
+live bridge is configured (`TF_WINDOWS_AGENT_*`, `TF_MOBILE_HUB_*` — booleans only),
+and the pilot state. `POST /api/roadmap/pilot/run` runs the deterministic pilot suite
+and stores a 24-hour receipt outside `library/`; only then do ERP/CRM pack targets
+badge `VERIFIED IN THIS ENVIRONMENT`. Desktop and mobile targets stay
+`SIMULATOR READY` until a live agent/hub pilot exists — simulator success is never
+presented as live-device verification. Custom testable desktop apps (Calculator,
+Settings, Access/VBA, FoxPro, COBOL, AS/400, Oracle desktop, custom .NET/C++/WinForms)
+are listed and extended via `GET`/`POST /api/roadmap/desktop-apps`.
 
 ## Validation commands
 

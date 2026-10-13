@@ -130,6 +130,9 @@ async def replay_step(page, step, variables, budgets=None, runtime=None):
     if isinstance(budgets, dict):
         budget.update({key: int(item) for key, item in budgets.items()
                        if key in DEFAULT_BUDGETS and item})
+    if runtime is not None and getattr(runtime, "speed_profile", None):
+        # Legacy basic steps bypass StepRuntime; the slider still slows typing.
+        budget["type_delay_ms"] = int(runtime.speed_profile.get("type_delay_ms") or 0)
     navigate_ms = budget["navigate_ms"]
     action_ms = budget["action_ms"]
     type_delay_ms = budget["type_delay_ms"]
@@ -267,7 +270,7 @@ async def _expand_steps_with_repeat(steps):
 
 
 async def execute_run(run_id, on_event, on_frame=None, display_window=True, viewer_count=None,
-                      screenshots="all", window_enabled=None):
+                      screenshots="all", window_enabled=None, execution_speed=None):
     """Replay one recording and optionally stream a viewer-aware live preview.
 
     ``display_window`` is the initial setting. ``window_enabled`` may be a
@@ -298,6 +301,13 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             await on_event({'type': 'status', 'status': 'running', 'percent': int(done / total * 100)})
         async with browser_budget.slot('plan:' + run_id):
             plan = normalize_plan(plan)
+            if execution_speed is not None:
+                # The run-level slider wins over the plan's stored factor.
+                from app.execution_speed import normalize_speed
+                factor = normalize_speed(execution_speed)
+                plan['execution_speed'] = factor
+                for profile in plan['matrix']:
+                    profile['execution_speed'] = factor
             from app.secrets_store import reveal_map
             values, _ = environment(project_id, plan, reveal_map(variable_snapshot) if variable_snapshot is not None else None)
             _save(run_id, status='running', started_at=datetime.datetime.utcnow())
@@ -456,7 +466,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                 # also pushed to the live view before the step-complete event.
                 shot_tasks = set()
                 video = page.video
-                runtime = StepRuntime(page, run_dir)
+                runtime = StepRuntime(page, run_dir, execution_speed=execution_speed)
                 try:
                     total = len(steps)
                     for index, step in enumerate(steps, 1):

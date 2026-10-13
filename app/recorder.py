@@ -40,21 +40,37 @@ _ELEMENT_JS = """
     const value = node.getAttribute(name);
     return value ? String(value).slice(0, 120) : "";
   };
+  // Stable enterprise attributes first: generated framework ids (SAP
+  // __xmlview0--..., GUIDs, long digit runs) are the last resort, never the
+  // primary locator, because they change between sessions/deployments.
+  function stableId(id) {
+    if (!id) return false;
+    if (id.indexOf("__") === 0 || id.indexOf(":") >= 0) return false;
+    if (/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(id)) return false;
+    if (/\\d{4,}/.test(id)) return false;
+    return true;
+  }
   function selectorFor(node) {
     if (!node || node.nodeType !== 1) return null;
-    if (node.id) return "#" + cssEscape(node.id);
     const testid = attr(node, "data-testid");
     if (testid) return '[data-testid="' + cssEscape(testid) + '"]';
+    const sapId = attr(node, "data-sap-ui-id");
+    if (sapId) return '[data-sap-ui-id="' + cssEscape(sapId) + '"]';
+    const field = attr(node, "data-field");
+    if (field) return '[data-field="' + cssEscape(field) + '"]';
     const name = attr(node, "name");
     if (name) return node.tagName.toLowerCase() + '[name="' + cssEscape(name) + '"]';
     const aria = attr(node, "aria-label");
+    const role = attr(node, "role");
+    if (aria && role) return node.tagName.toLowerCase() + '[role="' + cssEscape(role) + '"][aria-label="' + aria.replace(/"/g, '\\\\"') + '"]';
     if (aria) return node.tagName.toLowerCase() + '[aria-label="' + aria.replace(/"/g, '\\\\"') + '"]';
     const placeholder = attr(node, "placeholder");
     if (placeholder) return node.tagName.toLowerCase() + '[placeholder="' + placeholder.replace(/"/g, '\\\\"') + '"]';
+    if (stableId(node.id)) return "#" + cssEscape(node.id);
     const parts = [];
     let cur = node;
     while (cur && cur.nodeType === 1 && parts.length < 6 && cur.tagName !== "HTML") {
-      if (cur.id) { parts.unshift("#" + cssEscape(cur.id)); break; }
+      if (stableId(cur.id)) { parts.unshift("#" + cssEscape(cur.id)); break; }
       let index = 1;
       let sib = cur;
       while ((sib = sib.previousElementSibling)) {
@@ -77,10 +93,16 @@ _FOCUSED_JS = """
   const cssEscape = (window.CSS && CSS.escape)
     ? (value) => CSS.escape(value)
     : (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, "\\\\$&");
+  const stableId = (id) => !!id && id.indexOf("__") !== 0 && id.indexOf(":") < 0
+    && !/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(id) && !/\\d{4,}/.test(id);
   let selector = null;
-  if (el.id) selector = "#" + cssEscape(el.id);
+  if (el.getAttribute("data-testid")) selector = '[data-testid="' + cssEscape(el.getAttribute("data-testid")) + '"]';
+  else if (el.getAttribute("data-sap-ui-id")) selector = '[data-sap-ui-id="' + cssEscape(el.getAttribute("data-sap-ui-id")) + '"]';
+  else if (el.getAttribute("data-field")) selector = '[data-field="' + cssEscape(el.getAttribute("data-field")) + '"]';
   else if (el.getAttribute("name")) selector = el.tagName.toLowerCase() + '[name="' + cssEscape(el.getAttribute("name")) + '"]';
+  else if (el.getAttribute("aria-label")) selector = el.tagName.toLowerCase() + '[aria-label="' + el.getAttribute("aria-label").replace(/"/g, '\\\\"') + '"]';
   else if (el.getAttribute("placeholder")) selector = el.tagName.toLowerCase() + '[placeholder="' + el.getAttribute("placeholder").replace(/"/g, '\\\\"') + '"]';
+  else if (stableId(el.id)) selector = "#" + cssEscape(el.id);
   if (!selector) {
     const parts = [];
     let cur = el;

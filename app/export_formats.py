@@ -59,6 +59,11 @@ def write_exports(folder: Path, recording: dict) -> None:
         feature.append('    When I perform step %s "%s"' % (step.get("order"), label))
     (folder / "recording.feature").write_text("\n".join(feature) + "\n", encoding="utf-8")
     (folder / "steps.json").write_text(json.dumps(steps, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    # Desktop/mobile steps recorded outside a plan still get their portable
+    # bundles (plan-based bundles are written by write_runners).
+    from app.export_templates import write_desktop_bundle, write_mobile_bundle
+    write_desktop_bundle(folder, steps)
+    write_mobile_bundle(folder, steps)
     # A merged repeat is written into the label as " ×N" so the table can be
     # re-imported with the repeat count intact (steps.json carries it natively).
     azure = [(title, step.get("order"), _label_cell(step),
@@ -86,5 +91,9 @@ def write_exports(folder: Path, recording: dict) -> None:
         "Re-import steps.json for a lossless canonical round trip; the Azure DevOps, Jira and "
         "TestComplete tables round-trip too, because the label carries the repeat marker (\" ×N\") "
         "and the Selector column carries the recorded locator. Arbitrary generated runtime code is "
-        "not executed by the importer. Screenshots are PNG. Video, when enabled, is WebM, not PNG.\n",
+        "not executed by the importer. Screenshots are PNG. Video, when enabled, is WebM, not PNG. "
+        "Set TF_EXECUTION_SPEED (0.25-3.0) to pace Python/JS replays exactly like the dashboard slider. "
+        "Plans with Windows desktop or mobile profiles also export desktop_test.py/DesktopRunner.cs and "
+        "mobile_test.py/mobile_test.js plus a Zebra DataWedge profile; they simulate locally unless "
+        "TF_WINDOWS_AGENT_URL/TF_WINDOWS_AGENT_TOKEN or TF_MOBILE_HUB_URL/TF_MOBILE_HUB_TOKEN are set.\n",
         encoding="utf-8")

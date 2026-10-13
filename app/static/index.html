@@ -313,6 +313,7 @@ function App({ access }) {
         e('span', { className: "fast-badge" }, "FAST ⚡")
       ),
       e(GuideToggle, null),
+      typeof ExecutionSpeedControl === 'function' && e(ExecutionSpeedControl, { compact: true }),
       access && !access.configured && e('span', {className:"text-[9px] text-amber-300", title:"Set TF_ACCESS_TOKEN before exposing this instance"}, "ACCESS TOKEN NOT CONFIGURED"),
       access && access.configured && e('button', {className:"key-btn", onClick:async()=>{await API.post('/api/auth/logout',{});location.reload();}}, "SIGN OUT"),
       activeProject && e('span', { className: "text-[10px] bg-indigo-900 px-2 py-1 rounded" }, activeProject.name)
@@ -537,7 +538,8 @@ function Recorder({ project, onRun, liveWindow }) {
     setResumeBusy(recording.id); setError("");
     try {
       const res = await API.post("/api/runs", {
-        target_id: recording.id, display_window: liveWindow !== false });
+        target_id: recording.id, display_window: liveWindow !== false,
+        execution_speed: window.TESTFORGE_SPEED_FACTOR || 1 });
       if (onRun) onRun(res.run_id);
     } catch (err) { setError("Could not queue that recording: " + err.message); }
     finally { setResumeBusy(""); }
@@ -1284,6 +1286,7 @@ function BatchPanel({ onOpenRun, liveWindow }) {
         screenshots: screenshots,
         share_session: share,
         retry_transient: retry,
+        execution_speed: window.TESTFORGE_SPEED_FACTOR || 1,
       });
       setBatch({ id: created.batch_id, status: created.status, total: created.total, progress_pct: 0,
                  passed: 0, failed: 0, runs: [], options: created.options });
@@ -1297,7 +1300,7 @@ function BatchPanel({ onOpenRun, liveWindow }) {
     try {
       const created = await API.post("/api/runs/batch", {
         all: true, ...tagOptions(), display_window: !!liveWindow, screenshots: screenshots,
-        share_session: share, retry_transient: retry,
+        share_session: share, retry_transient: retry, execution_speed: window.TESTFORGE_SPEED_FACTOR || 1,
       });
       setBatch({ id: created.batch_id, status: created.status, total: created.total, progress_pct: 0,
                  passed: 0, failed: 0, runs: [], options: created.options });
@@ -1448,7 +1451,7 @@ function Library({ project, liveWindow, onRun }) {
   const run = async (recording, variables = {}) => {
     setRunning(recording.id); setError("");
     try {
-      const res = await API.post("/api/runs", { target_id: recording.id, display_window: liveWindow !== false, variables });
+      const res = await API.post("/api/runs", { target_id: recording.id, display_window: liveWindow !== false, variables, execution_speed: window.TESTFORGE_SPEED_FACTOR || 1 });
       onRun(res.run_id);
     } catch (err) {
       setError(err.message);
@@ -2583,6 +2586,13 @@ function Azure() {
               allOpen ? "COLLAPSE ALL" : "EXPAND ALL"),
             e("button", { onClick: resetProgress, className: "text-[9px] font-bold px-2 py-1 rounded bg-slate-700 hover:bg-red-700" }, "RESET PROGRESS"))))
     )),
+    e("div", { className: "bg-slate-900 border border-sky-900 rounded-2xl p-4 space-y-2" },
+      e("h3", { className: "text-sm font-bold text-sky-300" }, "☁️ Azure hosting + roadmap bridges"),
+      e("p", { className: "text-xs text-slate-300" },
+        "Set TF_ACCESS_TOKEN (32+ characters) on the Azure VM/container before exposing this instance — without it the optional single-operator gate reports itself unprotected (guide §0.1). " +
+        "The new roadmap runners bolt onto the same single-worker deployment without new Azure services: a Windows desktop target is an authenticated agent you run on your own Windows host (TF_WINDOWS_AGENT_URL + TF_WINDOWS_AGENT_TOKEN), and mobile/Zebra targets use an Appium lab endpoint (TF_MOBILE_HUB_URL + TF_MOBILE_HUB_TOKEN). " +
+        "Leave them unset and every desktop/mobile plan runs against the deterministic local simulators; the Future release planning tab's Support Matrix shows which mode each target is in. " +
+        "Keep one worker and sequential execution on Azure exactly as the guide's §0.2 requires — the adapters add no parallelism and store no credentials in the library or exports.")),
     loading && e("p", { className: "text-sm text-slate-400" }, "Loading the guide…"),
     error && e("div", { role: "alert", className: "bg-red-950/40 border border-red-800/40 text-red-200 p-4 rounded-2xl space-y-2" },
       e("p", { className: "text-sm font-bold" }, "The guide could not be loaded."),

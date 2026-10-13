@@ -54,10 +54,22 @@ def html_report(run_id: str):
                 if len(content) <= image_budget:
                     image_budget -= len(content)
                     image = '<img alt="Step screenshot" src="data:image/' + ('jpeg' if name.endswith('.jpg') else 'png') + ';base64,' + base64.b64encode(content).decode() + '">'
+        result = step.get("result") if isinstance(step.get("result"), dict) else {}
+        expected = result.get("expected", step.get("expected"))
+        actual = result.get("actual", step.get("actual"))
+        diagnostic = ""
+        if expected is not None or actual is not None:
+            diagnostic = ('<p>Expected: <code>' + esc(expected) + '</code><br>Actual: <code>' +
+                          esc(actual) + '</code></p>')
+        if step.get("diagnostic"):
+            diagnostic += '<p>' + esc(step.get("diagnostic")) + '</p>'
+        if result.get("symbology") or result.get("barcode_data"):
+            diagnostic += ('<p>Barcode: <code>' + esc(result.get("symbology") or "") + ' ' +
+                           esc(result.get("barcode_data") or "") + '</code></p>')
         rows.append('<tr><td>' + esc(step.get("order")) + '</td><td>' + esc(step.get("action")) +
                     '</td><td>' + esc(step.get("status")) + '</td><td><strong>' + esc(step.get("label")) +
                     '</strong><pre>' + esc(step.get("error") or json.dumps(step.get("result") or {}, ensure_ascii=False)) +
-                    '</pre>' + ('<p>Retried transient failure</p>' if step.get("retried") else '') + image + '</td></tr>')
+                    '</pre>' + diagnostic + ('<p>Retried transient failure</p>' if step.get("retried") else '') + image + '</td></tr>')
     document = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>TestForge report</title>'
     document += '<style>body{font:16px system-ui;margin:2rem;max-width:1100px}table{border-collapse:collapse;width:100%}td,th{border:1px solid #bbb;padding:.6rem;text-align:left;vertical-align:top}pre{white-space:pre-wrap}img{max-width:100%;max-height:360px}small{color:#555}</style>'
     document += '<h1>TestForge run report</h1><p>Run ' + esc(data["id"]) + ' · <strong>' + esc(data["status"]) + '</strong> · ' + esc(data["progress_pct"]) + '%</p>'
