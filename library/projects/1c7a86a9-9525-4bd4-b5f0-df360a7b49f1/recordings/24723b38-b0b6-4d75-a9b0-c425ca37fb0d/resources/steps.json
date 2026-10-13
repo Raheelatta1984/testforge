@@ -41,7 +41,7 @@
     "id": "82697a9b-9c6f-40a0-bc02-0049a8fe8968",
     "order": 4,
     "action": "type",
-    "value": "2",
+    "value": "{{Order_Qty}}",
     "label": "Type: 2",
     "selector": {
       "primary": "#store-picker-postcode"
@@ -52,7 +52,7 @@
     "id": "58562845-5049-45b9-9f02-1f6bb3a6b9a2",
     "order": 5,
     "action": "type",
-    "value": "0",
+    "value": "{{store_picker_postcode}}",
     "label": "Type: 0",
     "selector": {
       "primary": "#store-picker-postcode"
@@ -63,7 +63,7 @@
     "id": "1409bd58-6a0e-4bf6-9fcb-9aa18df9b4a7",
     "order": 6,
     "action": "type",
-    "value": "4",
+    "value": "{{store_picker_postcode_2}}",
     "label": "Type: 4",
     "selector": {
       "primary": "#store-picker-postcode"
@@ -74,7 +74,7 @@
     "id": "3bc9b782-b03b-4e23-a26a-31b55c7a5e23",
     "order": 7,
     "action": "type",
-    "value": "7",
+    "value": "{{store_picker_postcode_3}}",
     "label": "Type: 7",
     "selector": {
       "primary": "#store-picker-postcode"

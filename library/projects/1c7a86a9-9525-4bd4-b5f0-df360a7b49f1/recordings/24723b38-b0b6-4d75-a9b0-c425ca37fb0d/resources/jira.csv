@@ -2,10 +2,10 @@
 "Session 14/10/2026, 01:45:44",1,navigate,Open https://www.harrisfarm.com.au/,{},https://www.harrisfarm.com.au/,
 "Session 14/10/2026, 01:45:44",2,click,Click DELIVERY,"{""primary"": ""#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)"", ""x"": 651, ""y"": 506, ""text"": ""DELIVERY"", ""tag"": ""button""}",,step-002.png
 "Session 14/10/2026, 01:45:44",3,click,Click e.g. 2066,"{""primary"": ""#store-picker-postcode"", ""x"": 476, ""y"": 474, ""text"": ""e.g. 2066"", ""tag"": ""input""}",,step-003.png
-"Session 14/10/2026, 01:45:44",4,type,Type: 2,"{""primary"": ""#store-picker-postcode""}",2,step-004.png
-"Session 14/10/2026, 01:45:44",5,type,Type: 0,"{""primary"": ""#store-picker-postcode""}",0,step-005.png
-"Session 14/10/2026, 01:45:44",6,type,Type: 4,"{""primary"": ""#store-picker-postcode""}",4,step-006.png
-"Session 14/10/2026, 01:45:44",7,type,Type: 7,"{""primary"": ""#store-picker-postcode""}",7,step-007.png
+"Session 14/10/2026, 01:45:44",4,type,Type: 2,"{""primary"": ""#store-picker-postcode""}",{{Order_Qty}},step-004.png
+"Session 14/10/2026, 01:45:44",5,type,Type: 0,"{""primary"": ""#store-picker-postcode""}",{{store_picker_postcode}},step-005.png
+"Session 14/10/2026, 01:45:44",6,type,Type: 4,"{""primary"": ""#store-picker-postcode""}",{{store_picker_postcode_2}},step-006.png
+"Session 14/10/2026, 01:45:44",7,type,Type: 7,"{""primary"": ""#store-picker-postcode""}",{{store_picker_postcode_3}},step-007.png
 "Session 14/10/2026, 01:45:44",8,click,Click CHECK DELIVERY,"{""primary"": ""#store-picker-find"", ""x"": 659, ""y"": 464, ""text"": ""CHECK DELIVERY"", ""tag"": ""button""}",,step-008.png
 "Session 14/10/2026, 01:45:44",9,click,Click CONTINUE,"{""primary"": ""#store-picker-select-slot"", ""x"": 413, ""y"": 542, ""text"": ""CONTINUE"", ""tag"": ""button""}",,step-009.png
 "Session 14/10/2026, 01:45:44",10,click,"Click THU

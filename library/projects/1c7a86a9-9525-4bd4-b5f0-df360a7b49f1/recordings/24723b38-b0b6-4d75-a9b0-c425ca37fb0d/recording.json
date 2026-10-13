@@ -57,7 +57,7 @@
       "selector": {
         "primary": "#store-picker-postcode"
       },
-      "value": "2"
+      "value": "{{Order_Qty}}"
     },
     {
       "action": "type",
@@ -68,7 +68,7 @@
       "selector": {
         "primary": "#store-picker-postcode"
       },
-      "value": "0"
+      "value": "{{store_picker_postcode}}"
     },
     {
       "action": "type",
@@ -79,7 +79,7 @@
       "selector": {
         "primary": "#store-picker-postcode"
       },
-      "value": "4"
+      "value": "{{store_picker_postcode_2}}"
     },
     {
       "action": "type",
@@ -90,7 +90,7 @@
       "selector": {
         "primary": "#store-picker-postcode"
       },
-      "value": "7"
+      "value": "{{store_picker_postcode_3}}"
     },
     {
       "action": "click",
