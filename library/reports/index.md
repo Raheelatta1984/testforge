@@ -10,6 +10,8 @@ Newest first, newest 200 retained.
 
 | Finished (UTC) | Kind | Id | Outcome | Steps | Recordings | PDF asset |
 | --- | --- | --- | --- | --- | --- | --- |
+| 2026-10-13T13:57:16Z | batch | f0c12131-c29f-425c-98e2-20be769055e7 | passed | 3 | Amazon learning | not uploaded |
+| 2026-10-13T13:57:11Z | run | c170d79c-7fcb-4c6e-9461-a25f9f6d3480 | passed | 3 | Amazon learning | not uploaded |
 | 2026-10-13T13:11:08Z | run | f548ed45-e1f0-494f-a628-739aaa3d517a | passed | 3 | Amazon learning | not uploaded |
 | 2026-10-13T12:39:23Z | run | 47640b03-5d64-42d6-96a1-f05b84a1a55a | passed | 20 | Instacart | not uploaded |
 | 2026-10-13T11:13:16Z | run | 8ab2b37f-08bb-4d1f-bd31-683973ef7292 | failed | 1 | Hello variable | not uploaded |
