@@ -1,1 +1,285 @@
-[]
+[
+  {
+    "id": "f7f7ece9-7079-45e6-97a2-2d6d189e9d26",
+    "order": 1,
+    "action": "navigate",
+    "value": "https://www.instacart.com/",
+    "label": "Open https://www.instacart.com/",
+    "selector": null
+  },
+  {
+    "id": "7226dd6a-9364-4083-b110-9657352173d3",
+    "order": 2,
+    "action": "click",
+    "value": null,
+    "label": "Click Search",
+    "selector": {
+      "primary": "#search-bar-input",
+      "x": 469,
+      "y": 45,
+      "text": "Search",
+      "tag": "input"
+    },
+    "screenshot": "step-002.png"
+  },
+  {
+    "id": "72cc1e09-bc9a-459f-a13a-407b7a115d52",
+    "order": 3,
+    "action": "type",
+    "value": "Apple",
+    "label": "Type: Apple",
+    "selector": {
+      "primary": "#search-bar-input"
+    },
+    "screenshot": "step-003.png"
+  },
+  {
+    "id": "38002b0f-7c80-4959-9ff8-9062bbe52ec1",
+    "order": 4,
+    "action": "click",
+    "value": null,
+    "label": "Click 358,106",
+    "selector": {
+      "primary": "[data-testid=\"thumbnail\"]",
+      "x": 358,
+      "y": 106,
+      "text": "",
+      "tag": "img"
+    },
+    "screenshot": "step-004.png"
+  },
+  {
+    "id": "1aaa9fdd-b67f-4050-a6c2-f31caeb6b1b6",
+    "order": 5,
+    "action": "click",
+    "value": null,
+    "label": "Click Safeway\nDelivery available\nPickup available\nGroceries\nBakery\nDeli\nBest seller\nCu",
+    "selector": {
+      "primary": "#store-wrapper > div:nth-of-type(1)",
+      "x": 380,
+      "y": 105,
+      "text": "Safeway\nDelivery available\nPickup available\nGroceries\nBakery\nDeli\nBest seller\nCu",
+      "tag": "div"
+    },
+    "screenshot": "step-005.png"
+  },
+  {
+    "id": "6eb0bab4-6f61-4b5e-a458-0921ac1e3367",
+    "order": 6,
+    "action": "click",
+    "value": null,
+    "label": "Click 344,375",
+    "selector": {
+      "primary": "[data-testid=\"item-card-image\"]",
+      "x": 344,
+      "y": 375,
+      "text": "",
+      "tag": "img"
+    },
+    "screenshot": "step-006.png"
+  },
+  {
+    "id": "f96abbbf-bcb6-4910-a003-c7448a5ba0d1",
+    "order": 7,
+    "action": "click",
+    "value": null,
+    "label": "Click 364,371",
+    "selector": {
+      "primary": null,
+      "x": 364,
+      "y": 371,
+      "text": null,
+      "tag": null
+    },
+    "screenshot": "step-007.png"
+  },
+  {
+    "id": "03f7772d-8661-4793-8fc9-1694ca828c06",
+    "order": 8,
+    "action": "click",
+    "value": null,
+    "label": "Click Add to cart",
+    "selector": {
+      "primary": "div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(3) > div:nth-of-type(2) > button:nth-of-type(2) > span:nth-of-type(1)",
+      "x": 756,
+      "y": 348,
+      "text": "Add to cart",
+      "tag": "span"
+    },
+    "screenshot": "step-008.png"
+  },
+  {
+    "id": "4cdfb9fe-60d0-4ddb-b096-58ee01b29ccf",
+    "order": 9,
+    "action": "click",
+    "value": null,
+    "label": "Click Item instructions",
+    "selector": {
+      "primary": "div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(1) > div:nth-of-type(1)",
+      "x": 926,
+      "y": 350,
+      "text": "Item instructions",
+      "tag": "div"
+    },
+    "screenshot": "step-009.png"
+  },
+  {
+    "id": "d7b06ec6-ea0c-4c6e-8606-a5a2f97bb375",
+    "order": 10,
+    "action": "click",
+    "value": null,
+    "label": "Click Honeycrisp Apples\nAbout 0.5 lb each\n• $4.69 / lb\nFinal cost by weight\n• In seaso",
+    "selector": {
+      "primary": "#item_details > div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1)",
+      "x": 563,
+      "y": 326,
+      "text": "Honeycrisp Apples\nAbout 0.5 lb each\n• $4.69 / lb\nFinal cost by weight\n• In seaso",
+      "tag": "div"
+    },
+    "screenshot": "step-010.png"
+  },
+  {
+    "id": "9320aabb-56cb-4310-8c62-544271cec35e",
+    "order": 11,
+    "action": "click",
+    "value": null,
+    "label": "Click This is a carousel with one large image and a track of thumbnails. Select any of",
+    "selector": {
+      "primary": "#item_details > div:nth-of-type(2)",
+      "x": 369,
+      "y": 326,
+      "text": "This is a carousel with one large image and a track of thumbnails. Select any of",
+      "tag": "div"
+    },
+    "screenshot": "step-011.png"
+  },
+  {
+    "id": "70c2fc59-e3c5-4545-85d5-4dfb46d9d103",
+    "order": 12,
+    "action": "click",
+    "value": null,
+    "label": "Click Item instructions",
+    "selector": {
+      "primary": "div:nth-of-type(2) > div:nth-of-type(2) > div:nth-of-type(1) > div:nth-of-type(4) > div:nth-of-type(1) > div:nth-of-type(1)",
+      "x": 802,
+      "y": 337,
+      "text": "Item instructions",
+      "tag": "div"
+    },
+    "screenshot": "step-012.png"
+  },
+  {
+    "id": "86cb4540-1993-4866-9028-489d5ac0e83b",
+    "order": 13,
+    "action": "click",
+    "value": null,
+    "label": "Click Add note for shopper",
+    "selector": {
+      "primary": "div:nth-of-type(2) > button:nth-of-type(1) > span:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1)",
+      "x": 866,
+      "y": 444,
+      "text": "Add note for shopper",
+      "tag": "div"
+    },
+    "screenshot": "step-013.png"
+  },
+  {
+    "id": "926adbda-0765-4ab8-bd6e-3d9a9b6ab46e",
+    "order": 14,
+    "action": "click",
+    "value": null,
+    "label": "Click Add instructions for ripeness, expiration dates, etc. (optional)",
+    "selector": {
+      "primary": "#react-aria7633136552-_r_2_",
+      "x": 305,
+      "y": 299,
+      "text": "Add instructions for ripeness, expiration dates, etc. (optional)",
+      "tag": "textarea"
+    },
+    "screenshot": "step-014.png"
+  },
+  {
+    "id": "4777e74a-0de7-4c72-bbd1-397e84d4e49b",
+    "order": 15,
+    "action": "click",
+    "value": null,
+    "label": "Click Add instructions for ripeness, expiration dates, etc. (optional)",
+    "selector": {
+      "primary": "#react-aria7633136552-_r_2_",
+      "x": 603,
+      "y": 342,
+      "text": "Add instructions for ripeness, expiration dates, etc. (optional)",
+      "tag": "textarea"
+    },
+    "screenshot": "step-015.png"
+  },
+  {
+    "id": "1b402ef4-de4b-4c23-87b6-4bdefb127f49",
+    "order": 16,
+    "action": "click",
+    "value": null,
+    "label": "Click Add instructions for ripeness, expiration dates, etc. (optional)",
+    "selector": {
+      "primary": "#react-aria7633136552-_r_2_",
+      "x": 537,
+      "y": 314,
+      "text": "Add instructions for ripeness, expiration dates, etc. (optional)",
+      "tag": "textarea"
+    },
+    "screenshot": "step-016.png"
+  },
+  {
+    "id": "0ce560db-5e4f-4baa-8d67-a92f14fc29ad",
+    "order": 17,
+    "action": "click",
+    "value": null,
+    "label": "Click Add instructions for ripeness, expiration dates, etc. (optional)",
+    "selector": {
+      "primary": "#react-aria7633136552-_r_2_",
+      "x": 572,
+      "y": 296,
+      "text": "Add instructions for ripeness, expiration dates, etc. (optional)",
+      "tag": "textarea"
+    },
+    "screenshot": "step-017.png"
+  },
+  {
+    "id": "d0dc25be-2e6f-4635-997b-001575fc5708",
+    "order": 18,
+    "action": "click",
+    "value": null,
+    "label": "Click Save note",
+    "selector": {
+      "primary": "#id-46 > div:nth-of-type(2) > div:nth-of-type(1) > button:nth-of-type(1)",
+      "x": 607,
+      "y": 439,
+      "text": "Save note",
+      "tag": "button"
+    },
+    "screenshot": "step-018.png"
+  },
+  {
+    "id": "d821fb90-b518-4acb-a4be-a222adb6f0ee",
+    "order": 19,
+    "action": "click",
+    "value": null,
+    "label": "Click 314,321",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(1) > img:nth-of-type(1)",
+      "x": 314,
+      "y": 321,
+      "text": "",
+      "tag": "img"
+    },
+    "screenshot": "step-019.png"
+  },
+  {
+    "id": "42a73450-33d2-47d8-939b-52cc532e9f34",
+    "order": 20,
+    "action": "press",
+    "value": "Control+v",
+    "label": "Press Control+v",
+    "selector": null,
+    "screenshot": "step-020.png"
+  }
+]
