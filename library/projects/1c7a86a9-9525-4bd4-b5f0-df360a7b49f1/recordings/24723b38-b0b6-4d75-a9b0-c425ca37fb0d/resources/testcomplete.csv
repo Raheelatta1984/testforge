@@ -1,45 +1,45 @@
 ﻿Step,Action,Selector,Input,Screenshot
 1,Open https://www.harrisfarm.com.au/,{},https://www.harrisfarm.com.au/,
-2,Click DELIVERY,"{""primary"": ""#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)"", ""x"": 651, ""y"": 506, ""text"": ""DELIVERY"", ""tag"": ""button""}",,step-002.png
-3,Click e.g. 2066,"{""primary"": ""#store-picker-postcode"", ""x"": 476, ""y"": 474, ""text"": ""e.g. 2066"", ""tag"": ""input""}",,step-003.png
+2,Click DELIVERY,"{""primary"": ""#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)"", ""tag"": ""button"", ""text"": ""DELIVERY"", ""x"": 651, ""y"": 506}",,step-002.png
+3,Click e.g. 2066,"{""primary"": ""#store-picker-postcode"", ""tag"": ""input"", ""text"": ""e.g. 2066"", ""x"": 476, ""y"": 474}",,step-003.png
 4,Type: 2,"{""primary"": ""#store-picker-postcode""}",{{Order_Qty}},step-004.png
 5,Type: 0,"{""primary"": ""#store-picker-postcode""}",{{store_picker_postcode}},step-005.png
 6,Type: 4,"{""primary"": ""#store-picker-postcode""}",{{store_picker_postcode_2}},step-006.png
 7,Type: 7,"{""primary"": ""#store-picker-postcode""}",{{store_picker_postcode_3}},step-007.png
-8,Click CHECK DELIVERY,"{""primary"": ""#store-picker-find"", ""x"": 659, ""y"": 464, ""text"": ""CHECK DELIVERY"", ""tag"": ""button""}",,step-008.png
-9,Click CONTINUE,"{""primary"": ""#store-picker-select-slot"", ""x"": 413, ""y"": 542, ""text"": ""CONTINUE"", ""tag"": ""button""}",,step-009.png
+8,Click CHECK DELIVERY,"{""primary"": ""#store-picker-find"", ""tag"": ""button"", ""text"": ""CHECK DELIVERY"", ""x"": 659, ""y"": 464}",,step-008.png
+9,Click CONTINUE,"{""primary"": ""#store-picker-select-slot"", ""tag"": ""button"", ""text"": ""CONTINUE"", ""x"": 413, ""y"": 542}",,step-009.png
 10,"Click THU
-15 Oct","{""primary"": ""#cart-slot-days > button:nth-of-type(2)"", ""x"": 474, ""y"": 168, ""text"": ""THU\n15 Oct"", ""tag"": ""button""}",,step-010.png
-11,Click Afternoon,"{""primary"": ""#cart-slot-periods > button:nth-of-type(2)"", ""x"": 528, ""y"": 260, ""text"": ""Afternoon"", ""tag"": ""button""}",,step-011.png
+15 Oct","{""primary"": ""#cart-slot-days > button:nth-of-type(2)"", ""tag"": ""button"", ""text"": ""THU\n15 Oct"", ""x"": 474, ""y"": 168}",,step-010.png
+11,Click Afternoon,"{""primary"": ""#cart-slot-periods > button:nth-of-type(2)"", ""tag"": ""button"", ""text"": ""Afternoon"", ""x"": 528, ""y"": 260}",,step-011.png
 12,"Click 12:00 PM-1:00 PM
 12:30 PM-1:30 PM
 1:00 PM-2:00 PM
 1:30 PM-2:30 PM
-2:00 PM-3:00 P","{""primary"": ""#cart-slot-slots"", ""x"": 617, ""y"": 409, ""text"": ""12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P"", ""tag"": ""div""}",,step-012.png
-13,Click 12:30 PM-1:30 PM,"{""primary"": ""#cart-slot-slots > button:nth-of-type(2)"", ""x"": 591, ""y"": 390, ""text"": ""12:30 PM-1:30 PM"", ""tag"": ""button""}",,step-013.png
-14,Click RESERVE TIME,"{""primary"": ""#cart-slot-reserve"", ""x"": 633, ""y"": 584, ""text"": ""RESERVE TIME"", ""tag"": ""button""}",,step-014.png
-15,Click Same day express delivery 🍉🥑,"{""primary"": ""#shopify-section-sections--19725413744699__announcement-bar > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1)"", ""x"": 405, ""y"": 29, ""text"": ""Same day express delivery \ud83c\udf49\ud83e\udd51"", ""tag"": ""div""}",,step-015.png
-16,Click Search,"{""primary"": ""#Search-In-Template"", ""x"": 390, ""y"": 61, ""text"": ""Search"", ""tag"": ""input""}",,step-016.png
+2:00 PM-3:00 P","{""primary"": ""#cart-slot-slots"", ""tag"": ""div"", ""text"": ""12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P"", ""x"": 617, ""y"": 409}",,step-012.png
+13,Click 12:30 PM-1:30 PM,"{""primary"": ""#cart-slot-slots > button:nth-of-type(2)"", ""tag"": ""button"", ""text"": ""12:30 PM-1:30 PM"", ""x"": 591, ""y"": 390}",,step-013.png
+14,Click RESERVE TIME,"{""primary"": ""#cart-slot-reserve"", ""tag"": ""button"", ""text"": ""RESERVE TIME"", ""x"": 633, ""y"": 584}",,step-014.png
+15,Click Same day express delivery 🍉🥑,"{""primary"": ""#shopify-section-sections--19725413744699__announcement-bar > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1)"", ""tag"": ""div"", ""text"": ""Same day express delivery \ud83c\udf49\ud83e\udd51"", ""x"": 405, ""y"": 29}",,step-015.png
+16,Click Search,"{""primary"": ""#Search-In-Template"", ""tag"": ""input"", ""text"": ""Search"", ""x"": 390, ""y"": 61}",,step-016.png
 17,Type: {{Product1}},"{""primary"": ""#Search-In-Modal""}",{{Product1}},step-017.png
-18,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""x"": 411, ""y"": 464, ""text"": ""ADD TO CART"", ""tag"": ""button""}",,step-018.png
-19,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""x"": 670, ""y"": 464, ""text"": ""ADD TO CART"", ""tag"": ""button""}",,step-019.png
-20,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""x"": 892, ""y"": 495, ""text"": ""ADD TO CART"", ""tag"": ""button""}",,step-020.png
-21,"Click 413,451","{""primary"": ""#predictive-search-option-product-1 > div:nth-of-type(1) > div:nth-of-type(2) > a:nth-of-type(1)"", ""x"": 413, ""y"": 451, ""text"": """", ""tag"": ""a""}",,
-22,"Click 411,464","{""primary"": null, ""x"": 411, ""y"": 464, ""text"": null, ""tag"": null}",,
+18,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""tag"": ""button"", ""text"": ""ADD TO CART"", ""x"": 411, ""y"": 464}",,step-018.png
+19,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""tag"": ""button"", ""text"": ""ADD TO CART"", ""x"": 670, ""y"": 464}",,step-019.png
+20,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""tag"": ""button"", ""text"": ""ADD TO CART"", ""x"": 892, ""y"": 495}",,step-020.png
+21,"Click 413,451","{""primary"": ""#predictive-search-option-product-1 > div:nth-of-type(1) > div:nth-of-type(2) > a:nth-of-type(1)"", ""tag"": ""a"", ""text"": """", ""x"": 413, ""y"": 451}",,
+22,"Click 411,464","{""primary"": null, ""tag"": null, ""text"": null, ""x"": 411, ""y"": 464}",,
 23,"Click Apple Granny Smith Organic 1kg
 AUSTRALIA
 $12.99 EA $12.99 / kg
 ADD TO CART
-Apple","{""primary"": ""#MainProduct-template--19725411582011__main > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 476, ""y"": 464, ""text"": ""Apple Granny Smith Organic 1kg\nAUSTRALIA\n$12.99 EA $12.99 / kg\nADD TO CART\nApple"", ""tag"": ""div""}",,step-023.png
-24,Click Apple Granny Smith Organic,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(3) > h3:nth-of-type(1)"", ""x"": 712, ""y"": 458, ""text"": ""Apple Granny Smith Organic"", ""tag"": ""h3""}",,step-024.png
+Apple","{""primary"": ""#MainProduct-template--19725411582011__main > div:nth-of-type(1) > div:nth-of-type(2)"", ""tag"": ""div"", ""text"": ""Apple Granny Smith Organic 1kg\nAUSTRALIA\n$12.99 EA $12.99 / kg\nADD TO CART\nApple"", ""x"": 476, ""y"": 464}",,step-023.png
+24,Click Apple Granny Smith Organic,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(3) > h3:nth-of-type(1)"", ""tag"": ""h3"", ""text"": ""Apple Granny Smith Organic"", ""x"": 712, ""y"": 458}",,step-024.png
 25,"Click Apple Granny Smith Organic
 
-Crisp and tangy, our Apple Granny Smith Organic 1kg","{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(3)"", ""x"": 937, ""y"": 474, ""text"": ""Apple Granny Smith Organic\n\nCrisp and tangy, our Apple Granny Smith Organic 1kg "", ""tag"": ""div""}",,step-025.png
-26,Click ADD TO CART,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)"", ""x"": 678, ""y"": 338, ""text"": ""ADD TO CART"", ""tag"": ""div""}",,step-026.png
-27,"Click 675,370","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 675, ""y"": 370, ""text"": """", ""tag"": ""div""}",,step-027.png
-28,"Click 709,351","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 709, ""y"": 351, ""text"": """", ""tag"": ""div""}",,step-028.png
-29,"Click 701,349","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 701, ""y"": 349, ""text"": """", ""tag"": ""div""}",,step-029.png
-30,"Click 696,354","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 696, ""y"": 354, ""text"": """", ""tag"": ""div""}",,step-030.png
-31,Click ADD TO CART,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)"", ""x"": 709, ""y"": 333, ""text"": ""ADD TO CART"", ""tag"": ""div""}",,step-031.png
-32,Click $67.53,"{""primary"": ""#cart-icon-bubble > div:nth-of-type(1) > span:nth-of-type(2)"", ""x"": 957, ""y"": 63, ""text"": ""$67.53"", ""tag"": ""span""}",,step-032.png
-33,Click VIEW CART,"{""primary"": ""button[aria-label=\""View cart\""]"", ""x"": 829, ""y"": 589, ""text"": ""VIEW CART"", ""tag"": ""button""}",,
+Crisp and tangy, our Apple Granny Smith Organic 1kg","{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(3)"", ""tag"": ""div"", ""text"": ""Apple Granny Smith Organic\n\nCrisp and tangy, our Apple Granny Smith Organic 1kg "", ""x"": 937, ""y"": 474}",,step-025.png
+26,Click ADD TO CART,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)"", ""tag"": ""div"", ""text"": ""ADD TO CART"", ""x"": 678, ""y"": 338}",,step-026.png
+27,"Click 675,370","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""tag"": ""div"", ""text"": """", ""x"": 675, ""y"": 370}",,step-027.png
+28,"Click 709,351","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""tag"": ""div"", ""text"": """", ""x"": 709, ""y"": 351}",,step-028.png
+29,"Click 701,349","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""tag"": ""div"", ""text"": """", ""x"": 701, ""y"": 349}",,step-029.png
+30,"Click 696,354","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""tag"": ""div"", ""text"": """", ""x"": 696, ""y"": 354}",,step-030.png
+31,Click ADD TO CART,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)"", ""tag"": ""div"", ""text"": ""ADD TO CART"", ""x"": 709, ""y"": 333}",,step-031.png
+32,Click $67.53,"{""primary"": ""#cart-icon-bubble > div:nth-of-type(1) > span:nth-of-type(2)"", ""tag"": ""span"", ""text"": ""$67.53"", ""x"": 957, ""y"": 63}",,step-032.png
+33,Click VIEW CART,"{""primary"": ""button[aria-label=\""View cart\""]"", ""tag"": ""button"", ""text"": ""VIEW CART"", ""x"": 829, ""y"": 589}",,
