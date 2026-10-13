@@ -95,9 +95,14 @@ function SecureVariables({project}) {
   const sealingBlocked = !!encryption && !encryption.ready;
   const work=async(fn)=>{setBusy(true);try{const result=await fn();setNotice(result?.publish_message||'Saved. Persistent values are retained for subsequent executions.');setEdited({});await load();}catch(err){setNotice(err.message);if(/encryption|keyring|TF_VARIABLE_ENCRYPTION_KEYS/i.test(err.message||'')) checkEncryption();}finally{setBusy(false);}};
   return e('div',{className:'space-y-4'},
+    e(GuideSection,{id:'var-head',label:'Variables & parameters',
+      action:'Anything typed more than once belongs here as {{name}} instead of a literal.'},
+    e('div',{className:'space-y-4'},
     e('h2',{className:'font-bold text-indigo-300'},`${project.name} · Variables & parameters`),
     e('p',{className:'text-xs text-slate-400'},'Use {{name}} in steps. Values are saved only when you press Save. Encrypted values stay masked; the server needs a stable TF_VARIABLE_ENCRYPTION_KEYS key outside Git. Plaintext exists briefly in memory and in the target app during use.'),
-    e(EncryptionNotice,{status:encryption,onRecheck:checkEncryption,onRotate:rotate,busy:checking}),
+    e(EncryptionNotice,{status:encryption,onRecheck:checkEncryption,onRotate:rotate,busy:checking})),
+    e(GuideSection,{id:'var-add',label:'Add a variable or parameter',
+      action:'Name it, paste the value, tick ENCRYPT AT REST for a password or token, then SAVE INPUT.'},
     e('form',{className:'bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2',onSubmit:ev=>{ev.preventDefault();work(async()=>{const result=await API.post('/api/variables',{project_id:project.id,name,value,is_secret:secret&&sealingReady,category});setName('');setValue('');return result;});}},
       e('input',{className:fieldClass,required:true,'aria-label':'Variable name',placeholder:'Name, e.g. password or account',value:name,onChange:ev=>{setName(ev.target.value);setSecret(sealingReady && /password|secret|token/i.test(ev.target.value));}}),
       e('input',{className:fieldClass,'aria-label':'Variable value',type:secret?'password':'text',autoComplete:'off',placeholder:'Saved value',value,onChange:ev=>setValue(ev.target.value)}),
@@ -105,7 +110,10 @@ function SecureVariables({project}) {
       e('label',{className:`text-xs flex gap-2 ${sealingBlocked?'text-slate-500':''}`,title:sealingBlocked?`Unavailable until ${encryption.variable} is configured on this server`:''},
         e('input',{type:'checkbox',checked:secret,disabled:sealingBlocked,onChange:ev=>setSecret(ev.target.checked)}),
         sealingBlocked?'Encrypt at rest — unavailable until the server keyring is configured (see above)':'Encrypt at rest (password / token)'),
-      e('button',{className:'key-btn',disabled:busy},'SAVE INPUT')),
+      e('button',{className:'key-btn',disabled:busy},'SAVE INPUT'))),
+    e(GuideSection,{id:'var-rows',label:'Saved inputs',
+      action:'Edit a value and SAVE CHANGES, or DELETE it. Encrypted values stay masked until you replace them.'},
+    e('div',{className:'space-y-4'},
     notice && e('p',{role:'status',className:'text-xs text-amber-300'},notice),
     rows.map(row=>{const changes=edited[row.id]||{}; const sealed=row.is_secret||changes.is_secret; return e('div',{key:row.id,className:'bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-2'},
       e('strong',{className:'text-xs'},`{{${row.name}}} · ${row.category}${sealed?' · encrypted':''}`),
@@ -115,7 +123,7 @@ function SecureVariables({project}) {
         sealingBlocked?'Encrypt this saved value — unavailable until the server keyring is configured':'Encrypt this saved value'),
       row.is_secret && sealingBlocked && e('p',{className:'text-[10px] text-amber-400'},'This value was sealed with a keyring this server cannot load. Restore the original key to read or replace it.'),
       e('button',{className:'key-btn',disabled:busy||!Object.keys(changes).length,onClick:()=>work(()=>API.patch(`/api/variables/${row.id}`,changes))},'SAVE CHANGES'),
-      e('button',{className:'key-btn',disabled:busy,onClick:()=>{if(confirm(`Delete ${row.name}?`)) work(()=>API.del(`/api/variables/${row.id}`));}},'DELETE'));}));
+      e('button',{className:'key-btn',disabled:busy,onClick:()=>{if(confirm(`Delete ${row.name}?`)) work(()=>API.del(`/api/variables/${row.id}`));}},'DELETE'));})))));
 }
 
 function ExecutionInputs({recording,onClose,onRun}) {
@@ -245,6 +253,8 @@ function ExecutionPlan({project, onRun}) {
   const activeDefaults=defaults;
 
   return e('section',{className:'space-y-4'},
+    e(GuideSection,{id:'plan-head',label:'Execution plan · run recordings in order',
+      action:'Link recordings in the order they must run, then queue the whole thing as one batch.'},
     e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-2'},
       e('h2',{className:'font-bold text-indigo-300'},'Execution plan'),
       e('p',{className:'text-xs text-slate-400'},'Build an ordered run: pick repository recordings in the order they must execute, review the variables/parameters each one needs, then queue one batch. Login and logout share the browser session; a failed recording stops the plan. Selecting a recording costs no request — the whole catalog is one cached read.'),
@@ -252,7 +262,9 @@ function ExecutionPlan({project, onRun}) {
         e('input',{className:'flex-1 min-w-[12rem] bg-slate-800 p-2 rounded','aria-label':'Search recordings',placeholder:'Search recordings by name, project or tag…',value:search,onChange:ev=>setSearch(ev.target.value)}),
         e('button',{className:'key-btn',onClick:loadCatalog},'REFRESH CATALOG'),
         catalog && e('span',{className:'text-slate-500'},`${recordings.length} recordings · catalog in ${catalogMs} ms · cached ${catalog.cache_seconds}s on the server`)),
-      error && e('p',{role:'alert',className:'text-xs text-red-300'},error))),
+      error && e('p',{role:'alert',className:'text-xs text-red-300'},error)))),
+    e(GuideSection,{id:'plan-build',label:'1 Link · 2 Order · run',
+      action:'Pick recordings on the left, reorder with UP/DOWN, then RUN ORDERED PLAN.'},
     e('div',{className:'grid gap-4 md:grid-cols-2'},
       e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2'},
         e('h3',{className:'text-sm font-bold text-indigo-300'},'1 · Link a recording'),
@@ -278,7 +290,9 @@ function ExecutionPlan({project, onRun}) {
           e('button',{className:'key-btn',disabled:busy||!plan.length,onClick:()=>work(async()=>{
             const result=await API.post('/api/runs/batch',{recording_ids:plan.map(entry=>entry.recording_id),name:'Execution plan',share_session:true,screenshots:'all',display_window:false,retry_transient:false});
             setBatch({id:result.batch_id,status:result.status}); setNotice('Ordered plan queued.');})},'RUN ORDERED PLAN'),
-          e('button',{className:'key-btn',onClick:()=>{setPlan([]);setActiveId('');setValues({});setBatch(null);}},'CLEAR PLAN'))),
+          e('button',{className:'key-btn',onClick:()=>{setPlan([]);setActiveId('');setValues({});setBatch(null);}},'CLEAR PLAN')))),
+    e(GuideSection,{id:'plan-inputs',label:'3 · Inputs for the selected recording',
+      action:'Fill in what this recording needs, then SAVE AS RECORDING DEFAULTS so the next run reuses it.'},
     active && e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-4 space-y-3'},
       e('h3',{className:'text-sm font-bold text-indigo-300'},`3 · Variables & parameters · ${active.name}`),
       e('p',{className:'text-xs text-slate-400'},`Loaded from the cached catalog in ${catalogMs} ms. Values here are the recording's saved defaults; edits can be saved back to this recording, and {{placeholders}} stay variables when the plan runs.`),
@@ -290,7 +304,7 @@ function ExecutionPlan({project, onRun}) {
         e('button',{className:'key-btn',disabled:busy,onClick:()=>work(async()=>{
           const result=await API.post(`/api/recordings/${active.id}/run`,{});
           if(result && result.run_id && onRun) onRun(result.run_id); else setNotice('Run started — open the Runs tab.');})},'RUN THIS RECORDING'),
-        e('button',{className:'key-btn',onClick:()=>{setActiveId('');setValues({});}},'CLOSE INPUTS'))),
+        e('button',{className:'key-btn',onClick:()=>{setActiveId('');setValues({});}},'CLOSE INPUTS')))),
     batch && e('div',{className:'bg-slate-900 border border-slate-700 rounded-xl p-3 space-y-2'},
       e('p',{role:'status',className:'text-xs'},`Plan execution: ${batch.status} · ${batch.progress_pct||0}% · ${batch.passed||0} passed / ${batch.total||0}`),
       ['queued','running'].includes(batch.status) ? e('button',{className:'key-btn',onClick:()=>work(()=>API.post(`/api/runs/batch/${batch.id}/cancel`,{}))},'CANCEL EXECUTION') : e(ReportLinks,{kind:'batch',id:batch.id})),
