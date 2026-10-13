@@ -1,0 +1,14 @@
+{
+  "created_at": "2026-10-13T12:12:53Z",
+  "execution_plan": null,
+  "exports_pending": false,
+  "id": "2a84c45b-1550-40de-92ab-8e237d462c1f",
+  "input_defaults": {},
+  "name": "Instacart",
+  "parent_id": null,
+  "project_id": "qa-sample-app",
+  "start_url": "https://www.instacart.com/",
+  "status": "active",
+  "steps": [],
+  "tags": ""
+}
