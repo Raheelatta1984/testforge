@@ -1,5 +1,13 @@
 // Portable sequential TestForge runtime. No eval, shell commands, or fixed sleeps.
 const { expect } = require('@playwright/test');
+const { DesktopSimulator, DESKTOP_ACTIONS } = require('./testforge_desktop.js');
+const { MobileSimulator, MOBILE_ACTIONS } = require('./testforge_mobile.js');
+function speedProfile(factor) {
+  let f = Number(factor === undefined || factor === null || factor === '' ? (process.env.TF_EXECUTION_SPEED || 1) : factor);
+  if (!Number.isFinite(f) || f < 0.25 || f > 3) throw new Error('execution speed must be between 0.25 and 3.0');
+  return {factor: f, timeoutScale: Math.min(2.5, Math.max(0.34, 1 / f)),
+    paceMs: f >= 1 ? 0 : Math.round((1 - f) * 1000), typeDelayMs: f >= 1 ? 0 : Math.round((1 - f) * 80)};
+}
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -32,10 +40,63 @@ function locator(page, o) {
     default: return root.locator(o.primary);
   }
 }
+async function tableCell(page, o, timeout) {
+  const table = locator(page, o);
+  let columnIndex;
+  if (/^-?\d+$/.test(String(o.column))) columnIndex = Number(o.column);
+  else {
+    const headers = table.locator('th'); columnIndex = -1;
+    for (let i = 0; i < await headers.count(); i++) {
+      if ((await headers.nth(i).innerText({timeout})).trim().toLowerCase() === String(o.column).trim().toLowerCase()) { columnIndex = i; break; }
+    }
+    if (columnIndex < 0) throw new Error(`assert_table_cell: expected header ${JSON.stringify(o.column)}, actual headers available in the scoped table`);
+  }
+  const row = (/^-?\d+$/.test(String(o.row ?? ''))) ? table.locator('tr').nth(Number(o.row)) : table.locator('tr').filter({hasText: String(o.row_text || '')}).first();
+  return (await row.locator('td').nth(columnIndex).innerText({timeout})).trim();
+}
+async function assertWeb(action, l, page, value, timeout) {
+  try {
+    switch (action) {
+      case 'assert_text': await expect(l).toHaveText(value, {timeout}); return;
+      case 'assert_contains': await expect(l).toContainText(value, {timeout}); return;
+      case 'assert_value': await expect(l).toHaveValue(value, {timeout}); return;
+      case 'assert_count': await expect(l).toHaveCount(Number(value), {timeout}); return;
+      case 'assert_url': await expect(page).toHaveURL(value, {timeout}); return;
+      case 'assert_title': await expect(page).toHaveTitle(value, {timeout}); return;
+      case 'assert_visible': await expect(l).toBeVisible({timeout}); return;
+      case 'assert_hidden': await expect(l).toBeHidden({timeout}); return;
+      case 'assert_enabled': await expect(l).toBeEnabled({timeout}); return;
+      case 'assert_disabled': await expect(l).toBeDisabled({timeout}); return;
+      case 'assert_checked': await expect(l).toBeChecked({timeout}); return;
+      case 'assert_unchecked': await expect(l).not.toBeChecked({timeout}); return;
+    }
+  } catch (error) {
+    let actual = null;
+    try {
+      if (action === 'assert_url') actual = page.url();
+      else if (action === 'assert_title') actual = await page.title();
+      else if (action === 'assert_count') actual = await l.count();
+      else if (action === 'assert_value') actual = await l.inputValue({timeout: 500});
+      else if (['assert_visible', 'assert_hidden'].includes(action)) actual = await l.isVisible() ? 'visible' : 'hidden';
+      else if (['assert_checked', 'assert_unchecked'].includes(action)) actual = await l.isChecked() ? 'checked' : 'unchecked';
+      else if (['assert_enabled', 'assert_disabled'].includes(action)) actual = await l.isEnabled() ? 'enabled' : 'disabled';
+      else actual = (await l.innerText({timeout: 500})).trim();
+    } catch (_) { actual = null; }
+    const expected = ['assert_visible', 'assert_enabled', 'assert_checked'].includes(action) ? action.slice(7)
+      : ({assert_hidden: 'hidden', assert_disabled: 'disabled', assert_unchecked: 'unchecked'}[action] || value);
+    throw new Error(`${action}: expected ${JSON.stringify(expected)}, actual ${JSON.stringify(actual)}`);
+  }
+}
 async function replay(initialPage, steps, outputDir, vars = {}, state = null) {
   const pages = state?.pages || new Map([['main', initialPage]]), routes = state?.routes || [];
   let page = state?.page || initialPage, count = 0;
   if(state){state.pages=pages;state.routes=routes;}
+  const speed = speedProfile(state?.speedFactor);
+  if(state && !state.desktop) state.desktop = new DesktopSimulator();
+  if(state && !state.mobile) state.mobile = new MobileSimulator(state.mobilePlatform || 'android');
+  const desktop = state?.desktop || new DesktopSimulator();
+  const mobile = state?.mobile || new MobileSimulator();
+  const pace = async () => { if (speed.paceMs > 0) await new Promise(done => setTimeout(done, speed.paceMs)); };
   fs.mkdirSync(outputDir, {recursive:true});
   try {
     for (const step of steps) {
@@ -45,9 +106,12 @@ async function replay(initialPage, steps, outputDir, vars = {}, state = null) {
         if (++count > 2000) throw new Error('Expanded action limit exceeded');
         const action = step.action;
         const value = ['capture_text','save_variable','switch_page','close_page'].includes(action) ? step.value : resolve(step.value || '', vars);
-        const o = resolve(step.selector || {}, vars), timeout = o.timeout_ms || 3000;
+        const o = resolve(step.selector || {}, vars);
+        const timeout = Math.max(1, Math.min(30000, Math.round((o.timeout_ms || 3000) * speed.timeoutScale)));
         if (o.page) { if (!pages.has(o.page)) throw new Error('Unknown page'); page = pages.get(o.page); }
         const l = o.primary ? locator(page,o) : null;
+        if (DESKTOP_ACTIONS.has(action)) { desktop.perform({action, value, selector: o}, vars); await pace(); continue; }
+        if (MOBILE_ACTIONS.has(action)) { mobile.perform({action, value, selector: o}, vars); await pace(); continue; }
         switch (action) {
           case 'navigate': await page.goto(url(value),{waitUntil:'domcontentloaded',timeout:o.timeout_ms || 20000}); break;
           // A step may target an element, a recorded point (x/y) or the focused
@@ -73,25 +137,37 @@ async function replay(initialPage, steps, outputDir, vars = {}, state = null) {
             else throw new Error('Hover requires a locator or recorded coordinates');
             break;
           case 'fill': if (l) await l.fill(value,{timeout}); else await page.keyboard.insertText(value); break;
-          case 'type': if (l) await l.pressSequentially(value,{delay:0,timeout}); else await page.keyboard.type(value,{delay:0}); break;
+          case 'type': if (l) await l.pressSequentially(value,{delay:speed.typeDelayMs,timeout}); else await page.keyboard.type(value,{delay:speed.typeDelayMs}); break;
           case 'press': if (l) await l.press(value,{timeout}); else await page.keyboard.press(value); break;
           case 'check': case 'uncheck': await l[action]({timeout}); break;
           case 'select_option': await l.selectOption(o.by === 'label' ? {label:value} : {value},{timeout}); break;
           case 'drag_to': await l.dragTo(locator(page,o.target),{timeout}); break;
           case 'scroll': await l.scrollIntoViewIfNeeded({timeout}); await l.evaluate((el,y)=>el.scrollBy(0,y),Number(value)); break;
           case 'wait_visible': case 'wait_hidden': await l.waitFor({state:action.slice(5),timeout}); break;
-          case 'assert_text': await expect(l).toHaveText(value,{timeout}); break;
-          case 'assert_contains': await expect(l).toContainText(value,{timeout}); break;
-          case 'assert_value': await expect(l).toHaveValue(value,{timeout}); break;
-          case 'assert_count': await expect(l).toHaveCount(Number(value),{timeout}); break;
-          case 'assert_url': await expect(page).toHaveURL(value,{timeout}); break;
-          case 'assert_title': await expect(page).toHaveTitle(value,{timeout}); break;
-          case 'assert_visible': await expect(l).toBeVisible({timeout}); break;
-          case 'assert_hidden': await expect(l).toBeHidden({timeout}); break;
-          case 'assert_enabled': await expect(l).toBeEnabled({timeout}); break;
-          case 'assert_disabled': await expect(l).toBeDisabled({timeout}); break;
-          case 'assert_checked': await expect(l).toBeChecked({timeout}); break;
-          case 'assert_unchecked': await expect(l).not.toBeChecked({timeout}); break;
+          case 'assert_text': case 'assert_contains': case 'assert_value': case 'assert_count':
+          case 'assert_url': case 'assert_title': case 'assert_visible': case 'assert_hidden':
+          case 'assert_enabled': case 'assert_disabled': case 'assert_checked': case 'assert_unchecked':
+            await assertWeb(action, l, page, value, timeout); break;
+          case 'select_suggestion': case 'pick_suggestion': {
+            const suggestion = String(o.suggestion || value);
+            await l.fill(String(o.type_text ?? value), {timeout});
+            let root = page; for (const frame of o.frames || []) root = root.frameLocator(frame);
+            const candidates = [root.getByRole('option', {name: suggestion, exact: false}),
+              root.locator('[role="option"], [role="listbox"] *').filter({hasText: suggestion}),
+              root.locator('li, div, span').filter({hasText: suggestion})];
+            let picked = false;
+            for (const candidate of candidates) {
+              try { const first = candidate.first(); await first.waitFor({state: 'visible', timeout: Math.min(timeout, 3000)}); await first.click({timeout}); picked = true; break; } catch (_) {}
+            }
+            if (!picked) throw new Error(`${action}: expected ${JSON.stringify(suggestion)}, actual "no matching suggestion appeared"`);
+            break;
+          }
+          case 'table_lookup': vars[value] = await tableCell(page, o, timeout); break;
+          case 'assert_table_cell': {
+            const actual = await tableCell(page, o, timeout);
+            if (actual !== value) throw new Error(`assert_table_cell: expected ${JSON.stringify(value)}, actual ${JSON.stringify(actual)}`);
+            break;
+          }
           case 'save_variable': vars[value] = await l.inputValue({timeout}); break;
           case 'capture_text': vars[value] = await l.innerText({timeout}); break;
           case 'new_page': case 'open_popup': {
@@ -142,6 +218,7 @@ async function replay(initialPage, steps, outputDir, vars = {}, state = null) {
           case 'clear_routes': for(const [p,pattern,handler] of routes) if(!p.isClosed()) await p.unroute(pattern,handler); routes.length=0; break;
           default: throw new Error('Unsupported action: '+action);
         }
+        await pace();
       }
     }
   } finally {

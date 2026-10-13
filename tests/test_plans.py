@@ -122,12 +122,28 @@ class PlanTests(unittest.TestCase):
 
     def test_UT_PLAN_07_domain_packs_are_synthetic_bounded_plans(self):
         with TestClient(app) as client:
-            packs=client.get('/api/imports/packs').json(); self.assertEqual(len(packs),5)
+            packs=client.get('/api/imports/packs').json()
+            # Five original synthetic packs plus seven ERP/CRM packs (Oracle,
+            # SAP Fiori, JD Edwards, Dynamics F&O, Dynamics BC, Odoo,
+            # Salesforce) — nothing pre-existing was removed.
+            self.assertEqual(len(packs),12)
+            ids={pack['id'] for pack in packs}
+            self.assertTrue({'commerce','banking','insurance','hrms','travel'} <= ids)
+            self.assertTrue({'oracle_web','sap_fiori','jd_edwards','ms_dynamics_fo','ms_dynamics_bc','odoo_erp','salesforce_crm'} <= ids)
             for pack in packs:
                 result=client.get('/api/imports/packs/'+pack['id']).json()
                 plan=normalize_plan(result['execution_plan'])
                 self.assertEqual(len(plan['dataset']),2)
                 self.assertTrue(plan['teardown'])
+                if pack['id'] in {'oracle_web','sap_fiori','jd_edwards','ms_dynamics_fo','ms_dynamics_bc','odoo_erp','salesforce_crm'}:
+                    self.assertIn('/erp-crm-demo.html',result['demo_url'])
+                    self.assertTrue(result['execution_plan']['flows'])
+                    self.assertTrue(result['execution_plan']['setup'])
+                    variables=result['execution_plan']['variables']
+                    self.assertEqual(variables['erp_user'],{'env':'TF_SECRET_ERP_USERNAME'})
+                    self.assertEqual(variables['erp_password'],{'env':'TF_SECRET_ERP_PASSWORD'})
+                else:
+                    self.assertIn('/domain-demo.html',result['demo_url'])
             self.assertEqual(client.get('/api/imports/packs/unknown').status_code,404)
 
     def test_UT_PLAN_08_concurrent_draft_is_refused_and_cancellable(self):

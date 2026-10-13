@@ -15,18 +15,21 @@ SKU availability move under you.
 
 ## 0. Read this before you touch anything
 
-### 0.1 The application has no authentication. None.
+### 0.1 The application has an optional single-operator access gate — configure it
 
-The deployment configs in this repository pass an `API_Key` environment variable to the service.
-**No line of application code reads it.** A grep of the whole package finds only outbound auth
-(the GitHub REST client sending its own token) and nothing inbound:
+The application ships an optional access gate (`app/access_control.py`). Set
+`TF_ACCESS_TOKEN` (at least 32 characters) in the service environment and every
+`/api/` and `/ws/` route requires either an `Authorization: Bearer <token>` header or the
+signed `tf_session` cookie issued by `POST /api/auth/login` (12-hour, HttpOnly, SameSite
+strict). The dashboard header reports **ACCESS TOKEN NOT CONFIGURED** and
+`GET /api/auth/status` reports `"mode": "unprotected"` until then.
 
-```bash
-grep -rn "API_Key\|HTTPBearer\|Authorization" app/*.py
-# app/github_api.py:424:  request.add_header("Authorization", f"Bearer {self.token}")   <- outbound
-```
+This is **not** multi-tenant RBAC: there are no accounts, no identity provider and no
+per-user permissions. It is deliberately one shared operator token. The deployment configs
+in this repository also pass an `API_Key` environment variable; no application code reads
+that name — only `TF_ACCESS_TOKEN` arms the gate.
 
-There is no middleware, no dependency, no login. Every endpoint listed in `app/main.py` —
+An **unconfigured** deployment keeps the legacy behaviour: every endpoint —
 `POST /api/projects`, `POST /api/runs`, `POST /api/recordings/{id}/session`,
 `POST /api/library/publish`, `POST /api/ai/rephrase`, `GET /api/diagnostics` — is reachable by
 anyone who can reach the port. That is survivable on a throwaway sandbox with no data and no
@@ -37,11 +40,12 @@ The relevant capability: this service drives a headless Chromium on its own host
 batch runs, and — if a `TF_GITHUB_TOKEN` is present — write commits to your repository through
 `POST /api/library/publish`.
 
-> **Rule for the rest of this document:** the deployment is only allowed to listen on a loopback
-> interface. Section 6 enforces that with a reverse proxy and an IP allow-list. Do not "just open
-> 80/443 to test it".
+> **Rule for the rest of this document:** set `TF_ACCESS_TOKEN` (for example,
+> `openssl rand -hex 32`) in the service environment **and** only listen on a loopback
+> interface. Section 6 enforces that with a reverse proxy and an IP allow-list. Do not "just
+> open 80/443 to test it".
 
-If you need real authentication before a fix lands in the app, put it at the proxy (OIDC via
+If you need real per-user authentication, put it at the proxy (OIDC via
 Entra ID application proxy, or `auth_request` to an OAuth2 proxy sidecar) and treat the container
 port as a trusted network. Section 11 has the prompt for it.
 
@@ -881,9 +885,10 @@ a deploy is a *service* event (runs are cancelled, §6.5) and never a *data* eve
 ## 11. AI prompt library
 
 The value of these is that the constraints are already inside them. A prompt that says "deploy this
-FastAPI app to Azure" gets you a blog post; one that says "the app has no authentication, one worker
-is a correctness requirement, and the schema self-heals at boot" gets you working config. Paste one,
-then paste the repo's `Dockerfile`, `azure-pipelines.yml` and the output of `grep -n "TF_" app/config.py`.
+FastAPI app to Azure" gets you a blog post; one that says "the app has an optional TF_ACCESS_TOKEN
+gate (not RBAC), one worker is a correctness requirement, and the schema self-heals at boot" gets
+you working config. Paste one, then paste the repo's `Dockerfile`, `azure-pipelines.yml` and the
+output of `grep -n "TF_" app/config.py`.
 
 **P1 — Provisioning**
 > Produce an idempotent Azure CLI (or Bicep) script for: resource group `rg-testforge-eas` in
@@ -929,9 +934,10 @@ then paste the repo's `Dockerfile`, `azure-pipelines.yml` and the output of `gre
 > needed on each side and why read-only fails.
 
 **P5 — Auth at the proxy (the real gap)**
-> This application has **no authentication of any kind**: the `API_Key` env var in its deployment
-> config is read by no code at all, and every endpoint including `POST /api/runs`,
-> `POST /api/library/publish` and `GET /api/diagnostics` is open. It can launch Chromium on its host
+> This application has an optional single-operator gate: `TF_ACCESS_TOKEN` (>= 32 chars) arms a
+> bearer/cookie check on all `/api/` and `/ws/` routes, but there is no per-user RBAC, and an
+> unconfigured deployment leaves every endpoint including `POST /api/runs`,
+> `POST /api/library/publish` and `GET /api/diagnostics` open. It can launch Chromium on its host
 > and push to a GitHub repo. Without modifying the app, design Entra ID Application Proxy (or an
 > OAuth2-proxy sidecar in front of Caddy) so that: only allow-listed principals reach it; the three
 > WebSocket routes (`/ws/record/{rid}`, `/ws/runs/{id}`, `/ws/batches/{id}`) still stream without

@@ -249,6 +249,20 @@ function ExecutionPlan({project, onRun}) {
   const [catalog,setCatalog]=useState(null), [catalogMs,setCatalogMs]=useState(null), [error,setError]=useState('');
   const [plan,setPlan]=useState([]), [activeId,setActiveId]=useState(''), [search,setSearch]=useState('');
   const [values,setValues]=useState({}), [notice,setNotice]=useState(''), [busy,setBusy]=useState(false), [batch,setBatch]=useState(null);
+  const [datasetRows,setDatasetRows]=useState([]), [datasetNote,setDatasetNote]=useState('');
+  const uploadDataset=async(file)=>{
+    if(!file) return;
+    try {
+      const parsed=await API.post('/api/plans/dataset/parse',{filename:file.name,content:await file.text()});
+      setDatasetRows(parsed.dataset); setDatasetNote(parsed.rows+' dataset row(s) loaded. Pick a row to load it as inputs for the selected recording, edit any cell to override it, then SAVE AS RECORDING DEFAULTS.');
+    } catch(err) { setDatasetNote(err.message); }
+  };
+  const useDatasetRow=(row)=>{
+    const scalars={};
+    Object.entries(row||{}).forEach(([key,value])=>{ scalars[key]=(value && typeof value==='object' && value.env) ? 'env:'+value.env : String(value); });
+    setValues(prev=>({...prev,...scalars}));
+    setDatasetNote('Row loaded into the inputs below. Secret references stay env:TF_SECRET_* and are resolved from the environment at run time.');
+  };
   const loadCatalog=async()=>{
     const started=performance.now();
     try { const data=await API.get('/api/plans/catalog'); setCatalog(data); setCatalogMs(Math.round(performance.now()-started)); setError(''); }
@@ -291,6 +305,23 @@ function ExecutionPlan({project, onRun}) {
         e('input',{className:'flex-1 min-w-[12rem] bg-slate-800 p-2 rounded','aria-label':'Search recordings',placeholder:'Search recordings by name, project or tag…',value:search,onChange:ev=>setSearch(ev.target.value)}),
         e('button',{className:'key-btn',onClick:loadCatalog},'REFRESH CATALOG'),
         catalog && e('span',{className:'text-slate-500'},`${recordings.length} recordings · catalog in ${catalogMs} ms · cached ${catalog.cache_seconds}s on the server`)),
+      typeof ExecutionSpeedControl==='function' && e(ExecutionSpeedControl,null),
+      e('div',{className:'border border-slate-700 bg-slate-950 p-3 rounded space-y-2'},
+        e('p',{className:'text-xs font-bold text-indigo-300'},'DATASET UPLOAD & ROW OVERRIDES'),
+        e('p',{className:'text-[11px] text-slate-400'},'Upload a CSV/JSON dataset, override any cell, then load a row as the selected recording inputs. env:TF_SECRET_* cells stay secret references. Full per-row datasets for plan recordings live in Upload Test Scripts → Execution Plan options.'),
+        e('label',{className:'key-btn cursor-pointer inline-block'},'UPLOAD CSV/JSON DATASET',
+          e('input',{type:'file',accept:'.csv,.json,text/csv,application/json',className:'hidden',onChange:ev=>{uploadDataset(ev.target.files && ev.target.files[0]); ev.target.value='';}})),
+        datasetNote && e('p',{role:'status',className:'text-[11px] text-emerald-300'},datasetNote),
+        datasetRows.length>0 && e('div',{className:'overflow-x-auto border border-slate-800 rounded'},
+          e('table',{className:'text-[10px]'},
+            e('thead',null,e('tr',null,e('th',{className:'p-1 text-left text-slate-400'},'Row'),
+              [...new Set(datasetRows.flatMap(row=>Object.keys(row||{})))].map(col=>e('th',{key:col,className:'p-1 text-left text-slate-400'},col)),e('th',{className:'p-1'},''))),
+            e('tbody',null,datasetRows.map((row,rowIndex)=>e('tr',{key:rowIndex},
+              e('td',{className:'p-1 text-slate-500'},rowIndex+1),
+              [...new Set(datasetRows.flatMap(r=>Object.keys(r||{})))].map(col=>e('td',{key:col,className:'p-1'},
+                e('input',{value:(row[col] && typeof row[col]==='object' && row[col].env) ? 'env:'+row[col].env : (row[col]==null?'':String(row[col])),'aria-label':'Dataset row '+(rowIndex+1)+' '+col,className:'bg-slate-900 border border-slate-700 rounded px-1 py-0.5 w-32',
+                  onChange:ev=>{const text=ev.target.value; const match=/^env:(TF_SECRET_[A-Z0-9_]{1,64})$/.exec(text.trim()); setDatasetRows(rows=>rows.map((r,i)=>i===rowIndex?{...r,[col]:match?{env:match[1]}:text}:r));}}))),
+              e('td',{className:'p-1'},e('button',{type:'button',className:'key-btn',disabled:!active,onClick:()=>useDatasetRow(row)},'USE ROW')))))))),
       error && e('p',{role:'alert',className:'text-xs text-red-300'},error)))),
     e(GuideSection,{id:'plan-build',label:'1 Link · 2 Order · run',
       action:'Pick recordings on the left, reorder with UP/DOWN, then RUN ORDERED PLAN.'},
@@ -317,7 +348,7 @@ function ExecutionPlan({project, onRun}) {
           e('button',{className:'key-btn',onClick:()=>setPlan(plan.filter((_,i)=>i!==index))},'REMOVE'))))),
         e('div',{className:'flex flex-wrap gap-2'},
           e('button',{className:'key-btn',disabled:busy||!plan.length,onClick:()=>work(async()=>{
-            const result=await API.post('/api/runs/batch',{recording_ids:plan.map(entry=>entry.recording_id),name:'Execution plan',share_session:true,screenshots:'all',display_window:false,retry_transient:false});
+            const result=await API.post('/api/runs/batch',{recording_ids:plan.map(entry=>entry.recording_id),name:'Execution plan',share_session:true,screenshots:'all',display_window:false,retry_transient:false,execution_speed:window.TESTFORGE_SPEED_FACTOR||1});
             setBatch({id:result.batch_id,status:result.status}); setNotice('Ordered plan queued.');})},'RUN ORDERED PLAN'),
           e('button',{className:'key-btn',onClick:()=>{setPlan([]);setActiveId('');setValues({});setBatch(null);}},'CLEAR PLAN')))),
     e(GuideSection,{id:'plan-inputs',label:'3 · Inputs for the selected recording',

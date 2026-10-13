@@ -1182,6 +1182,11 @@ async def queue_run(body: dict):
     # The Runs tab toggle controls live frames only; the replay and saved step
     # evidence are identical. An active single run can change this setting later.
     display_window = True if body.get("display_window") is None else bool(body.get("display_window"))
+    from app.execution_speed import normalize_speed
+    try:
+        execution_speed = normalize_speed(body.get("execution_speed", 1.0))
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     # Fast check
     rec = library_store.get_recording(target_id)
     if rec is None:
@@ -1247,6 +1252,7 @@ async def queue_run(body: dict):
                 display_window=display_window,
                 window_enabled=lambda: RUN_WINDOWS.get(rid, display_window),
                 viewer_count=viewer_count, screenshots=screenshots,
+                execution_speed=execution_speed,
             )
         except Exception as exc:
             from datetime import datetime
@@ -1273,6 +1279,7 @@ async def queue_run(body: dict):
         "deduplicated": False,
         "message": "Execution queue started immediately",
         "display_window": display_window,
+        "execution_speed": execution_speed,
     }
 
 
@@ -1515,6 +1522,12 @@ async def start_batch(body: dict | None = None):
             detail=f"screenshots must be one of {', '.join(batch_runner.SCREENSHOT_MODES)}",
         )
     display_window = bool(body.get("display_window"))
+    from app.execution_speed import normalize_speed
+    try:
+        execution_speed = normalize_speed(body.get("execution_speed", 1.0))
+    except ValueError as exc:
+        guardrails.batch_budget.release()
+        raise HTTPException(422, str(exc)) from exc
     share_session = (guardrails.BATCH_SHARE_SESSION
                      if body.get("share_session") is None else bool(body.get("share_session")))
     retry_transient = (guardrails.BATCH_RETRY_TRANSIENT
@@ -1529,6 +1542,7 @@ async def start_batch(body: dict | None = None):
             batch = Batch(name=name, status="queued", total=len(plan),
                           options={"screenshots": screenshots, "share_session": share_session,
                                    "retry_transient": retry_transient, "display_window": display_window,
+                                   "execution_speed": execution_speed,
                                    "selected": len(selected), "unknown": unknown[:20], "scenario": scenario_meta, "ordered": bool(scenario_meta)})
             db.add(batch)
             db.commit()
@@ -1565,7 +1579,7 @@ async def start_batch(body: dict | None = None):
                     batch_id, on_event,
                     display_window=display_window, viewer_count=viewer_count,
                     screenshots=screenshots, share_session=share_session,
-                    retry_transient=retry_transient,
+                    retry_transient=retry_transient, execution_speed=execution_speed,
                 )
             except Exception as exc:
                 from datetime import datetime
@@ -2370,6 +2384,8 @@ from app.scenario_routes import router as scenario_router
 app.include_router(scenario_router)
 from app.report_routes import router as report_router
 app.include_router(report_router)
+from app.roadmap_routes import router as roadmap_router
+app.include_router(roadmap_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

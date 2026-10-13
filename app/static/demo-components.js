@@ -19,6 +19,13 @@ const DEMO_PACK_BLURB = {
   insurance: 'Applicant age → quote. Negative row rejects an under-18 applicant.',
   hrms: 'Leave days → remaining balance. Negative row trips insufficient leave.',
   travel: 'Seats requested → booking total. Negative row runs out of seats.',
+  oracle_web: 'Purchase order lookup inside nested iframes with an LOV dialog. Negative row finds no record.',
+  sap_fiori: 'Sales order lookup with data-sap-ui-id locators, busy indicator and ARIA grid. Negative row finds no record.',
+  jd_edwards: 'Fast-path P0411 → order/batch status in the grid. Negative row finds no record.',
+  ms_dynamics_fo: 'Dynamics 365 F&O sales order confirmation. Negative row finds no record.',
+  ms_dynamics_bc: 'Business Central sales order posting. Negative row finds no record.',
+  odoo_erp: 'Many2one partner pick (wait-aware suggestion) → Draft to Confirmed. Negative row finds no record.',
+  salesforce_crm: 'Lightning opportunity save with toast assertion. Negative row finds no record.',
 };
 
 function DemoStep({ index, title, children }) {
@@ -135,7 +142,7 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
   const replay = async (recording) => {
     setBusy(recording.id); setError('');
     try {
-      const result = await API.post('/api/runs', { target_id: recording.id, display_window: liveWindow !== false });
+      const result = await API.post('/api/runs', { target_id: recording.id, display_window: liveWindow !== false, execution_speed: window.TESTFORGE_SPEED_FACTOR || 1 });
       onRun(result.run_id);
     } catch (err) { setError(err.message); }
     finally { setBusy(''); }
@@ -245,7 +252,7 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
         }, e('option', { value: '' }, 'Choose an example…'),
            packs.map(p => e('option', { key: p.id, value: p.id }, p.name)))),
       pack && e('p', { className: 'text-xs text-slate-400' }, DEMO_PACK_BLURB[pack] || ''),
-      pack && e(DemoFrame, { src: `/domain-demo.html?pack=${encodeURIComponent(pack)}`, title: `Domain fixture ${pack}`, height: 340 }),
+      pack && e(DemoFrame, { src: `${packDetail && packDetail.demo_url ? new URL(packDetail.demo_url, location.origin).pathname : '/domain-demo.html'}?pack=${encodeURIComponent(pack)}`, title: `Domain fixture ${pack}`, height: 340 }),
       dataset.length > 0 && e('div', { className: 'space-y-1' },
         e('p', { className: 'text-xs font-bold text-slate-300' }, 'Dataset rows this example asserts'),
         e('div', { className: 'overflow-x-auto border border-slate-800 rounded-lg' },
@@ -253,10 +260,21 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
             e('thead', {}, e('tr', { className: 'bg-slate-950 text-slate-400' },
               e('th', { className: 'text-left p-2' }, 'Input'), e('th', { className: 'text-left p-2' }, 'Expected result'))),
             e('tbody', {}, dataset.map((row, i) => e('tr', { key: i, className: 'border-t border-slate-800' },
-              e('td', { className: 'p-2 font-mono' }, row.amount),
+              e('td', { className: 'p-2 font-mono' }, row.amount !== undefined ? row.amount : row.input),
               e('td', { className: 'p-2' }, row.expected))))))),
       packDetail && e('p', { className: 'text-xs text-slate-400' },
         `To save this as a real test: Library tab → UPLOAD TEST SCRIPTS → “Or start with a synthetic domain pack” → ${packDetail.name}, then TEST BEFORE PUBLISHING and SAVE TO LIBRARY.`),
       packDetail && e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('library') }, 'OPEN LIBRARY TAB'),
-      packDetail && packDetail.notice && e('p', { className: 'text-[10px] text-amber-300' }, packDetail.notice))));
+      packDetail && packDetail.notice && e('p', { className: 'text-[10px] text-amber-300' }, packDetail.notice))),
+
+    e(GuideSection, { id: 'demo-erp-crm', label: 'ERP/CRM + desktop & mobile fixtures',
+      action: 'Open the deterministic ERP/CRM fixture or the Zebra handheld fixture. Enterprise packs sign in with TF_SECRET_* references only.' },
+    e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3' },
+      e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'Enterprise fixtures · /erp-crm-demo.html · /mobile-zebra-demo.html'),
+      e('p', { className: 'text-xs text-slate-400' },
+        'The ERP/CRM fixture is multi-tenant (demo/acme/globex) and models Oracle nested iframes and LOV dialogs, SAP Fiori data-sap-ui-id grids with a busy indicator, JD Edwards fast-path and batch status, Dynamics 365 F&O and Business Central forms, Odoo many2one suggestions with Draft to Confirmed status, and Salesforce Lightning toasts. Choose an enterprise pack in the domain selector above to preview it; the seven ERP/CRM packs appear there alongside the five synthetic domains. Windows desktop and mobile plans instead run against the in-process simulators in app/desktop_runner.py and app/mobile_runner.py, with the Zebra fixture mirroring the handheld state machine.'),
+      e('div', { className: 'flex flex-wrap gap-2' },
+        e('a', { href: '/erp-crm-demo.html', className: 'key-btn' }, 'OPEN ERP/CRM DEMO'),
+        e('a', { href: '/mobile-zebra-demo.html', className: 'key-btn' }, 'OPEN MOBILE/ZEBRA DEMO'),
+        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('future') }, 'OPEN SUPPORT MATRIX')))));
 }

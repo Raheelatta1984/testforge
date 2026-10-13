@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TestForge ERP/CRM deterministic demo</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:2rem;background:#0f172a;color:#e2e8f0}
+  main{max-width:56rem;margin:auto;background:#1e293b;padding:1.5rem;border-radius:1rem}
+  label{display:block;margin:.6rem 0 .2rem} input,select{padding:.5rem;width:100%;box-sizing:border-box}
+  button{padding:.55rem 1rem;margin:.6rem .3rem .6rem 0;cursor:pointer}
+  [role="dialog"]{border:1px solid #38bdf8;padding:1rem;margin:1rem 0;background:#082f49}
+  table{border-collapse:collapse;margin:1rem 0} th,td{border:1px solid #475569;padding:.35rem .7rem}
+  .suggestions div{border:1px solid #475569;padding:.4rem;cursor:pointer;background:#111827}
+  iframe{width:100%;height:34rem;background:#fff;border:1px solid #475569}
+  a{color:#7dd3fc} .stage{display:flex;gap:.5rem}.stage span{border:1px solid #475569;padding:.3rem .6rem}
+</style>
+</head>
+<body>
+<main id="root">
+  <h1 id="app-title">ERP/CRM demo</h1>
+  <p>Tenant: <span data-testid="tenant-name" id="tenant-name">demo</span>
+     <label>Tenant <select id="tenant-select" aria-label="Tenant">
+       <option>demo</option><option>acme</option><option>globex</option></select></label></p>
+  <div id="app"></div>
+  <nav id="index" hidden>
+    <p>Deterministic multi-tenant fixtures (no real enterprise system):</p>
+    <ul>
+      <li><a href="?pack=oracle_web">Oracle Fusion / EBS (web)</a></li>
+      <li><a href="?pack=sap_fiori">SAP Fiori / UI5</a></li>
+      <li><a href="?pack=jd_edwards">JD Edwards EnterpriseOne</a></li>
+      <li><a href="?pack=ms_dynamics_fo">Microsoft Dynamics 365 Finance &amp; Operations</a></li>
+      <li><a href="?pack=ms_dynamics_bc">Microsoft Dynamics 365 Business Central</a></li>
+      <li><a href="?pack=odoo_erp">Odoo ERP</a></li>
+      <li><a href="?pack=salesforce_crm">Salesforce CRM (Lightning)</a></li>
+    </ul>
+  </nav>
+</main>
+<script>
+(function(){
+  var params=new URLSearchParams(location.search);
+  var pack=params.get('pack')||''; var embed=params.get('embed')||'';
+  var tenant=params.get('tenant')||'demo';
+  document.getElementById('tenant-name').textContent=tenant;
+  document.getElementById('tenant-select').value=['demo','acme','globex'].indexOf(tenant)>=0?tenant:'demo';
+  document.getElementById('tenant-select').addEventListener('change',function(e){
+    document.getElementById('tenant-name').textContent=e.target.value;});
+  var RECORDS={
+    oracle_web:{'PO-1001':'Purchase order PO-1001 approved for AUD 250.00'},
+    sap_fiori:{'5001001':'Sales order 5001001 confirmed for AUD 480.00'},
+    jd_edwards:{'1001':'Batch 1001 status: Approved'},
+    ms_dynamics_fo:{'SO-1001':'Sales order SO-1001 confirmed in Dynamics 365 F&O'},
+    ms_dynamics_bc:{'BC-1001':'Sales order BC-1001 posted in Business Central'},
+    odoo_erp:{'Acme Pty Ltd':'Sales order SO-1001 confirmed for Acme Pty Ltd'},
+    salesforce_crm:{'OPP-1001':'Opportunity OPP-1001 saved at stage Qualification'}};
+  var CFG={
+    oracle_web:{title:'Oracle Fusion Procurement',user:'oracle-username',pass:'oracle-password',sign:'oracle-sign-in',shell:'oracle-shell',input:'oracle-order-number',label:'Purchase order number',submit:'oracle-submit',result:'oracle-result'},
+    sap_fiori:{title:'SAP Fiori Sales Orders',sap:true,shell:'sap-shell',result:'sap-result'},
+    jd_edwards:{title:'JD Edwards EnterpriseOne',user:'jde-username',sign:'jde-sign-in',shell:'jde-shell',input:'jde-order-number',label:'Order number',submit:'jde-find',result:'jde-batch-status'},
+    ms_dynamics_fo:{title:'Dynamics 365 Finance & Operations',user:'d365fo-username',sign:'d365fo-sign-in',shell:'d365fo-shell',input:'d365fo-sales-order',label:'Sales order',submit:'d365fo-submit',result:'d365fo-result'},
+    ms_dynamics_bc:{title:'Dynamics 365 Business Central',user:'bc-username',sign:'bc-sign-in',shell:'bc-shell',input:'bc-sales-order',label:'Sales order',submit:'bc-submit',result:'bc-result'},
+    odoo_erp:{title:'Odoo Sales',shell:'odoo-shell',result:'odoo-result'},
+    salesforce_crm:{title:'Salesforce Lightning Sales',user:'sf-username',sign:'sf-sign-in',shell:'sf-shell',input:'sf-opportunity',label:'Opportunity',submit:'sf-save',result:'sf-toast'}};
+  var app=document.getElementById('app');
+  function el(html){var d=document.createElement('div');d.innerHTML=html;return d;}
+  if(embed==='lines'){
+    app.appendChild(el('<table data-testid="oracle-lines-table" id="oracle-lines-table"><thead><tr><th>Line</th><th>Item</th><th>Amount</th></tr></thead><tbody><tr><td>1</td><td>Widget</td><td>AUD 250.00</td></tr></tbody></table>'));
+    return;}
+  if(pack==='oracle_web'&&embed!=='1'){
+    document.getElementById('app-title').textContent='Oracle Fusion / EBS (web)';
+    var frame=document.createElement('iframe');
+    frame.id='oracle-frame'; frame.title='Oracle application frame';
+    frame.src='?pack=oracle_web&embed=1&tenant='+encodeURIComponent(tenant);
+    app.appendChild(frame); return;}
+  var cfg=CFG[pack];
+  if(!cfg){document.getElementById('index').hidden=false;return;}
+  document.getElementById('app-title').textContent=cfg.title;
+  var userField, passField, inputField;
+  var login=el('<section data-testid="login-panel"><h2>Sign in</h2><p data-testid="login-error" id="login-error"></p></section>');
+  var userLabel=document.createElement('label'); userLabel.textContent='User name';
+  userField=document.createElement('input'); userField.setAttribute('name','username'); userField.setAttribute('aria-label','User name');
+  if(cfg.sap){userField.setAttribute('data-sap-ui-id','sapUsername');}
+  else if(pack==='odoo_erp'){userField.setAttribute('name','username');}
+  else{userField.setAttribute('data-testid',cfg.user);}
+  userLabel.appendChild(userField); login.appendChild(userLabel);
+  var passLabel=document.createElement('label'); passLabel.textContent='Password';
+  passField=document.createElement('input'); passField.type='password'; passField.setAttribute('name','password'); passField.setAttribute('aria-label','Password');
+  if(cfg.pass){passField.setAttribute('data-testid',cfg.pass);}
+  passLabel.appendChild(passField); login.appendChild(passLabel);
+  var sign=document.createElement('button'); sign.textContent='Sign in';
+  if(cfg.sap){sign.setAttribute('data-sap-ui-id','sapSignIn');}else if(pack==='odoo_erp'){sign.setAttribute('data-testid','odoo-sign-in');}
+  else{sign.setAttribute('data-testid',cfg.sign);}
+  login.appendChild(sign); app.appendChild(login);
+  var shell=document.createElement('section'); shell.hidden=true; shell.setAttribute('data-testid',cfg.shell);
+  if(pack==='jd_edwards'){
+    shell.appendChild(el('<label>Fast path <input data-testid="jde-fastpath" aria-label="Fast path"></label><button data-testid="jde-fastpath-go">Go</button><h2 data-testid="jde-heading">Home</h2>'));
+  }
+  if(pack==='sap_fiori'){
+    shell.appendChild(el('<div data-testid="sap-busy" class="busy" hidden>SAP busy indicator active</div>'));
+  }
+  var inputLabel=document.createElement('label');
+  inputField=document.createElement('input');
+  if(cfg.sap){inputField.setAttribute('data-sap-ui-id','salesOrderInput'); inputLabel.textContent='Sales order';}
+  else if(pack==='odoo_erp'){inputField.setAttribute('name','partner_id'); inputField.setAttribute('aria-label','Customer'); inputLabel.textContent='Customer (many2one)';}
+  else{inputField.setAttribute('data-testid',cfg.input); inputLabel.textContent=cfg.label;}
+  inputLabel.appendChild(inputField); shell.appendChild(inputLabel);
+  if(pack==='odoo_erp'){
+    var sugg=document.createElement('div'); sugg.className='suggestions'; sugg.setAttribute('role','listbox'); sugg.setAttribute('data-testid','odoo-suggestions');
+    shell.appendChild(sugg);
+    shell.appendChild(el('<div class="stage" data-testid="odoo-statusbar"><span data-testid="odoo-status">Draft</span></div>'));
+    inputField.addEventListener('input',function(){
+      sugg.innerHTML='';
+      var text=inputField.value; if(!text){return;}
+      ['Acme Pty Ltd','Globex Pty Ltd'].filter(function(n){return n.toLowerCase().indexOf(text.toLowerCase())>=0;})
+        .concat([text]).forEach(function(name){
+          var opt=document.createElement('div'); opt.setAttribute('role','option'); opt.textContent=name;
+          opt.addEventListener('click',function(){inputField.value=name; sugg.innerHTML='';});
+          sugg.appendChild(opt);});
+    });
+  }
+  if(pack==='oracle_web'){
+    shell.appendChild(el('<button data-testid="oracle-lov-open">Open list of values</button><div role="dialog" data-testid="oracle-lov-dialog" hidden><p>Purchase orders</p><button data-lov="PO-1001">PO-1001</button><button data-lov="PO-1002">PO-1002</button><button data-testid="oracle-lov-close">Close</button></div>'));
+    var lines=document.createElement('iframe'); lines.id='oracle-lines-frame'; lines.title='Order lines frame';
+    lines.src='?pack=oracle_web&embed=lines'; shell.appendChild(lines);
+  }
+  if(pack==='sap_fiori'){
+    shell.appendChild(el('<table data-testid="sap-grid" role="grid" aria-label="Sales orders"><thead><tr><th>Order</th><th>Status</th></tr></thead><tbody><tr><td>5001001</td><td>Confirmed</td></tr></tbody></table>'));
+  }
+  if(pack==='jd_edwards'){
+    shell.appendChild(el('<table data-testid="jde-grid" role="grid" aria-label="Batch grid"><thead><tr><th>Batch</th><th>Status</th></tr></thead><tbody><tr><td>1001</td><td>Approved</td></tr></tbody></table>'));
+  }
+  if(pack==='salesforce_crm'){
+    shell.appendChild(el('<lightning-record-form data-aura-rendered-by="sf-form"><div class="stage" data-testid="sf-stage"><span>Qualification</span><span>Proposal</span><span>Closed Won</span></div></lightning-record-form>'));
+  }
+  var submit=document.createElement('button');
+  submit.textContent=pack==='odoo_erp'?'Confirm':(pack==='jd_edwards'?'Find':'Submit');
+  if(cfg.sap){submit.setAttribute('data-sap-ui-id','salesOrderSubmit');}
+  else if(pack==='odoo_erp'){submit.setAttribute('data-testid','odoo-confirm');}
+  else{submit.setAttribute('data-testid',cfg.submit);}
+  shell.appendChild(submit);
+  var result=document.createElement('p'); result.id='result'; result.textContent='Ready';
+  result.setAttribute('data-testid',cfg.result); result.setAttribute('role',pack==='salesforce_crm'?'alert':'status');
+  shell.appendChild(result);
+  var reset=document.createElement('button'); reset.id='reset'; reset.textContent='Reset';
+  if(pack==='oracle_web'){reset.setAttribute('data-testid','oracle-reset');}
+  shell.appendChild(reset); app.appendChild(shell);
+  sign.addEventListener('click',function(){
+    if(!userField.value||!passField.value){document.getElementById('login-error').textContent='Sign-in failed: credentials required';return;}
+    login.hidden=true; shell.hidden=false;});
+  var resetBtn=reset;
+  resetBtn.addEventListener('click',function(){inputField.value=''; result.textContent='Ready';
+    var st=document.querySelector('[data-testid="odoo-status"]'); if(st){st.textContent='Draft';}});
+  if(pack==='jd_edwards'){
+    shell.querySelector('[data-testid="jde-fastpath-go"]').addEventListener('click',function(){
+      if(shell.querySelector('[data-testid="jde-fastpath"]').value==='P0411'){
+        shell.querySelector('[data-testid="jde-heading"]').textContent='Supplier Ledger Inquiry';}});
+  }
+  if(pack==='oracle_web'){
+    var dialog=shell.querySelector('[data-testid="oracle-lov-dialog"]');
+    shell.querySelector('[data-testid="oracle-lov-open"]').addEventListener('click',function(){dialog.hidden=false;});
+    shell.querySelector('[data-testid="oracle-lov-close"]').addEventListener('click',function(){dialog.hidden=true;});
+    Array.prototype.forEach.call(dialog.querySelectorAll('[data-lov]'),function(b){b.addEventListener('click',function(){inputField.value=b.getAttribute('data-lov'); dialog.hidden=true;});});
+  }
+  submit.addEventListener('click',function(){
+    var value=inputField.value;
+    function finish(){
+      result.textContent=RECORDS[pack][value]||('No record found: '+value);
+      if(pack==='sap_fiori'){
+        var body=shell.querySelector('[data-testid="sap-grid"] tbody'); var found=false;
+        Array.prototype.forEach.call(body.querySelectorAll('tr'),function(r){if(r.cells[0].textContent===value){found=true;}});
+        if(!found){var row=body.insertRow(); row.insertCell().textContent=value; row.insertCell().textContent=RECORDS[pack][value]?'Confirmed':'No record';}
+        shell.querySelector('[data-testid="sap-busy"]').hidden=true;}
+      if(pack==='odoo_erp'){var st=document.querySelector('[data-testid="odoo-status"]'); if(st&&RECORDS[pack][value]){st.textContent='Confirmed';}}
+    }
+    if(pack==='sap_fiori'){shell.querySelector('[data-testid="sap-busy"]').hidden=false; setTimeout(finish,120);}
+    else{finish();}
+  });
+})();
+</script>
+</main>
+</body>
+</html>

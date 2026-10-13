@@ -333,15 +333,17 @@ class ScenarioTests(unittest.TestCase):
                       'Phase 3 · Mobile & Rugged Device Runner',
                       'Phase 4 · Pilot, Security Review, Support Matrix & Remaining Playwright Roadmap (R01–R15)'):
             self.assertIn(phase, future)
-        for fixture in ('/demo.html', '/domain-demo.html'):
+        for fixture in ('/demo.html', '/domain-demo.html', '/erp-crm-demo.html', '/mobile-zebra-demo.html'):
             self.assertTrue((static / fixture.lstrip('/')).is_file(), fixture)
             self.assertIn(fixture, component)
         with TestClient(app) as client:
-            for path in ('/demo-components.js', '/future-components.js', '/demo.html', '/domain-demo.html'):
+            for path in ('/demo-components.js', '/future-components.js', '/demo.html', '/domain-demo.html', '/erp-crm-demo.html', '/mobile-zebra-demo.html'):
                 self.assertEqual(client.get(path).status_code, 200, path)
             packs = client.get('/api/imports/packs').json()
             self.assertEqual({p['id'] for p in packs},
-                             {'commerce', 'banking', 'insurance', 'hrms', 'travel'})
+                             {'commerce', 'banking', 'insurance', 'hrms', 'travel',
+                              'oracle_web', 'sap_fiori', 'jd_edwards', 'ms_dynamics_fo',
+                              'ms_dynamics_bc', 'odoo_erp', 'salesforce_crm'})
             # The tab prints a one-line blurb per pack; an unexplained pack is a bug.
             for pack in packs:
                 self.assertIn(f"  {pack['id']}:", component)

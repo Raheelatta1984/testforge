@@ -1,61 +1,72 @@
-/* Future-release planning view. These are exploration targets, not claims of
-   current integrations. The logo-style monograms are local placeholders so the
-   tab remains self-contained and does not fetch vendor assets. */
+/* Future-release planning view. Targets are implemented simulator-first with
+   a live Support Matrix; nothing here claims vendor certification. The
+   logo-style monograms are local placeholders so the tab remains
+   self-contained and does not fetch vendor assets. */
 const TESTFORGE_ROADMAP_TARGETS = [
   {
     group: 'ERP / CRM web applications', mark: 'ORCL', name: 'Oracle web applications',
-    color: '#f80000', ink: '#ffffff', stage: 'Browser UI now · dedicated pack proposed',
-    detail: 'Oracle browser apps such as Fusion or E-Business Suite can be approached as ordinary web pages when reachable. Oracle-specific authentication, selectors and workflow templates are not implemented.'
+    color: '#f80000', ink: '#ffffff', stage: 'Pack implemented · deterministic fixture',
+    detail: 'The oracle_web pack models Fusion/EBS patterns — nested iframes, LOV dialogs and line-item tables — on the local /erp-crm-demo.html fixture with TF_SECRET_* sign-in references. A real Oracle tenant still needs authorized access; there is no vendor certification.'
   },
   {
     group: 'ERP / CRM web applications', mark: 'SAP', name: 'SAP · Fiori / web UI',
-    color: '#0875b9', ink: '#ffffff', stage: 'Browser UI now · dedicated pack proposed',
-    detail: 'Web-based SAP Fiori workflows may be recorded with generic browser controls. SAP GUI and certified SAP-specific integrations are outside current support.'
+    color: '#0875b9', ink: '#ffffff', stage: 'Pack implemented · deterministic fixture',
+    detail: 'The sap_fiori pack uses data-sap-ui-id locators, an ARIA grid with scoped table lookup and a busy-indicator flow on the local fixture. SAP GUI and certified SAP integrations remain outside support.'
   },
   {
     group: 'ERP / CRM web applications', mark: 'JD', name: 'JD Edwards',
-    color: '#315b7d', ink: '#ffffff', stage: 'Browser UI now · dedicated pack proposed',
-    detail: 'The browser UI can be explored with generic recording where access is authorized; JDE-specific patterns and test environments would need separate work.'
+    color: '#315b7d', ink: '#ffffff', stage: 'Pack implemented · deterministic fixture',
+    detail: 'The jd_edwards pack covers fast-path (P0411) navigation, grid rows and batch-status assertions on the local EnterpriseOne-style fixture.'
+  },
+  {
+    group: 'ERP / CRM web applications', mark: 'D365', name: 'Microsoft Dynamics 365 F&O',
+    color: '#5c2d91', ink: '#ffffff', stage: 'Pack implemented · deterministic fixture',
+    detail: 'The ms_dynamics_fo pack models Finance & Operations sales-order forms with data-testid locators on the local fixture; credentials are environment references only.'
+  },
+  {
+    group: 'ERP / CRM web applications', mark: 'BC', name: 'Microsoft Dynamics 365 Business Central',
+    color: '#243a5e', ink: '#ffffff', stage: 'Pack implemented · deterministic fixture',
+    detail: 'The ms_dynamics_bc pack models Business Central list/form posting flows on the local fixture, separate from the F&O pack because the products differ.'
   },
   {
     group: 'ERP / CRM web applications', mark: 'odoo', name: 'Odoo',
-    color: '#714b67', ink: '#ffffff', stage: 'Browser UI now · dedicated pack proposed',
-    detail: 'Odoo web workflows are a candidate for reusable ERP test templates. There is no Odoo connector or product-specific coverage today.'
+    color: '#714b67', ink: '#ffffff', stage: 'Pack implemented · deterministic fixture',
+    detail: 'The odoo_erp pack exercises OWL-style forms, a wait-aware many2one suggestion pick and Draft → Confirmed statusbar transitions on the local fixture. There is no Odoo connector.'
   },
   {
     group: 'ERP / CRM web applications', mark: 'SF', name: 'Salesforce',
-    color: '#00a1e0', ink: '#ffffff', stage: 'Browser UI now · dedicated pack proposed',
-    detail: 'Accessible Salesforce pages can be approached through generic browser recording. Salesforce-specific authentication, sandbox setup and stable page objects remain future work.'
+    color: '#00a1e0', ink: '#ffffff', stage: 'Pack implemented · deterministic fixture',
+    detail: 'The salesforce_crm pack uses Lightning-style locators, toast (role=alert) assertions and record-stage markup on the local fixture. Real sandboxes still need authorized access.'
   },
   {
     group: 'Windows desktop applications', mark: '.NET', name: '.NET / C# desktop apps',
-    color: '#512bd4', ink: '#ffffff', stage: 'Future proposal · not supported yet',
-    detail: 'A Windows-hosted automation agent would be needed for native desktop controls; the current Playwright browser cannot drive ordinary desktop windows.'
+    color: '#512bd4', ink: '#ffffff', stage: 'Adapter implemented · simulator + Windows agent bridge',
+    detail: 'Plans with runner "windows_desktop" and framework "dotnet" run sequentially against a simulated UIA tree (Calculator and custom apps seeded), or a real Windows agent when TF_WINDOWS_AGENT_URL/TF_WINDOWS_AGENT_TOKEN are set.'
   },
   {
     group: 'Windows desktop applications', mark: 'C++', name: 'C++ desktop apps',
-    color: '#00599c', ink: '#ffffff', stage: 'Future proposal · not supported yet',
-    detail: 'Native C++ applications would need a separate Windows UI automation adapter and a controlled runner, not a browser-only change.'
+    color: '#00599c', ink: '#ffffff', stage: 'Adapter implemented · simulator + Windows agent bridge',
+    detail: 'Native Win32/MFC targets use the same structured UIA locators and actions (framework "cpp") in the simulator or through the authenticated Windows agent bridge.'
   },
   {
     group: 'Windows desktop applications', mark: 'WF', name: 'WinForms · legacy and current',
-    color: '#475569', ink: '#ffffff', stage: 'Future proposal · not supported yet',
-    detail: 'Possible target: recording and replay for older and newer WinForms applications via Windows accessibility/UI Automation, with compatibility testing by framework version.'
+    color: '#475569', ink: '#ffffff', stage: 'Adapter implemented · simulator + Windows agent bridge',
+    detail: 'WinForms legacy/current plus custom Access/VBA, FoxPro, COBOL-terminal, AS/400-terminal and Oracle desktop app profiles can be registered and simulated; live control needs the Windows agent.'
   },
   {
     group: 'Mobile and rugged devices', mark: 'AND', name: 'Android apps',
-    color: '#3ddc84', ink: '#052e16', stage: 'Future proposal · not supported yet',
-    detail: 'Native Android app testing would require an Android automation driver/device lab. A responsive browser viewport is not native app support.'
+    color: '#3ddc84', ink: '#052e16', stage: 'Adapter implemented · simulator + Appium hub bridge',
+    detail: 'Plans with runner "mobile_device" and platform "android" run against the deterministic device simulator, or an authorized Appium lab via TF_MOBILE_HUB_URL/TF_MOBILE_HUB_TOKEN.'
   },
   {
     group: 'Mobile and rugged devices', mark: 'iOS', name: 'iPhone / iPad apps',
-    color: '#111827', ink: '#ffffff', stage: 'Future proposal · not supported yet',
-    detail: 'Native iOS apps need Apple-device infrastructure and a mobile automation adapter; neither is part of the current browser runner.'
+    color: '#111827', ink: '#ffffff', stage: 'Adapter implemented · simulator + Appium hub bridge',
+    detail: 'iOS profiles use XCUITest-style locators (ios_predicate, ios_class_chain) in the simulator or through the Appium hub; Apple hardware is never simulated as real.'
   },
   {
     group: 'Mobile and rugged devices', mark: 'Z', name: 'Zebra rugged devices',
-    color: '#111827', ink: '#ffffff', stage: 'Future proposal · not supported yet',
-    detail: 'Potential handheld coverage includes Android-based Zebra devices, barcode scanners and device-specific input. Hardware access and a dedicated runner would be required.'
+    color: '#111827', ink: '#ffffff', stage: 'Adapter implemented · simulator + DataWedge bridge',
+    detail: 'Zebra profiles add hardware keys (F1–F12, Scan) and DataWedge barcode injection for EAN-13, CODE-128, QR and GS1-128, with the /mobile-zebra-demo.html fixture mirroring the simulator.'
   }
 ];
 
@@ -77,8 +88,8 @@ const TESTFORGE_ROADMAP_PROMPT_HEADER = [
 
 const TESTFORGE_ROADMAP_PHASE_PROMPTS = {
   phase1: [
-    '## Phase 1 · ERP / CRM Web Application Packs (Oracle, SAP Fiori, JD Edwards, Odoo, Salesforce)',
-    '1. Extend `app/domain_packs.py` and `/api/imports/packs` with five enterprise ERP/CRM packs: `oracle_web` (Oracle Fusion / E-Business Suite), `sap_fiori` (SAP Fiori / UI5 web UI), `jd_edwards` (JD Edwards EnterpriseOne web UI), `odoo_erp` (Odoo web workflows), and `salesforce_crm` (Salesforce Lightning web workflows).',
+    '## Phase 1 · ERP / CRM Web Application Packs (Oracle, SAP Fiori, JD Edwards, Microsoft Dynamics, Odoo, Salesforce)',
+    '1. Extend `app/domain_packs.py` and `/api/imports/packs` with the enterprise ERP/CRM packs: `oracle_web` (Oracle Fusion / E-Business Suite), `sap_fiori` (SAP Fiori / UI5 web UI), `jd_edwards` (JD Edwards EnterpriseOne web UI), `ms_dynamics_fo` (Microsoft Dynamics 365 Finance & Operations), `ms_dynamics_bc` (Microsoft Dynamics 365 Business Central), `odoo_erp` (Odoo web workflows), and `salesforce_crm` (Salesforce Lightning web workflows). Keep the existing five synthetic packs unchanged.',
     '2. Add a local deterministic multi-tenant ERP/CRM simulation fixture (`app/static/erp-crm-demo.html` or extended `/domain-demo.html`) modeling realistic DOM patterns for each target:',
     '   - Oracle Fusion/EBS: dynamic region containers, nested iframes, LOV lookup dialogs, and line-item tables.',
     '   - SAP Fiori / UI5: `data-sap-ui` attributes, ARIA grid/tile roles, busy-indicator waits, and object-header assertions.',
@@ -170,7 +181,7 @@ function RoadmapTargetCard({ target }) {
         e('h4', { className: 'text-sm font-bold text-slate-100' }, target.name),
         e(RoadmapStatus, {
           stage: target.stage,
-          current: target.stage.startsWith('Browser UI now')
+          current: target.stage.startsWith('Pack implemented') || target.stage.startsWith('Adapter implemented')
         })),
       e('p', { className: 'text-xs leading-relaxed text-slate-400' }, target.detail)));
 }
@@ -258,8 +269,113 @@ function RoadmapAiPromptPanel() {
     }),
 
     e('p', { className: 'text-[10px] text-slate-400' },
-      'Tip: Keep "Complete End-to-End Scope (All Phases 1–4)" selected to copy the full end-to-end implementation prompt across all 11 application targets and R01–R15 requirements, or switch tabs above to copy one phase at a time.')
+      'Tip: Keep "Complete End-to-End Scope (All Phases 1–4)" selected to copy the full end-to-end implementation prompt across all 13 support-matrix targets (the 11 named roadmap targets with Microsoft Dynamics split into F&O and Business Central) and R01–R15 requirements, or switch tabs above to copy one phase at a time.')
   );
+}
+
+/* Shared execution-speed slider (25%–300%). The factor is persisted locally,
+   mirrored on window.TESTFORGE_SPEED_FACTOR for every run-queue call site, and
+   sent to the server as execution_speed; 1.0 is the historical behaviour. */
+function tfSpeedFactor() {
+  try {
+    const value = parseFloat(localStorage.getItem('tf_execution_speed') || '1');
+    return Number.isFinite(value) ? Math.min(3, Math.max(0.25, value)) : 1;
+  } catch (_) { return 1; }
+}
+try { window.TESTFORGE_SPEED_FACTOR = tfSpeedFactor(); } catch (_) {}
+
+function ExecutionSpeedControl({ compact } = {}) {
+  const [factor, setFactor] = useState(tfSpeedFactor());
+  useEffect(() => {
+    const sync = () => setFactor(tfSpeedFactor());
+    window.addEventListener('tf-speed-change', sync);
+    return () => window.removeEventListener('tf-speed-change', sync);
+  }, []);
+  const update = (raw) => {
+    const value = Math.min(3, Math.max(0.25, Number(raw) || 1));
+    setFactor(value);
+    try { localStorage.setItem('tf_execution_speed', String(value)); } catch (_) {}
+    window.TESTFORGE_SPEED_FACTOR = value;
+    window.dispatchEvent(new Event('tf-speed-change'));
+  };
+  const label = factor >= 2 ? 'fast' : factor > 1 ? 'faster' : factor === 1 ? 'normal' : 'slow · watchable';
+  return e('label', { className: 'flex items-center gap-2 text-xs text-slate-300', title: 'Execution speed: faster shrinks timeouts, slower adds a watchable pace and typing delay. Applies to runs queued from any tab.' },
+    e('span', { className: 'font-bold whitespace-nowrap' }, '⚡ Speed ' + factor.toFixed(2) + '×'),
+    e('input', {
+      type: 'range', min: 0.25, max: 3, step: 0.25, value: factor,
+      'aria-label': 'Test script execution speed',
+      onChange: event => update(event.target.value),
+      className: compact ? 'w-24 accent-indigo-500' : 'w-36 accent-indigo-500'
+    }),
+    e('span', { className: 'text-[10px] text-slate-400 whitespace-nowrap' }, Math.round(factor * 100) + '% · ' + label));
+}
+
+function SupportMatrixPanel() {
+  const [matrix, setMatrix] = useState(null);
+  const [apps, setApps] = useState([]);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [appName, setAppName] = useState('');
+  const [appKind, setAppKind] = useState('custom');
+  const [appNote, setAppNote] = useState('');
+  const load = () => API.get('/api/roadmap/support-matrix').then(data => { setMatrix(data); setError(''); }).catch(err => setError(err.message));
+  const loadApps = () => API.get('/api/roadmap/desktop-apps').then(data => setApps(data.apps || [])).catch(() => {});
+  useEffect(() => { load(); loadApps(); }, []);
+  const runPilot = async () => {
+    setBusy(true);
+    try { setMatrix(await API.post('/api/roadmap/pilot/run', {})); setError(''); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  };
+  const addApp = async (event) => {
+    event.preventDefault();
+    if (!appName.trim()) return;
+    try {
+      await API.post('/api/roadmap/desktop-apps', { profile: { name: appName.trim(), kind: appKind } });
+      setAppName(''); setAppNote('Custom desktop app registered for simulation.'); loadApps();
+    } catch (err) { setAppNote(err.message); }
+  };
+  const badgeClass = badge => badge === 'VERIFIED IN THIS ENVIRONMENT'
+    ? 'border-emerald-700 bg-emerald-950/50 text-emerald-200'
+    : badge === 'SIMULATOR READY' ? 'border-sky-800 bg-sky-950/40 text-sky-200'
+    : 'border-amber-800 bg-amber-950/40 text-amber-200';
+  return e('section', { className: 'rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-3' },
+    e('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
+      e('div', null,
+        e('h2', { className: 'text-sm font-bold text-indigo-300' }, '✅ Support Matrix & Readiness Gate (live)'),
+        e('p', { className: 'text-xs text-slate-400' }, 'Real state from GET /api/roadmap/support-matrix. VERIFIED requires a passing, unexpired pilot receipt; simulator success is never presented as live-device verification.')),
+      e('div', { className: 'flex gap-2' },
+        e('button', { type: 'button', onClick: load, className: 'key-btn' }, 'REFRESH'),
+        e('button', { type: 'button', onClick: runPilot, disabled: busy, className: 'bg-indigo-600 px-3 py-1.5 rounded-lg font-bold text-xs text-white disabled:opacity-50' }, busy ? 'RUNNING PILOTS…' : '▶ RUN PILOT SUITE'))),
+    error && e('p', { role: 'alert', className: 'text-xs font-bold text-red-300' }, error),
+    matrix && matrix.receipt && e('p', { className: 'text-[11px] text-slate-400' },
+      'Pilot receipt: ' + (matrix.receipt.suite || '') + ' · generated ' + (matrix.receipt.generated_at || '') + ' · expires ' + (matrix.receipt.expires_at || '')),
+    matrix && e('div', { className: 'overflow-x-auto' },
+      e('table', { className: 'w-full text-left text-xs' },
+        e('thead', null, e('tr', null, ['Target', 'Pack / adapter', 'Simulator', 'Live bridge', 'Pilot', 'Badge', 'Note'].map(h => e('th', { key: h, className: 'border-b border-slate-800 px-2 py-1 text-slate-400' }, h)))),
+        e('tbody', null, matrix.targets.map(target => e('tr', { key: target.id },
+          e('td', { className: 'border-b border-slate-800 px-2 py-1 font-bold text-slate-100' }, target.name),
+          e('td', { className: 'border-b border-slate-800 px-2 py-1 text-slate-300' }, target.pack ? ('pack: ' + target.pack) : (target.runner + (target.framework ? ' · ' + target.framework : '') + (target.platform ? ' · ' + target.platform : ''))),
+          e('td', { className: 'border-b border-slate-800 px-2 py-1' }, target.simulator_ready ? 'ready' : '—'),
+          e('td', { className: 'border-b border-slate-800 px-2 py-1' }, target.live_configured ? 'configured' : (target.live_env.length ? 'not configured' : 'local fixture')),
+          e('td', { className: 'border-b border-slate-800 px-2 py-1' }, target.pilot_status),
+          e('td', { className: 'border-b border-slate-800 px-2 py-1' }, e('span', { className: 'rounded-full border px-2 py-0.5 text-[9px] font-bold ' + badgeClass(target.badge) }, target.badge)),
+          e('td', { className: 'border-b border-slate-800 px-2 py-1 text-slate-400' }, target.note)))))),
+    !matrix && !error && e('p', { className: 'text-xs text-slate-400' }, 'Loading support matrix…'),
+    e('div', { className: 'rounded-xl border border-slate-800 bg-slate-950 p-3 space-y-2' },
+      e('h3', { className: 'text-xs font-bold text-slate-100' }, 'Testable desktop applications'),
+      e('p', { className: 'text-[11px] text-slate-400' }, (apps.length ? apps.map(app => app.name + ' (' + app.framework + (app.builtin ? '' : ', custom') + ')').join(' · ') : 'Loading…')),
+      e('form', { onSubmit: addApp, className: 'flex flex-wrap items-end gap-2' },
+        e('label', { className: 'text-[11px] text-slate-300' }, 'Add tested desktop app',
+          e('input', { value: appName, onChange: event => setAppName(event.target.value), placeholder: 'e.g. Orders (Access/VBA)', className: 'mt-1 block rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white' })),
+        e('label', { className: 'text-[11px] text-slate-300' }, 'Kind',
+          e('select', { value: appKind, onChange: event => setAppKind(event.target.value), className: 'mt-1 block rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white' },
+            [['custom', 'Custom app'], ['access_vba', 'MS Access / VBA'], ['foxpro', 'Visual FoxPro'], ['cobol_terminal', 'COBOL terminal'], ['as400_terminal', 'AS/400 terminal'], ['oracle_desktop', 'Oracle desktop'], ['dotnet', '.NET C#'], ['cpp', 'C++'], ['winforms', 'WinForms'], ['winforms_legacy', 'WinForms legacy'], ['calculator', 'Calculator'], ['settings', 'Settings']].map(([value, label]) => e('option', { key: value, value }, label)))),
+        e('button', { type: 'submit', className: 'bg-emerald-700 px-3 py-1.5 rounded-lg font-bold text-xs text-white' }, 'ADD APP')),
+      appNote && e('p', { className: 'text-[11px] text-emerald-300' }, appNote),
+      e('p', { className: 'text-[11px] text-slate-400' }, 'Fixtures: ',
+        e('a', { href: '/erp-crm-demo.html', className: 'text-sky-300 underline' }, 'ERP/CRM demo'), ' · ',
+        e('a', { href: '/mobile-zebra-demo.html', className: 'text-sky-300 underline' }, 'Mobile/Zebra demo'))));
 }
 
 function FuturePlanningTab() {
@@ -267,25 +383,28 @@ function FuturePlanningTab() {
     e('section', { className: 'rounded-2xl border border-indigo-800 bg-slate-900 p-5 space-y-3' },
       e('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
         e('span', { className: 'text-[10px] font-bold tracking-wide text-indigo-300' }, '🗺️ FUTURE RELEASE PLANNING'),
-        e('span', { className: 'rounded-full bg-slate-800 px-2 py-1 text-[9px] font-bold text-amber-200' }, 'PROPOSED · NO DATES COMMITTED')),
+        e('span', { className: 'rounded-full bg-slate-800 px-2 py-1 text-[9px] font-bold text-emerald-200' }, 'IMPLEMENTED · SIMULATOR-FIRST, LIVE VIA AGENTS')),
       e('h1', { className: 'text-xl font-bold text-slate-100' }, 'Plan beyond browser testing'),
       e('p', { className: 'text-sm leading-relaxed text-slate-300' },
-        'This page separates the current TestForge capability from possible future targets. It is a planning view, not a promise of vendor support or a release schedule.'),
+        'The roadmap targets below are implemented simulator-first: ERP/CRM packs, a Windows desktop adapter and a mobile/Zebra adapter all author, draft-test, execute sequentially, export and report in this build. Live enterprise systems, Windows machines and physical devices are reached only through the authenticated agent/hub bridges — the Support Matrix states plainly which is which.'),
+      e(ExecutionSpeedControl, null),
       e('div', { className: 'rounded-xl border border-emerald-900/60 bg-emerald-950/30 p-3 space-y-1' },
         e('div', { className: 'flex flex-wrap items-center gap-2' },
           e('div', { className: 'flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-600 text-xs font-bold text-white' }, 'PW'),
           e('h2', { className: 'text-sm font-bold text-emerald-200' }, 'Supported today · browser UI'),
           e('span', { className: 'rounded-full border border-emerald-700 px-2 py-0.5 text-[9px] font-bold text-emerald-200' }, 'AVAILABLE NOW')),
         e('p', { className: 'text-xs leading-relaxed text-slate-300' },
-          'TestForge records and replays accessible web pages using Playwright and Chromium. A web-based ERP or CRM may be tried through this generic browser workflow when you have authorized access; this does not mean TestForge has a dedicated or certified Oracle, SAP, JD Edwards, Odoo or Salesforce integration.'),
+          'TestForge records and replays accessible web pages using Playwright and Chromium, and now ships dedicated ERP/CRM packs (Oracle, SAP Fiori, JD Edwards, Dynamics 365 F&O and Business Central, Odoo, Salesforce) against a deterministic local fixture. Trying a real tenant through the browser still needs authorized access and is not vendor certification.'),
         e('p', { className: 'text-[10px] text-slate-500' },
-          'Native Windows desktop apps and native Android/iOS apps are not supported by the current browser runner.'))),
+          'Windows desktop and native mobile plans execute against deterministic simulators by default, or a real target only when TF_WINDOWS_AGENT_URL/TF_WINDOWS_AGENT_TOKEN or TF_MOBILE_HUB_URL/TF_MOBILE_HUB_TOKEN are configured.'))),
+
+    e(SupportMatrixPanel, null),
 
     e('section', { className: 'rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-3' },
       e('div', { className: 'space-y-1' },
-        e('h2', { className: 'text-sm font-bold text-indigo-300' }, 'Suggested application and tool targets'),
+        e('h2', { className: 'text-sm font-bold text-indigo-300' }, 'Implemented application and tool targets'),
         e('p', { className: 'text-xs text-slate-400' },
-          'The colorful initials below are local logo-style placeholders for planning. Vendor names identify possible targets only; these are not official logo assets or endorsements.')),
+          'The colorful initials below are local logo-style placeholders. Vendor names identify implemented pack/adapter targets only; these are not official logo assets, endorsements or certifications.')),
       TESTFORGE_ROADMAP_GROUPS.map(group => e('div', { key: group, className: 'space-y-2' },
         e('h3', { className: 'text-xs font-bold uppercase tracking-wide text-slate-300' }, group),
         e('div', { className: 'grid grid-cols-1 gap-2 md:grid-cols-2' },
@@ -296,15 +415,15 @@ function FuturePlanningTab() {
       e('h2', { className: 'text-sm font-bold text-indigo-300' }, 'A practical extension roadmap'),
       e('ol', { className: 'space-y-3' },
         [
-          ['1 · ERP / CRM web packs', 'Discovery first: validate authorized test tenants, predictable authentication, reusable selectors and data-reset guidance for SAP Fiori, Oracle web apps, JD Edwards, Odoo and Salesforce.'],
-          ['2 · Windows desktop runner', 'Research a separately deployed Windows agent using accessibility/UI Automation for .NET/C#, C++ and legacy/current WinForms. Isolate the agent and define version, permissions and evidence requirements.'],
-          ['3 · Mobile and rugged device runner', 'Evaluate Android and iOS device automation, then Zebra handheld/scanner workflows, device availability, OS versions and hardware input. This needs native-device infrastructure; browser emulation is not enough.'],
-          ['4 · Pilot, security review and support matrix', 'Only promote a target to “supported” after a repeatable end-to-end pilot, documented limits, safe test data, compatibility coverage and a maintained adapter.']
+          ['1 · ERP / CRM web packs', 'Implemented: seven enterprise packs (Oracle, SAP Fiori, JD Edwards, Dynamics 365 F&O, Dynamics 365 Business Central, Odoo, Salesforce) with TF_SECRET_* sign-in, reusable flows, positive/negative datasets and reset teardowns against /erp-crm-demo.html.'],
+          ['2 · Windows desktop runner', 'Implemented: app/desktop_runner.py provides a bounded sequential UIA adapter for .NET/C#, C++ and WinForms (legacy/current), with custom Access/VBA, FoxPro, COBOL, AS/400 and Oracle desktop profiles, a simulated UIA tree and an authenticated Windows agent bridge.'],
+          ['3 · Mobile and rugged device runner', 'Implemented: app/mobile_runner.py covers Android (UiAutomator2), iOS (XCUITest) and Zebra (DataWedge barcode injection for EAN-13, CODE-128, QR, GS1-128), with a deterministic simulator and an authenticated Appium hub bridge.'],
+          ['4 · Pilot, security review and support matrix', 'Implemented above: run the deterministic pilot suite to mint a 24-hour receipt; only then do ERP/CRM packs badge VERIFIED IN THIS ENVIRONMENT, and desktop/mobile stay SIMULATOR READY until a live agent/hub pilot exists.']
         ].map(([title, detail]) => e('li', { key: title, className: 'rounded-xl border border-slate-800 bg-slate-950 p-3 space-y-1' },
           e('h3', { className: 'text-xs font-bold text-slate-100' }, title),
           e('p', { className: 'text-xs leading-relaxed text-slate-400' }, detail)))),
       e('p', { className: 'text-[10px] text-amber-200' },
-        'No dates, vendor partnerships, native integrations or certifications are committed. Treat every “future proposal” card as a candidate until it is implemented and verified.')),
+        'No vendor partnerships or certifications are claimed. Simulator verification proves the TestForge contract locally; live verification needs your authorized tenant, Windows agent or device lab.')),
 
     e(RoadmapAiPromptPanel, null)
   );

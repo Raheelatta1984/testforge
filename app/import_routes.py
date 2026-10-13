@@ -634,8 +634,8 @@ def plans_catalog():
 
 @router.get('/api/imports/packs')
 def packs():
-    from app.domain_packs import PACKS
-    return [{'id': key, 'name': value[0]} for key, value in PACKS.items()]
+    from app.domain_packs import catalog
+    return catalog()
 
 
 @router.get('/api/imports/packs/{slug}')
@@ -644,7 +644,7 @@ def pack(slug: str):
     try:
         result = template(slug)
         # This URL is consumed by the server-side browser, not fetched by the UI.
-        result['demo_url'] = library_store.playback_url('/domain-demo.html')
+        result['demo_url'] = library_store.playback_url(result.pop('demo_path', '/domain-demo.html'))
         return result
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc

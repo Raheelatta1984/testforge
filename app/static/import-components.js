@@ -158,6 +158,67 @@ function OnboardingLoopPanel({loop,onStop}) {
     loop.error && e('p',{className:'text-xs text-red-300'},loop.error));
 }
 
+/* Dataset upload + per-row overrides for the Execution Plan options.
+   Uploads are parsed server-side (POST /api/plans/dataset/parse); a cell that
+   reads env:TF_SECRET_NAME is stored as a secret reference, never a value. */
+function PlanDatasetManager({ planOptions, setPlanOptions, disabled }) {
+  const [note, setNote] = useState('');
+  let plan = {};
+  try { plan = JSON.parse(planOptions || '{}'); } catch (_) { plan = null; }
+  const dataset = plan && Array.isArray(plan.dataset) ? plan.dataset : [];
+  const columns = [];
+  dataset.forEach(row => Object.keys(row || {}).forEach(key => { if (!columns.includes(key)) columns.push(key); }));
+  const writeDataset = (rows) => {
+    if (!plan) return;
+    setPlanOptions(JSON.stringify({ ...plan, dataset: rows }, null, 2));
+  };
+  const cellText = (value) => (value && typeof value === 'object' && value.env) ? 'env:' + value.env : (value == null ? '' : String(value));
+  const cellValue = (text) => {
+    const match = /^env:(TF_SECRET_[A-Z0-9_]{1,64})$/.exec(text.trim());
+    return match ? { env: match[1] } : text;
+  };
+  const upload = async (file, append) => {
+    if (!file) return;
+    try {
+      const parsed = await API.post('/api/plans/dataset/parse', { filename: file.name, content: await file.text() });
+      const merged = append ? [...dataset, ...parsed.dataset].slice(0, 25) : parsed.dataset;
+      writeDataset(merged);
+      setNote(parsed.rows + ' row(s) parsed (' + parsed.columns.join(', ') + '). Review, override any row, then TEST BEFORE PUBLISHING.');
+    } catch (err) { setNote(err.message); }
+  };
+  return e('div', { className: 'border border-slate-700 bg-slate-950 p-3 rounded space-y-2 mt-2' },
+    e('p', { className: 'text-xs font-bold text-indigo-300' }, 'DATASET UPLOAD & ROW OVERRIDES'),
+    e('p', { className: 'text-[11px] text-slate-400' }, 'Upload a CSV or JSON dataset (max 25 rows) or edit rows inline. A cell typed as env:TF_SECRET_NAME stays a secret reference — plaintext secrets are never stored in the plan. Changes update the Execution Plan options JSON above and invalidate the previous draft test.'),
+    typeof ExecutionSpeedControl === 'function' && e('div', { className: 'flex flex-wrap items-center gap-2' },
+      e(ExecutionSpeedControl, null),
+      e('button', { type: 'button', disabled: disabled || !plan, className: 'key-btn',
+        onClick: () => { if (plan) setPlanOptions(JSON.stringify({ ...plan, execution_speed: window.TESTFORGE_SPEED_FACTOR || 1 }, null, 2)); } }, 'APPLY SPEED TO PLAN JSON')),
+    e('div', { className: 'flex flex-wrap gap-2 items-center' },
+      e('label', { className: 'key-btn cursor-pointer' }, 'UPLOAD CSV/JSON (REPLACE)',
+        e('input', { type: 'file', accept: '.csv,.json,text/csv,application/json', className: 'hidden', disabled,
+          onChange: ev => { upload(ev.target.files && ev.target.files[0], false); ev.target.value = ''; } })),
+      e('label', { className: 'key-btn cursor-pointer' }, 'APPEND ROWS',
+        e('input', { type: 'file', accept: '.csv,.json,text/csv,application/json', className: 'hidden', disabled,
+          onChange: ev => { upload(ev.target.files && ev.target.files[0], true); ev.target.value = ''; } })),
+      e('button', { type: 'button', disabled: disabled || !plan || dataset.length >= 25, className: 'key-btn',
+        onClick: () => writeDataset([...dataset, {}]) }, 'ADD ROW')),
+    note && e('p', { role: 'status', className: 'text-[11px] text-emerald-300' }, note),
+    dataset.length > 0 && e('div', { className: 'overflow-x-auto border border-slate-800 rounded' },
+      e('table', { className: 'text-[10px]' },
+        e('thead', null, e('tr', null,
+          e('th', { className: 'p-1 text-left text-slate-400' }, 'Row'),
+          columns.map(col => e('th', { key: col, className: 'p-1 text-left text-slate-400' }, col)),
+          e('th', { className: 'p-1' }, ''))),
+        e('tbody', null, dataset.map((row, rowIndex) => e('tr', { key: rowIndex },
+          e('td', { className: 'p-1 text-slate-500' }, rowIndex + 1),
+          columns.map(col => e('td', { key: col, className: 'p-1' },
+            e('input', { value: cellText(row[col]), disabled, 'aria-label': 'Row ' + (rowIndex + 1) + ' ' + col,
+              className: 'bg-slate-900 border border-slate-700 rounded px-1 py-0.5 w-32',
+              onChange: ev => { const next = dataset.map((r, i) => i === rowIndex ? { ...r, [col]: cellValue(ev.target.value) } : r); writeDataset(next); } }))),
+          e('td', { className: 'p-1' },
+            e('button', { type: 'button', disabled, className: 'key-btn', onClick: () => writeDataset(dataset.filter((_, i) => i !== rowIndex)) }, 'DELETE'))))))));
+}
+
 function ImportScripts({ project, onSaved, onRun }) {
   const [files, setFiles] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -537,7 +598,7 @@ function ImportScripts({ project, onSaved, onRun }) {
         const slug=ev.target.value;if(!slug) return;
         setBusy(true);setError('');setDraft(null);setSaved(null);setPollNote('');const version=generation.current;
         try {const result=await API.get('/api/imports/packs/'+slug);if(version!==generation.current)return;
-          result.execution_plan.variables={demo_url:result.demo_url};
+          result.execution_plan.variables={...(result.execution_plan.variables || {}), demo_url:result.demo_url};
           setPreview(result);setName(result.name);setPlanOptions(JSON.stringify(result.execution_plan,null,2));setNotice(result.notice);
         } catch(err){if(version===generation.current)setError(err.message);} finally{setBusy(false);}
       }},e('option',{value:''},'Choose an example…'),packs.map(pack=>e('option',{key:pack.id,value:pack.id},pack.name)))),
@@ -645,8 +706,9 @@ function ImportScripts({ project, onSaved, onRun }) {
       e('input',{'aria-label':'Imported test tags',value:tags,onChange:ev=>setTags(ev.target.value),placeholder:'Comma-separated tags',className:'w-full bg-slate-800 p-2 rounded text-xs'}),
       e('details',{className:'border border-slate-700 p-3 rounded'},
         e('summary',{className:'text-xs cursor-pointer'},'Datasets, reusable flows, fixtures & profiles (optional)'),
-        e('p',{className:'text-xs text-slate-400 my-2'},'JSON options: dataset rows, variables, setup/teardown steps, named flows, matrix [{browser:"chromium",device:"mobile"}], retries 0 or 1. Secret values use {"env":"TF_SECRET_NAME"}. No parallelism. Extra cases consume work only when you explicitly TEST/RUN.'),
-        e('textarea',{'aria-label':'Execution plan options',value:planOptions,disabled:busy || testRunning,onChange:ev=>{setPlanOptions(ev.target.value);setDraft(null);setSaved(null);},rows:6,className:'w-full bg-slate-950 p-2 font-mono text-xs'})),
+        e('p',{className:'text-xs text-slate-400 my-2'},'JSON options: dataset rows, variables, setup/teardown steps, named flows, matrix [{browser:"chromium",device:"mobile"}] (or runner:"windows_desktop"/"mobile_device" profiles), execution_speed 0.25–3.0, retries 0 or 1. Secret values use {"env":"TF_SECRET_NAME"}. No parallelism. Extra cases consume work only when you explicitly TEST/RUN.'),
+        e('textarea',{'aria-label':'Execution plan options',value:planOptions,disabled:busy || testRunning,onChange:ev=>{setPlanOptions(ev.target.value);setDraft(null);setSaved(null);},rows:6,className:'w-full bg-slate-950 p-2 font-mono text-xs'}),
+        e(PlanDatasetManager,{planOptions,setPlanOptions:(next)=>{setPlanOptions(next);setDraft(null);setSaved(null);},disabled:busy || testRunning})),
       e('button',{onClick:testDraft,disabled:busy || !preview.can_save || testRunning,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},testRunning?'TESTING…':'TEST BEFORE PUBLISHING'),
       draft && e('div',{role:'status',className:'text-xs space-y-2'},
         e('p',{className:draft.status==='passed'?'text-emerald-300 font-bold':draft.status==='failed'?'text-red-300 font-bold':''},

@@ -397,7 +397,7 @@ def _signature(page, step: dict) -> str:
 async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None,
                         pacer: AdaptivePacer | None = None, screenshots: str | None = None,
                         share_session: bool | None = None, retry_transient: bool | None = None,
-                        display_window: bool = False, viewer_count=None) -> dict:
+                        display_window: bool = False, viewer_count=None, execution_speed=None) -> dict:
     """Replay every recording of a batch through one browser.
 
     ``playwright_factory`` exists so the unit tests can drive the whole batch
@@ -626,7 +626,7 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                         error_text = "This recording has no steps."
                     run_dir = os.path.join(ARTIFACTS, "runs", run_id)
                     os.makedirs(run_dir, exist_ok=True)
-                    runtime = StepRuntime(page, run_dir)
+                    runtime = StepRuntime(page, run_dir, execution_speed=execution_speed)
                     last_signature = None
                     total_steps = len(steps)
                     for index, step in enumerate(steps, 1):

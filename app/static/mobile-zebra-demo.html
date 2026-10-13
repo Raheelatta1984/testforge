@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TestForge Mobile / Zebra demo</title>
+<style>body{font-family:system-ui,sans-serif;margin:2rem;background:#111827;color:#e5e7eb}main{max-width:30rem;margin:auto;background:#1f2937;padding:1.5rem;border-radius:1.2rem}input,select{width:100%;padding:.6rem;box-sizing:border-box}button{padding:.6rem 1rem;margin:.5rem .3rem .5rem 0}</style>
+</head>
+<body>
+<main>
+  <h1 id="home_title" aria-label="home_title">Warehouse Home</h1>
+  <p>Platform
+    <select id="platform" aria-label="Platform">
+      <option value="android">Android (UiAutomator2)</option>
+      <option value="ios">iOS (XCUITest)</option>
+      <option value="zebra" selected>Zebra (Android Enterprise + DataWedge)</option>
+    </select></p>
+  <p>Device <span id="device_model">Zebra TC58 simulator</span> · Orientation <span id="orientation">portrait</span> · Network <span id="network">online</span></p>
+  <label>Barcode data <input id="barcode" aria-label="barcode_data" value="4006381333931"></label>
+  <label>Symbology
+    <select id="symbology" aria-label="symbology">
+      <option>EAN-13</option><option>CODE-128</option><option>QR</option><option>GS1-128</option>
+    </select></label>
+  <button id="scan">Scan (DataWedge intent)</button>
+  <button id="rotate">Rotate</button>
+  <button id="toggle_network">Toggle network</button>
+  <p>Scan result: <span id="scan_result" aria-label="scan_result"></span></p>
+  <p>Product: <span id="product_name" aria-label="product_name"></span></p>
+  <p>Status: <span id="status" aria-label="status">Ready</span></p>
+  <h2>DataWedge / device log</h2>
+  <ul id="log"></ul>
+  <p>This fixture mirrors the deterministic in-process simulator in
+     <code>app/mobile_runner.py</code>. No real device is contacted; a real
+     Zebra/Appium target needs <code>TF_MOBILE_HUB_URL</code> and
+     <code>TF_MOBILE_HUB_TOKEN</code>.</p>
+</main>
+<script>
+(function(){
+  var PRODUCTS={'4006381333931':'TestForge Scanner Demo Item','TF-QR-001':'TestForge QR Demo Item','1234567890128':'Warehouse Demo Carton'};
+  function log(message){var li=document.createElement('li'); li.textContent=message; document.getElementById('log').appendChild(li);}
+  function ean13Ok(data){
+    if(!/^\d{13}$/.test(data)){return false;}
+    var total=0; for(var i=0;i<12;i++){total+=Number(data[i])*(i%2?3:1);}
+    return (10-(total%10))%10===Number(data[12]);}
+  document.getElementById('scan').addEventListener('click',function(){
+    var data=document.getElementById('barcode').value;
+    var symbology=document.getElementById('symbology').value;
+    if(symbology==='EAN-13'&&!ean13Ok(data)){
+      document.getElementById('status').textContent='Invalid EAN-13 check digit'; log('Rejected invalid EAN-13'); return;}
+    document.getElementById('scan_result').textContent=symbology+':'+data;
+    var product=PRODUCTS[data]||'';
+    document.getElementById('product_name').textContent=product;
+    document.getElementById('status').textContent=product?('Item found: '+product):('Scanned '+symbology+' code');
+    log('DataWedge broadcast com.symbol.datawedge.data_string='+data+' label_type='+symbology);});
+  document.getElementById('rotate').addEventListener('click',function(){
+    var node=document.getElementById('orientation');
+    node.textContent=node.textContent==='portrait'?'landscape':'portrait'; log('Orientation '+node.textContent);});
+  document.getElementById('toggle_network').addEventListener('click',function(){
+    var node=document.getElementById('network');
+    node.textContent=node.textContent==='online'?'offline':'online'; log('Network '+node.textContent);});
+  document.getElementById('platform').addEventListener('change',function(e){
+    document.getElementById('device_model').textContent=
+      e.target.value==='zebra'?'Zebra TC58 simulator':(e.target.value==='ios'?'iPhone simulator':'Android emulator');
+    log('Platform '+e.target.value);});
+})();
+</script>
+</body>
+</html>

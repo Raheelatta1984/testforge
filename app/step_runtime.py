@@ -12,6 +12,23 @@ from urllib.parse import urlparse
 
 from playwright.async_api import expect
 
+try:  # package context; portable exports copy these modules next to this one
+    from app.execution_speed import normalize_speed, scaled_timeout, speed_profile
+    from app.desktop_runner import DESKTOP_ACTIONS, DESKTOP_LOCATOR_KEYS, validate_desktop_selector
+    from app.mobile_runner import (DEVICE_KEYS, MOBILE_ACTIONS, MOBILE_LOCATOR_KEYS,
+                                   NETWORK_MODES, ORIENTATIONS, validate_barcode,
+                                   validate_mobile_selector)
+    from app import desktop_runner as _desktop_module
+    from app import mobile_runner as _mobile_module
+except ImportError:  # pragma: no cover - exercised by exported bundles
+    from testforge_speed import normalize_speed, scaled_timeout, speed_profile
+    from testforge_desktop import DESKTOP_ACTIONS, DESKTOP_LOCATOR_KEYS, validate_desktop_selector
+    from testforge_mobile import (DEVICE_KEYS, MOBILE_ACTIONS, MOBILE_LOCATOR_KEYS,
+                                  NETWORK_MODES, ORIENTATIONS, validate_barcode,
+                                  validate_mobile_selector)
+    import testforge_desktop as _desktop_module
+    import testforge_mobile as _mobile_module
+
 MAX_STEPS = 500
 # A vendor export (Azure DevOps, TestRail, Zephyr, HP ALM) carries 15-30 metadata
 # columns next to the steps; the row cap above still bounds the parse.
@@ -29,7 +46,9 @@ ACTIONS = BASIC | {
     "wait_visible", "wait_hidden", "capture_text", "new_page", "switch_page",
     "close_page", "open_popup", "dialog", "upload_file", "download",
     "api_request", "mock_route", "clear_routes",
-}
+    # Scoped web-table helpers and wait-aware autocomplete (roadmap R03/R04).
+    "select_suggestion", "pick_suggestion", "table_lookup", "assert_table_cell",
+} | DESKTOP_ACTIONS | MOBILE_ACTIONS
 NO_LOCATOR = {"navigate", "press", "assert_url", "assert_title", "new_page", "switch_page",
               "close_page", "api_request", "mock_route", "clear_routes"}
 KINDS = {"css", "role", "label", "text", "test_id", "placeholder"}
@@ -83,6 +102,12 @@ OPTION_KEYS = {
     "upload_file": {"filename", "base64", "mime_type"},
     "api_request": {"method", "headers", "body", "status", "json_path", "capture", "expected"},
     "mock_route": {"status", "content_type", "body", "abort"},
+    "select_suggestion": {"suggestion", "type_text"},
+    "pick_suggestion": {"suggestion", "type_text"},
+    "table_lookup": {"row_text", "column", "row", "header"},
+    "assert_table_cell": {"row_text", "column", "row", "header"},
+    **{action: set(DESKTOP_LOCATOR_KEYS) for action in DESKTOP_ACTIONS},
+    **{action: set(MOBILE_LOCATOR_KEYS) | {"symbology", "barcode_data", "direction", "distance", "duration_ms", "key", "mode", "orientation", "app_id", "bundle_id"} for action in MOBILE_ACTIONS},
 }
 COMMON_KEYS = {"schema_version", "primary", "kind", "name", "exact", "frames", "page", "strict", "timeout_ms", "x", "y", "text", "tag"}
 
@@ -152,7 +177,35 @@ def normalize_step(raw, order=1):
         raise ValueError("Only action schema_version 1 is supported")
     selector["schema_version"] = 1
     selector["strict"] = True
-    if action not in NO_LOCATOR:
+    if action in DESKTOP_ACTIONS:
+        # Desktop steps carry a structured UIA locator instead of a web locator.
+        validate_desktop_selector(selector, action)
+        if action in {"assert_control_text", "assert_control_state"} and "value" not in raw:
+            raise ValueError(action + " requires an expected value")
+        if action == "ui_menu_invoke" and not value and not selector.get("name"):
+            raise ValueError("ui_menu_invoke requires a menu path value or a name locator")
+        if action == "ui_grid_read" and value and not re.fullmatch(r"[\w.-]{1,100}", value):
+            raise ValueError("ui_grid_read value must be a simple variable name")
+    elif action in MOBILE_ACTIONS:
+        validate_mobile_selector(selector, action)
+        if action == "scan_barcode":
+            validate_barcode(selector, value)
+        elif action == "device_key":
+            key = value or str(selector.get("key") or "")
+            if key not in DEVICE_KEYS:
+                raise ValueError("device_key must be Enter, Tab, F1-F12, Escape, Backspace or Scan")
+        elif action == "rotate_orientation":
+            if (value or str(selector.get("orientation") or "")).lower() not in ORIENTATIONS:
+                raise ValueError("rotate_orientation value must be portrait or landscape")
+        elif action == "toggle_network_mode":
+            if (value or str(selector.get("mode") or "")).lower() not in NETWORK_MODES:
+                raise ValueError("toggle_network_mode has an unsupported network mode")
+        elif action == "swipe":
+            if (value or str(selector.get("direction") or "up")).lower() not in {"up", "down", "left", "right"}:
+                raise ValueError("swipe value must be up, down, left or right")
+        elif action in {"assert_mobile_text"} and "value" not in raw:
+            raise ValueError("assert_mobile_text requires an expected value")
+    elif action not in NO_LOCATOR:
         _target_spec(selector, action)
     if action == "select_option" and selector.get("by", "value") not in {"value", "label"}:
         raise ValueError("select_option.by must be value or label")
@@ -204,6 +257,21 @@ def normalize_step(raw, order=1):
     if action == "dialog":
         if selector.get("decision", "accept") not in {"accept", "dismiss"}:
             raise ValueError("Dialog decision must be accept or dismiss")
+    if action in {"select_suggestion", "pick_suggestion"}:
+        if not value and not selector.get("suggestion"):
+            raise ValueError(action + " requires the suggestion text as its value")
+        for key in ("suggestion", "type_text"):
+            if key in selector and (not isinstance(selector[key], str) or len(selector[key]) > 500):
+                raise ValueError("Suggestion options must be short strings")
+    if action in {"table_lookup", "assert_table_cell"}:
+        if "row_text" not in selector and "row" not in selector:
+            raise ValueError(action + " requires selector.row_text (or a numeric selector.row)")
+        if "column" not in selector:
+            raise ValueError(action + " requires selector.column (a header name or zero-based index)")
+        if action == "table_lookup" and not re.fullmatch(r"[\w.-]{1,100}", value):
+            raise ValueError("table_lookup value must be the destination variable name")
+        if action == "assert_table_cell" and "value" not in raw:
+            raise ValueError("assert_table_cell requires an expected value")
     return {"order": order, "action": action, "value": value,
             "selector": selector, "label": str(raw.get("label") or action)[:500],
             "repeat_count": count}
@@ -287,12 +355,65 @@ def json_field(data, path):
 
 class StepRuntime:
     """One runtime per recording, with no tasks when idle and no parallel runs."""
-    def __init__(self, page, artifact_dir=None):
+    def __init__(self, page, artifact_dir=None, speed=None, execution_speed=None):
         self.page = page
         self.pages = {"main": page}
         self.artifact_dir = Path(artifact_dir) if artifact_dir else None
         self.routes = []
         self.last_result = None
+        # 1.0 reproduces the historical behaviour exactly (no added pace).
+        self.speed_profile = speed_profile(execution_speed if execution_speed is not None else speed)
+        self._desktop = None
+        self._mobile = None
+
+    def _timeout(self, opts, default=3000):
+        return scaled_timeout((opts or {}).get("timeout_ms", default), self.speed_profile)
+
+    async def _pace(self):
+        pace = int(self.speed_profile.get("pace_ms") or 0)
+        if pace > 0:
+            import asyncio
+            await asyncio.sleep(pace / 1000)
+
+    def _assertion_failed(self, action, expected, actual):
+        """Record expected-vs-actual diagnostics, then raise a scrub-able error.
+
+        Callers (executor/plan runtimes) scrub known secret values out of the
+        message before it is persisted or broadcast, so a failed password
+        assertion cannot leak the secret through its diagnostic.
+        """
+        self.last_result = {"assertion": action, "expected": expected, "actual": actual, "matched": False}
+        return AssertionError(f"{action}: expected {expected!r}, actual {actual!r}")
+
+    def _scope(self, opts):
+        scope = self.page
+        for frame in opts.get("frames", []):
+            scope = scope.frame_locator(frame)
+        return scope
+
+    async def _table_cell(self, opts, timeout):
+        """Scoped row/cell lookup inside one table locator (never page-global)."""
+        table = locator(self.page, opts)
+        column = opts.get("column")
+        if str(column).lstrip("-").isdigit():
+            column_index = int(column)
+        else:
+            headers = table.locator("th")
+            column_index = -1
+            for index in range(await headers.count()):
+                text = (await headers.nth(index).inner_text(timeout=timeout)).strip()
+                if text.lower() == str(column).strip().lower():
+                    column_index = index
+                    break
+            if column_index < 0:
+                raise AssertionError(f"table column not found: expected header {column!r}, "
+                                     f"actual headers available in the scoped table")
+        if "row" in opts and str(opts["row"]).lstrip("-").isdigit():
+            row = table.locator("tr").nth(int(opts["row"]))
+        else:
+            row = table.locator("tr").filter(has_text=str(opts.get("row_text") or "")).first
+        cell = row.locator("td").nth(column_index)
+        return (await cell.inner_text(timeout=timeout)).strip()
 
     async def close(self):
         for page, pattern, handler in self.routes:
@@ -309,8 +430,25 @@ class StepRuntime:
         # Resolve before any side effect, including locators and request headers.
         value = interpolate(step.get("value"), variables) if action not in {"capture_text", "save_variable", "switch_page", "close_page"} else str(step.get("value") or "")
         opts = resolve(step.get("selector") or {}, variables)
-        timeout = opts.get("timeout_ms", 3000)
+        timeout = self._timeout(opts)
         self.last_result = None
+        if action in DESKTOP_ACTIONS:
+            # Web recordings may carry desktop steps; they run against the
+            # deterministic simulator here, and against the Windows agent /
+            # simulator pair when a plan declares runner="windows_desktop".
+            if self._desktop is None:
+                self._desktop = _desktop_module.DesktopSimulator()
+            result = self._desktop.perform({"action": action, "value": value, "selector": opts}, variables)
+            self.last_result = result
+            await self._pace()
+            return result
+        if action in MOBILE_ACTIONS:
+            if self._mobile is None:
+                self._mobile = _mobile_module.MobileSimulator()
+            result = self._mobile.perform({"action": action, "value": value, "selector": opts}, variables)
+            self.last_result = result
+            await self._pace()
+            return result
         if opts.get("page"):
             if opts["page"] not in self.pages:
                 raise ValueError("Unknown page: " + opts["page"])
@@ -318,7 +456,7 @@ class StepRuntime:
         page = self.page
         loc = locator(page, opts) if action not in NO_LOCATOR and opts.get("primary") else None
         if action == "navigate":
-            await _goto_resilient(page, check_url(value), opts.get("timeout_ms", 20000))
+            await _goto_resilient(page, check_url(value), self._timeout(opts, 20000))
         elif action in POINTER_ACTIONS and loc is None:
             # A recorded coordinate click has no element to wait for; it clicks the
             # point the operator actually clicked.
@@ -340,10 +478,11 @@ class StepRuntime:
             else:
                 await loc.fill(value, timeout=timeout)
         elif action == "type":
+            delay = int(self.speed_profile.get("type_delay_ms") or 0)
             if loc is None:
-                await page.keyboard.type(value, delay=0)
+                await page.keyboard.type(value, delay=delay)
             else:
-                await loc.press_sequentially(value, delay=0, timeout=timeout)
+                await loc.press_sequentially(value, delay=delay, timeout=timeout)
         elif action == "press":
             if opts.get("primary"):
                 await locator(page, opts).press(value, timeout=timeout)
@@ -356,7 +495,7 @@ class StepRuntime:
         elif action == "scroll":
             await loc.scroll_into_view_if_needed(timeout=timeout)
             await loc.evaluate("(el, y) => el.scrollBy(0, y)", int(value), timeout=timeout)
-        elif action.startswith("assert_"):
+        elif action.startswith("assert_") and action != "assert_table_cell":
             target = page if action in {"assert_url", "assert_title"} else loc
             methods = {"assert_text": "to_have_text", "assert_contains": "to_contain_text",
                        "assert_value": "to_have_value", "assert_visible": "to_be_visible",
@@ -364,12 +503,74 @@ class StepRuntime:
                        "assert_disabled": "to_be_disabled", "assert_checked": "to_be_checked",
                        "assert_count": "to_have_count", "assert_url": "to_have_url", "assert_title": "to_have_title"}
             assertion = expect(target)
-            if action == "assert_unchecked":
-                await assertion.not_to_be_checked(timeout=timeout)
-            else:
-                args = [int(value)] if action == "assert_count" else ([value] if action in {"assert_text", "assert_contains", "assert_value", "assert_url", "assert_title"} else [])
-                await getattr(assertion, methods[action])(*args, timeout=timeout)
-            self.last_result = {"assertion": action, "matched": True}
+            try:
+                if action == "assert_unchecked":
+                    await assertion.not_to_be_checked(timeout=timeout)
+                else:
+                    args = [int(value)] if action == "assert_count" else ([value] if action in {"assert_text", "assert_contains", "assert_value", "assert_url", "assert_title"} else [])
+                    await getattr(assertion, methods[action])(*args, timeout=timeout)
+            except AssertionError as exc:
+                # Re-read the actual state once (short, bounded) so reports can
+                # show expected-vs-actual instead of an opaque timeout string.
+                actual = None
+                try:
+                    if action == "assert_url":
+                        actual = page.url
+                    elif action == "assert_title":
+                        actual = await page.title()
+                    elif action == "assert_count":
+                        actual = await loc.count()
+                    elif action in {"assert_value", "save_variable"}:
+                        actual = await loc.input_value(timeout=500)
+                    elif action in {"assert_visible", "assert_hidden"}:
+                        actual = "visible" if await loc.is_visible() else "hidden"
+                    elif action in {"assert_checked", "assert_unchecked"}:
+                        actual = "checked" if await loc.is_checked() else "unchecked"
+                    elif action in {"assert_enabled", "assert_disabled"}:
+                        actual = "enabled" if await loc.is_enabled() else "disabled"
+                    else:
+                        actual = (await loc.inner_text(timeout=500)).strip()
+                except Exception:
+                    actual = None
+                expected = value if action not in {"assert_visible", "assert_enabled", "assert_checked"} else action.removeprefix("assert_")
+                if action in {"assert_hidden", "assert_disabled", "assert_unchecked"}:
+                    expected = {"assert_hidden": "hidden", "assert_disabled": "disabled", "assert_unchecked": "unchecked"}[action]
+                raise self._assertion_failed(action, expected, actual) from exc
+            self.last_result = {"assertion": action, "expected": value, "actual": value, "matched": True}
+        elif action in {"select_suggestion", "pick_suggestion"}:
+            # Wait-aware autocomplete: type, then wait for the suggestion whose
+            # text matches and click it. No fixed sleeps anywhere.
+            suggestion = str(opts.get("suggestion") or value)
+            await loc.fill(str(opts.get("type_text", value)), timeout=timeout)
+            scope = self._scope(opts)
+            candidates = []
+            try:
+                candidates.append(scope.get_by_role("option", name=suggestion, exact=False))
+            except Exception:
+                pass
+            candidates.append(scope.locator('[role="option"], [role="listbox"] *').filter(has_text=suggestion))
+            candidates.append(scope.locator("li, div, span").filter(has_text=suggestion))
+            picked = False
+            for candidate in candidates:
+                try:
+                    first = candidate.first
+                    await first.wait_for(state="visible", timeout=min(timeout, 3000))
+                    await first.click(timeout=timeout)
+                    picked = True
+                    break
+                except Exception:
+                    continue
+            if not picked:
+                raise self._assertion_failed(action, suggestion, "no matching suggestion appeared")
+            self.last_result = {"assertion": action, "selected": suggestion, "matched": True}
+        elif action == "table_lookup":
+            variables[value] = await self._table_cell(opts, timeout)
+            self.last_result = {"captured": value, "text": variables[value]}
+        elif action == "assert_table_cell":
+            actual = await self._table_cell(opts, timeout)
+            if actual != value:
+                raise self._assertion_failed(action, value, actual)
+            self.last_result = {"assertion": action, "expected": value, "actual": actual, "matched": True}
         elif action in {"wait_visible", "wait_hidden"}:
             await loc.wait_for(state=action.removeprefix("wait_"), timeout=timeout)
         elif action in {"save_variable", "capture_text"}:
@@ -484,4 +685,5 @@ class StepRuntime:
             self.routes.clear()
         else:
             raise ValueError("Unsupported action: " + action)
+        await self._pace()
         return self.last_result
