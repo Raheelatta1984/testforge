@@ -10,14 +10,29 @@
   body { background: #020617; color: #f8fafc; font-family: system-ui; overflow: hidden; height: 100vh; width: 100vw; }
   /* Labels stay visible on phones too; the named tab strip scrolls horizontally
      instead of compressing 13 tabs into icons that new users have to guess. */
-  #main-tabs { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #4f46e5 #0f172a; }
-  #main-tabs::-webkit-scrollbar { height: 3px; }
-  #main-tabs::-webkit-scrollbar-thumb { background: #4f46e5; border-radius: 999px; }
+  #main-tabs { overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: thin; scrollbar-color: #6366f1 #0f172a; }
+  #main-tabs::-webkit-scrollbar { height: 8px; }
+  #main-tabs::-webkit-scrollbar-track { background: #0f172a; }
+  #main-tabs::-webkit-scrollbar-thumb { background: #6366f1; border-radius: 999px; }
+  /* Scroll bars that are always visible, both directions, on every tab. A wide
+     table or a long form can be reached by dragging the bar or the wheel. */
+  .content-area, .content-area * { scrollbar-width: auto; scrollbar-color: #6366f1 #0b1222; }
+  .content-area { overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; }
+  .content-area::-webkit-scrollbar, .content-area *::-webkit-scrollbar { width: 12px; height: 12px; }
+  .content-area::-webkit-scrollbar-track, .content-area *::-webkit-scrollbar-track { background: #0b1222; border-radius: 999px; }
+  .content-area::-webkit-scrollbar-thumb, .content-area *::-webkit-scrollbar-thumb { background: #4f46e5; border-radius: 999px; border: 2px solid #0b1222; }
+  .content-area::-webkit-scrollbar-thumb:hover, .content-area *::-webkit-scrollbar-thumb:hover { background: #818cf8; }
+  .content-area::-webkit-scrollbar-corner, .content-area *::-webkit-scrollbar-corner { background: #0b1222; }
+  /* Wide tables and code blocks get their own horizontal bar. */
+  .overflow-x-auto, .overflow-auto, .overflow-y-auto, pre { scrollbar-width: auto; scrollbar-color: #6366f1 #0b1222; }
+  .overflow-x-auto::-webkit-scrollbar, .overflow-auto::-webkit-scrollbar, .overflow-y-auto::-webkit-scrollbar, pre::-webkit-scrollbar { width: 10px; height: 10px; }
+  .overflow-x-auto::-webkit-scrollbar-track, .overflow-auto::-webkit-scrollbar-track, .overflow-y-auto::-webkit-scrollbar-track, pre::-webkit-scrollbar-track { background: #0b1222; border-radius: 999px; }
+  .overflow-x-auto::-webkit-scrollbar-thumb, .overflow-auto::-webkit-scrollbar-thumb, .overflow-y-auto::-webkit-scrollbar-thumb, pre::-webkit-scrollbar-thumb { background: #4f46e5; border-radius: 999px; }
   .nav-btn { flex: 0 0 auto; min-width: 66px; padding: 7px 7px 8px; font-size: 10px; font-weight: bold; color: #64748b; border-top: 2px solid transparent; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; white-space: nowrap; }
   .nav-btn-icon { font-size: 16px; line-height: 18px; }
   .nav-btn-label { font-size: 9px; line-height: 11px; }
   .nav-btn.active { color: #818cf8; border-top-color: #818cf8; background: rgba(30, 41, 59, 0.5); }
-  .content-area { height: calc(100vh - 75px); overflow-y: auto; padding: 15px; padding-bottom: 90px; }
+  .content-area { height: calc(100vh - 75px); overflow-y: auto; overflow-x: auto; padding: 15px; padding-bottom: 90px; }
   .canvas-window { background: #000; border: 2px solid #1e293b; border-radius: 16px; overflow: hidden; aspect-ratio: 16/10; }
   .progress-bar { height: 100%; background: #6366f1; transition: width 0.4s ease; box-shadow: 0 0 15px #6366f1; }
   .key-btn { background: #1e293b; padding: 8px; border-radius: 6px; font-size: 10px; font-weight: bold; border: 1px solid #334155; }
@@ -368,6 +383,17 @@ function Recorder({ project, onRun, liveWindow }) {
   const recRef = useRef(null);
   const frameUrl = useRef(null);
   const initialStepsLoaded = useRef(false);
+  // Big-screen recorder: FIT shows the whole page; a zoom level scrolls it.
+  const [fit, setFit] = useState(true);
+  // Type directly: keystrokes typed while the picture is focused go to the remote page.
+  const [typeDirect, setTypeDirect] = useState(false);
+  const typeInput = useRef(null);
+  const typeBuffer = useRef("");
+  const typeTimer = useRef(null);
+  const typeChain = useRef(Promise.resolve());
+  // True from the moment START is pressed until the recording exists, so the
+  // tab answers at once instead of sitting on the form.
+  const [starting, setStarting] = useState(false);
 
   // Every recording already in the library, for the tree of previous recordings
   // above the start form and for the "run an existing recording" panel.
@@ -462,7 +488,8 @@ function Recorder({ project, onRun, liveWindow }) {
     } catch (err) { setError(err.message); }
   };
   const start = async () => {
-    setBusy(true); setError("");
+    setBusy(true); setError(""); setStarting(true); setSaveNote(""); setSteps([]); setFrame(null);
+    setStatus("Creating recording… FAST ⚡");
     try {
       const recording = await API.post("/api/recordings", {
         project_id: project.id,
@@ -470,10 +497,10 @@ function Recorder({ project, onRun, liveWindow }) {
         start_url: (url || "").trim() || "/demo.html"
       });
       initialStepsLoaded.current = false;
-      setSteps([]); setFrame(null); setStatus("Launching browser… FAST ⚡"); setRecId(recording.id);
+      setStatus("Launching browser… FAST ⚡"); setRecId(recording.id);
       await API.post("/api/recordings/" + recording.id + "/session", {});
     } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
+    finally { setBusy(false); setStarting(false); }
   };
   // Continue an existing recording: the session opens on that recording's start
   // URL with its step count as the sequence, so new actions append after the old
@@ -569,18 +596,95 @@ function Recorder({ project, onRun, liveWindow }) {
     }
   };
 
+  // Direct typing. Printable characters are batched into one "type" action (one
+  // recorded step, not one per letter); special keys are sent immediately, in order.
+  const flushTyping = () => {
+    clearTimeout(typeTimer.current); typeTimer.current = null;
+    const chunk = typeBuffer.current; typeBuffer.current = "";
+    if (chunk) typeChain.current = typeChain.current.then(() => send({ type: "text", text: chunk }));
+  };
+  const queueText = (chunk) => {
+    typeBuffer.current += chunk;
+    clearTimeout(typeTimer.current);
+    typeTimer.current = setTimeout(flushTyping, 350);
+  };
+  const queueKey = (key) => {
+    flushTyping();
+    typeChain.current = typeChain.current.then(() => send({ type: "key", key: key }));
+  };
+
   const insertVariable = (varName) => {
     const placeholder = `{{${varName}}}`;
     setText(prev => prev + placeholder);
   };
 
+  if (starting && !recId) return e("div", { className: "fixed inset-0 bg-slate-950 z-[100] flex flex-col items-center justify-center gap-3 p-6", role: "status" },
+    e("span", { className: "text-sm font-bold text-emerald-400" }, "● " + (status || "Creating recording… FAST ⚡")),
+    e("p", { className: "text-xs text-slate-400" }, "The recording is created first; the browser opens right after. You do not need to wait for GitHub."));
+
+  // Keys that have a name on the remote keyboard. Anything else typed is text.
+  const NAMED_KEYS = { Enter: "Enter", Tab: "Tab", Backspace: "Backspace", Delete: "Delete", Escape: "Escape",
+    ArrowUp: "ArrowUp", ArrowDown: "ArrowDown", ArrowLeft: "ArrowLeft", ArrowRight: "ArrowRight",
+    Home: "Home", End: "End", PageUp: "PageUp", PageDown: "PageDown" };
+  const onTypeKeyDown = (evt) => {
+    if (evt.nativeEvent && evt.nativeEvent.isComposing) return;
+    const mods = [evt.ctrlKey && "Control", evt.altKey && "Alt", evt.metaKey && "Meta"].filter(Boolean);
+    if (NAMED_KEYS[evt.key]) {
+      evt.preventDefault();
+      queueKey(mods.concat(NAMED_KEYS[evt.key]).join("+"));
+    } else if (mods.length && evt.key.length === 1) {
+      evt.preventDefault();
+      queueKey(mods.concat(evt.key.toLowerCase()).join("+"));
+    }
+    // Plain characters arrive through onInput, which also works with phone keyboards.
+  };
+  const onTypeInput = (evt) => {
+    const value = evt.target.value;
+    evt.target.value = "";
+    if (value) queueText(value);
+  };
+  // Map a click on the picture to page pixels, correcting for FIT letterboxing.
+  const pagePoint = (img, clientX, clientY) => {
+    const rect = img.getBoundingClientRect();
+    const nw = img.naturalWidth || 1280, nh = img.naturalHeight || 800;
+    if (!rect.width || !rect.height) return null;
+    let scale, offX = 0, offY = 0;
+    if (fit) {
+      scale = Math.min(rect.width / nw, rect.height / nh);
+      offX = (rect.width - nw * scale) / 2;
+      offY = (rect.height - nh * scale) / 2;
+    } else {
+      scale = rect.width / nw;
+    }
+    const x = Math.round((clientX - rect.left - offX) / scale);
+    const y = Math.round((clientY - rect.top - offY) / (fit ? scale : rect.height / nh));
+    if (x < 0 || y < 0 || x > nw || y > nh) return null;   // clicked the black margin
+    return { x: x, y: y };
+  };
+  const toggleTyping = () => {
+    if (typeDirect) flushTyping();
+    setTypeDirect(!typeDirect);
+    if (!typeDirect) setTimeout(() => typeInput.current && typeInput.current.focus(), 0);
+  };
+  const zoomLevels = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const stepZoom = (dir) => {
+    const current = fit ? 1 : zoom;
+    const index = zoomLevels.findIndex(level => level >= current);
+    const next = zoomLevels[Math.min(zoomLevels.length - 1, Math.max(0, (index < 0 ? zoomLevels.length - 1 : index) + dir))];
+    setFit(false); setZoom(next);
+  };
+
   if (recId) return e("div", { className: "fixed inset-0 bg-slate-950 z-[100] flex flex-col p-2 gap-2" },
-    e("div", { className: "flex justify-between items-center px-1" },
+    e("div", { className: "flex flex-wrap justify-between items-center gap-2 px-1" },
       e("span", { className: "text-xs font-bold " + (status.includes("live") ? "text-emerald-400" : "text-red-400") }, status === "Browser live ⚡ FAST" ? "● BROWSER LIVE ⚡ FAST" : "● " + (status || "RECORDING")),
-      e("div", { className: "flex gap-1 items-center" },
-        e("button", { onClick: () => setZoom(z => Math.max(0.5, +(z - 0.25).toFixed(2))), className: "key-btn", title: "Zoom out" }, "−"),
-        e("span", { className: "text-xs" }, Math.round(zoom * 100) + "%"),
-        e("button", { onClick: () => setZoom(z => Math.min(2, +(z + 0.25).toFixed(2))), className: "key-btn", title: "Zoom in" }, "+"),
+      e("div", { className: "flex gap-1 items-center flex-wrap" },
+        e("button", { onClick: () => setFit(true), className: "key-btn " + (fit ? "bg-indigo-600" : ""), title: "Fit the whole page on screen", "aria-pressed": fit }, "FIT"),
+        e("button", { onClick: () => stepZoom(-1), className: "key-btn", title: "Zoom out" }, "−"),
+        e("span", { className: "text-xs w-10 text-center" }, fit ? "fit" : Math.round(zoom * 100) + "%"),
+        e("button", { onClick: () => stepZoom(1), className: "key-btn", title: "Zoom in" }, "+"),
+        e("button", { onClick: toggleTyping,
+          className: "key-btn " + (typeDirect ? "bg-emerald-600 border-emerald-300" : ""), "aria-pressed": typeDirect,
+          title: "Type straight into the remote browser" }, typeDirect ? "⌨ TYPING ON" : "⌨ TYPE DIRECTLY"),
         e("button", { onClick: stop, className: "bg-red-600 px-4 py-1 rounded font-bold text-xs" }, "SAVE"))
     ),
     error && e("p", { role: "alert", className: "text-sm text-red-300 px-1" }, error),
@@ -591,31 +695,39 @@ function Recorder({ project, onRun, liveWindow }) {
         : "bg-slate-950 border-slate-800 text-slate-300") },
       (saveState === "published" ? "✅ " : saveState === "refused" ? "⛔ "
         : saveState === "retry" ? "⏳ " : "💾 ") + saveNote),
-    e("div", { className: "browser-shell flex-1 min-h-0" },
+    e("div", { className: "browser-shell", style: { flex: "1 1 0", minHeight: "45vh" } },
       e("div", { className: "browser-bar" },
         e("span", { className: "dot red" }), e("span", { className: "dot yellow" }), e("span", { className: "dot green" }),
         e("span", { className: "browser-url" }, url || "/demo.html"),
+        typeDirect && e("span", { className: "text-[10px] text-emerald-300 font-bold" }, "keys go to the page"),
         e("span", { className: "fast-badge ml-2" }, "FAST")
       ),
-      e("div", { className: "browser-viewport flex-1 overflow-auto" },
+      e("div", { className: "browser-viewport", style: { flex: "1 1 0", minHeight: 0, overflow: fit ? "hidden" : "auto",
+          outline: typeDirect ? "2px solid #34d399" : "none", outlineOffset: "-2px" } },
         frame
           ? e("img", {
               src: frame, alt: "Remote browser", draggable: false,
-              style: { width: (100 * zoom) + "%", maxWidth: "none" },
+              style: fit
+                ? { position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "contain" }
+                : { display: "block", width: (100 * zoom) + "%", height: "auto", maxWidth: "none" },
               onClick: (evt) => {
-                const img = evt.target;
-                const rect = img.getBoundingClientRect();
-                if (!rect.width || !rect.height) return;
-                const x = Math.round((evt.clientX - rect.left) / rect.width * (img.naturalWidth || 1024));
-                const y = Math.round((evt.clientY - rect.top) / rect.height * (img.naturalHeight || 640));
-                send({ type: "tap", x: x, y: y });
+                if (typeDirect && typeInput.current) typeInput.current.focus();
+                const point = pagePoint(evt.target, evt.clientX, evt.clientY);
+                if (point) send({ type: "tap", x: point.x, y: point.y });
               }
             })
-          : e("div", { className: "browser-wait" }, error || status || "Starting the remote browser FAST…")
+          : e("div", { className: "browser-wait" }, error || status || "Starting the remote browser FAST…"),
+        typeDirect && e("input", {
+          ref: typeInput, "aria-label": "Type into the remote browser", autoComplete: "off", autoCapitalize: "off",
+          autoCorrect: "off", spellCheck: false,
+          style: { position: "absolute", left: 0, bottom: 0, width: "1px", height: "1px", opacity: 0, border: 0, padding: 0 },
+          onKeyDown: onTypeKeyDown, onInput: onTypeInput, onBlur: () => flushTyping()
+        })
       )
     ),
+    e("div", { className: "shrink-0 space-y-2 pr-1", style: { maxHeight: "34vh", overflowY: "auto" } },
     e(GuideSection, { id: "rec-live", label: "Live session controls",
-      action: "Click the picture to click, use the keyboard strip for keys, type into the text box to enter text." },
+      action: "Click the picture to click, use the keyboard strip for keys, or press ⌨ TYPE DIRECTLY and type on the picture." },
     e("div", { className: "space-y-4" },
     e(RunExistingRecording, {recId, recordings: libraryRecs, onDone: loadLibraryRecs}),
     e(ActionComposer, {label:"EXECUTE & RECORD ACTION", onSave: async step => { const res = await API.post(`/api/recordings/${recId}/input`, {type:"action", step}); if (res.step) setSteps(prev => [res.step, ...prev.filter(s => s.id !== res.step.id)]); }}),
@@ -650,7 +762,7 @@ function Recorder({ project, onRun, liveWindow }) {
         e("button", { className: "bg-indigo-600 px-4 rounded font-bold text-sm", onClick: () => { if (text) { send({ type: "text", text: text }); setText(""); } } }, "Type")
       ),
       e("p", { className: "text-[9px] text-slate-500" }, "💡 Each action is saved as an editable step in execution order. Repeating the same action merges it into one step with a ×N count.")
-    )))
+    ))))
   );
 
   return e("div", { className: "space-y-4" },

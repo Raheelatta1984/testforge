@@ -130,6 +130,34 @@ const PASTE_EXAMPLE_TYPESCRIPT = [
   ''
 ].join('\n');
 
+/* The AI onboarding loop, live: round, validated steps, repairs, time and a STOP
+   that ends the loop after the current model call. Stopping keeps the best
+   conversion so far, marked incomplete, and it can still not be saved as complete. */
+function OnboardingLoopPanel({loop,onStop}) {
+  const p=loop.progress||{};
+  const running=['queued','running','stopping'].includes(loop.status);
+  const pct=loop.status==='passed'?100:(p.percent||0);
+  const failing=(loop.result&&loop.result.ai&&loop.result.ai.onboarding&&loop.result.ai.onboarding.failing)||[];
+  const label={queued:'starting',running:'running',stopping:'stopping after the current AI call',passed:'complete — every step validated',
+    stopped:'stopped by you',incomplete:'finished incomplete',failed:'failed'}[loop.status]||loop.status;
+  return e('div',{role:'status','aria-live':'polite',className:'border '+(loop.status==='passed'?'border-emerald-700 bg-emerald-950/30':running?'border-indigo-600 bg-slate-950':'border-amber-700 bg-slate-950')+' p-3 rounded-xl space-y-2'},
+    e('div',{className:'flex flex-wrap justify-between items-center gap-2'},
+      e('p',{className:'text-xs font-bold text-indigo-300'},`AI ONBOARDING LOOP — ${label}`),
+      running && e('button',{type:'button',className:'bg-red-700 px-3 py-1 rounded text-xs font-bold disabled:opacity-50',disabled:loop.status==='stopping'||loop.stop_requested,onClick:onStop},
+        loop.stop_requested||loop.status==='stopping'?'STOPPING…':'STOP')),
+    e('div',{className:'w-full bg-slate-800 h-2 rounded-full overflow-hidden','aria-label':'Validated steps',role:'progressbar','aria-valuemin':0,'aria-valuemax':100,'aria-valuenow':pct},
+      e('div',{className:'h-2 '+(loop.status==='passed'?'bg-emerald-500':'bg-indigo-500'),style:{width:pct+'%',transition:'width 0.4s ease'}})),
+    e('p',{className:'text-[11px] text-slate-300'},
+      `${pct}% validated · ${p.valid_steps||0} of ${p.proposed_steps||0} step(s) · round ${p.round||0}${p.max_rounds?' of '+p.max_rounds:''}`+
+      (p.phase?` · ${p.phase==='fix'?'repairing failing steps':p.phase==='convert'?'asking the AI':p.phase}`:'')+
+      ` · ${p.calls||0} AI call(s) · ${p.step_fixes||0} step repair(s) · ${Math.round(loop.elapsed_seconds||0)}s`),
+    running && e('p',{className:'text-[10px] text-slate-500'},'The loop keeps converting and re-validating every step until all of them pass. Press STOP to end it; nothing is saved from an incomplete conversion.'),
+    !running && loop.status!=='passed' && failing.length>0 && e('details',{},
+      e('summary',{className:'text-xs cursor-pointer text-amber-300'},`${failing.length} step(s) still failing validation`),
+      failing.slice(0,50).map((f,i)=>e('p',{key:i,className:'text-[11px] text-slate-400 break-all'},`step ${f.step}: ${f.reason}`))),
+    loop.error && e('p',{className:'text-xs text-red-300'},loop.error));
+}
+
 function ImportScripts({ project, onSaved, onRun }) {
   const [files, setFiles] = useState([]);
   const [preview, setPreview] = useState(null);
@@ -175,6 +203,34 @@ function ImportScripts({ project, onSaved, onRun }) {
   const [pasteFilename,setPasteFilename]=useState('');
   const [pasteFormats,setPasteFormats]=useState(PASTE_FORMAT_OPTIONS);
   const generation = useRef(0);
+  // Background AI onboarding loop: the job is started, polled and can be stopped.
+  const [loop,setLoop]=useState(null);
+  const jobRef=useRef(null);
+  const aiReady = !!(aiInfo && aiInfo.available);
+  // Starts a background job and waits for it. Resolves with the final preview,
+  // including a stopped or incomplete one (it is never saved as complete).
+  const runOnboarding=async(mode,body)=>{
+    setLoop(null);
+    const started=await API.post('/api/imports/onboard',{mode,...body});
+    jobRef.current=started.job_id; setLoop(started);
+    let failures=0;
+    for(;;){
+      await new Promise(resolve=>setTimeout(resolve,700));
+      let snap;
+      try{snap=await API.get('/api/imports/onboard/'+started.job_id); failures=0;}
+      catch(err){ if(++failures>=5) throw err; continue; }
+      setLoop(snap);
+      if(snap.done){
+        if(snap.status==='failed' && !snap.result) throw new Error(snap.error || 'AI onboarding failed');
+        return snap.result;
+      }
+    }
+  };
+  const stopOnboarding=async()=>{
+    if(!jobRef.current) return;
+    try{const snap=await API.post('/api/imports/onboard/'+jobRef.current+'/stop',{}); setLoop(snap);}
+    catch(err){setError(err.message);}
+  };
   useEffect(()=>{API.get('/api/imports/packs').then(setPacks).catch(()=>{});},[]);
   useEffect(()=>{API.get('/api/imports/formats').then(d=>{setAiInfo(d.ai_onboarding||null);if(d.paste && Array.isArray(d.paste.formats) && d.paste.formats.length) setPasteFormats(d.paste.formats);}).catch(()=>{});},[]);
   useEffect(()=>{API.get('/api/imports/templates').then(data=>{setTemplates(data.templates||[]);setTemplatesNotice(data.notice||'');}).catch(()=>{});},[]);
@@ -372,9 +428,14 @@ function ImportScripts({ project, onSaved, onRun }) {
     const version=generation.current;
     try {
       if(!files.length || files.length>8 || files.reduce((n,f)=>n+f.size,0)>1048576) throw new Error('Choose 1–8 files totalling at most 1 MiB. One test per recording; Jenkins bundles include the referenced script.');
+      const useLoop = smart && aiReady;
       const result=files.length===1
-        ? await apiRequest('/api/imports/preview?filename='+encodeURIComponent(files[0].name)+(smart?'&smart=true':'&smart=false'),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:files[0]})
-        : await API.post('/api/imports/preview-bundle'+(smart?'?smart=true':'?smart=false'),{files:await Promise.all(files.map(async f=>({name:f.name,base64:await readBase64(f)})))});
+        ? (useLoop
+            ? await runOnboarding('file',{filename:files[0].name,base64:await readBase64(files[0])})
+            : await apiRequest('/api/imports/preview?filename='+encodeURIComponent(files[0].name)+(smart?'&smart=true':'&smart=false'),{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:files[0]}))
+        : (useLoop
+            ? await runOnboarding('bundle',{files:await Promise.all(files.map(async f=>({name:f.name,base64:await readBase64(f)})))})
+            : await API.post('/api/imports/preview-bundle'+(smart?'?smart=true':'?smart=false'),{files:await Promise.all(files.map(async f=>({name:f.name,base64:await readBase64(f)})))}));
       if(version!==generation.current) return;
       setPreview(result); setPlanOptions(JSON.stringify(result.execution_plan || {},null,2)); setName(result.name);
       let note=result.notice || 'Preview only: no browser launched, no source code executed, nothing saved or published.';
@@ -400,8 +461,10 @@ function ImportScripts({ project, onSaved, onRun }) {
     try {
       if(!pasteText.trim()) throw new Error('Paste or type a script first — the script area is empty.');
       if(new Blob([pasteText]).size>1048576) throw new Error('The pasted script exceeds 1 MiB. Split it into one test per recording.');
-      const result=await API.post('/api/imports/preview-text'+(smart?'?smart=true':'?smart=false'),
-        {content:pasteText, format:pasteFormat, ...(pasteFilename.trim()?{filename:pasteFilename.trim()}:{}), smart});
+      const pasteBody={content:pasteText, format:pasteFormat, ...(pasteFilename.trim()?{filename:pasteFilename.trim()}:{})};
+      const result=(smart && aiReady)
+        ? await runOnboarding('text',pasteBody)
+        : await API.post('/api/imports/preview-text'+(smart?'?smart=true':'?smart=false'),{...pasteBody, smart});
       if(version!==generation.current) return;
       setPreview(result); setPlanOptions(JSON.stringify(result.execution_plan || {},null,2)); setName(result.name);
       let note=result.notice || 'Pasted script processed — preview only: no browser launched, no source code executed, nothing saved or published.';
@@ -541,6 +604,7 @@ function ImportScripts({ project, onSaved, onRun }) {
         'AI SMART ONBOARDING',
         aiInfo && e('span',{className:'text-[10px] '+(aiInfo.available?'text-emerald-300':'text-slate-500')},
           aiInfo.available?` · ready (${aiInfo.model})`:' · unavailable (no ANTHROPIC_API_KEY)'))),
+    loop && e(OnboardingLoopPanel,{loop,onStop:stopOnboarding}),
     error && e('p',{role:'alert',className:'text-red-300 text-xs'},error),
     pollNote && e('p',{role:'status',className:'text-amber-300 text-xs'},pollNote),
     notice && e('p',{role:'status',className:'text-emerald-300 text-xs'},notice),

@@ -5,7 +5,7 @@ function InputFields({definitions=[], defaults={}, values={}, onChange}) {
   return e('div', {className:'space-y-2'}, names.length===0 && e('p',{className:'text-xs text-slate-400'},'No inputs defined. Add project variables or parameters in the Variables tab.'),
     names.map(name=>{const definition=definitions.find(v=>v.name===name)||{}; const secret=definition.is_secret || defaults[name]==='[encrypted]';
       const value=Object.hasOwn(values,name)?values[name]:(Object.hasOwn(defaults,name)?defaults[name]:definition.value||'');
-      return e('label',{key:name,className:'block text-xs text-slate-400'},`${name} · ${definition.category==='Parameter'?'parameter':'variable'}${secret?' · encrypted':''}`,
+      return e('label',{key:name,className:'block text-xs text-slate-400'},`${name} · ${definition.category==='Parameter'?'parameter':'variable'}${secret?' · encrypted':''}${definition.missing?' · not saved in project yet':''}`,
         e('input',{className:fieldClass,'aria-label':name,type:secret?'password':'text',autoComplete:'off',value:secret && (!Object.hasOwn(values,name)||value==='[encrypted]')?'':value,
           placeholder:secret?'Stored encrypted value is retained unless replaced':'Value',onChange:ev=>{const next={...values}; if(secret && !ev.target.value) delete next[name]; else next[name]=ev.target.value; onChange(next);}}));}));
 }
@@ -127,16 +127,45 @@ function SecureVariables({project}) {
 }
 
 function ExecutionInputs({recording,onClose,onRun}) {
-  const [config,setConfig]=useState(null), [changes,setChanges]=useState({}), [note,setNote]=useState(''), [busy,setBusy]=useState(false);
-  useEffect(()=>{API.get(`/api/recordings/${recording.id}/inputs`).then(setConfig).catch(err=>setNote(err.message));},[recording.id]);
-  const work=async(fn)=>{setBusy(true);try{await fn();}catch(err){setNote(err.message);}finally{setBusy(false);}};
+  // The dialog opens at once with a loading line; the inputs arrive a moment later.
+  // `config` is re-read every time the dialog opens and on REFRESH, so a variable
+  // saved from an AI recording a moment ago is listed without reloading the page.
+  const [config,setConfig]=useState(null), [changes,setChanges]=useState({}), [note,setNote]=useState(''), [busy,setBusy]=useState(''), [loading,setLoading]=useState(true);
+  const load=()=>{setLoading(true);return API.get(`/api/recordings/${recording.id}/inputs`).then(data=>{setConfig(data);setNote('');}).catch(err=>setNote(err.message)).finally(()=>setLoading(false));};
+  useEffect(()=>{setChanges({});load();},[recording.id]);
+  const work=async(label,fn)=>{setBusy(label);try{await fn();}catch(err){setNote(err.message);}finally{setBusy('');}};
+  const used=new Set((config&&config.used_names)||[]);
+  // A name the recording uses but the project does not hold yet still gets an
+  // input, so nothing typed in an AI recording is silently unfillable.
+  const missing=(config&&config.missing_names)||[];
+  const definitions=config ? [...config.project_variables, ...missing.map(name=>({name,category:'General',value:'',missing:true}))] : [];
+  const usedDefs=definitions.filter(v=>used.has(v.name));
+  const otherDefs=definitions.filter(v=>!used.has(v.name));
+  // Each group sees only its own names, so a value typed for a used variable is
+  // never shown twice. Stored defaults that match no definition go to "other".
+  const groupOf=(names,source)=>Object.fromEntries(Object.entries(source||{}).filter(([k])=>names(k)));
+  const isUsed=k=>used.has(k);
+  const isOther=k=>!used.has(k);
+  const changeGroup=(names)=>next=>setChanges(prev=>{const out={...prev}; for(const k of Object.keys(prev)) if(names(k)) delete out[k]; return {...out,...next};});
+  const otherExtra=config ? Object.keys(config.defaults||{}).filter(k=>!used.has(k) && !otherDefs.some(v=>v.name===k)) : [];
   return e('div',{role:'dialog','aria-label':'Execution inputs',className:'fixed inset-0 z-[110] overflow-y-auto bg-slate-950 p-6 space-y-4'},
-    e('h2',{className:'font-bold text-indigo-300'},`Inputs · ${recording.name}`),
+    e('div',{className:'flex flex-wrap justify-between items-center gap-2'},
+      e('h2',{className:'font-bold text-indigo-300'},`Inputs · ${recording.name}`),
+      e('button',{className:'key-btn',disabled:loading||!!busy,onClick:()=>load()},loading?'LOADING…':'REFRESH')),
     e('p',{className:'text-xs text-slate-400'},'Run once uses these edits without changing persistent project values. Save recording defaults to reuse edits for this recording. These inputs also apply to imported/AI-authored recordings; this does not add an autonomous AI agent.'),
-    config && e(InputFields,{definitions:config.project_variables,defaults:config.defaults,values:changes,onChange:setChanges}),
+    loading && !config && e('p',{role:'status',className:'text-xs text-slate-400'},'Loading inputs…'),
+    config && usedDefs.length>0 && e('div',{className:'space-y-2 border border-indigo-800/60 rounded-xl p-3'},
+      e('p',{className:'text-xs font-bold text-indigo-300'},`Used by this recording (${usedDefs.length})`),
+      e(InputFields,{definitions:usedDefs,defaults:groupOf(isUsed,config.defaults),values:groupOf(isUsed,changes),onChange:changeGroup(isUsed)})),
+    config && (otherDefs.length>0 || otherExtra.length>0) && e('div',{className:'space-y-2 border border-slate-800 rounded-xl p-3'},
+      e('p',{className:'text-xs font-bold text-slate-300'},`Other variables and parameters in this project (${otherDefs.length+otherExtra.length})`),
+      e(InputFields,{definitions:otherDefs,defaults:groupOf(isOther,config.defaults),values:groupOf(isOther,changes),onChange:changeGroup(isOther)})),
+    config && usedDefs.length===0 && otherDefs.length===0 && Object.keys(config.defaults||{}).length===0 &&
+      e('p',{className:'text-xs text-slate-400'},'No inputs defined. Add project variables or parameters in the Variables tab.'),
+    missing.length>0 && e('p',{role:'status',className:'text-[11px] text-amber-300'},`This recording uses ${missing.map(n=>'{{'+n+'}}').join(', ')} but the project has no variable with that name yet. Type a value here, or add it in the Variables tab and press REFRESH.`),
     e('div',{className:'flex flex-wrap gap-2'},
-      e('button',{className:'key-btn',disabled:busy||!config,onClick:()=>work(async()=>{await onRun(recording,changes);onClose();})},'RUN ONCE'),
-      e('button',{className:'key-btn',disabled:busy||!config,onClick:()=>work(async()=>{const result=await API.put(`/api/recordings/${recording.id}/inputs`,{variables:{...config.defaults,...changes}});setConfig({...config,defaults:result.defaults});setChanges({});setNote(result.publish_message||'Recording defaults saved.');})},'SAVE RECORDING DEFAULTS'),
+      e('button',{className:'key-btn',disabled:!!busy||!config,onClick:()=>work('run',async()=>{await onRun(recording,changes);onClose();})},busy==='run'?'STARTING…':'RUN ONCE'),
+      e('button',{className:'key-btn',disabled:!!busy||!config,onClick:()=>work('save',async()=>{const result=await API.put(`/api/recordings/${recording.id}/inputs`,{variables:{...config.defaults,...changes}});setConfig({...config,defaults:result.defaults});setChanges({});setNote(result.publish_message||'Recording defaults saved.');})},busy==='save'?'SAVING…':'SAVE RECORDING DEFAULTS'),
       e('button',{className:'key-btn',onClick:onClose},'CLOSE')),
     note && e('p',{role:'alert',className:'text-xs text-amber-300'},note));
 }
