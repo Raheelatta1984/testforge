@@ -28,6 +28,8 @@
             "recording.feature",
             "recording.spec.ts",
             "requirements.txt",
+            "step-002.png",
+            "step-003.png",
             "steps.json",
             "testcomplete.csv",
             "testcomplete.xlsx",
@@ -35,7 +37,7 @@
             "testforge_runtime.py"
           ],
           "start_url": "https://www.amazon.com/",
-          "step_count": 0,
+          "step_count": 3,
           "tags": ""
         },
         {

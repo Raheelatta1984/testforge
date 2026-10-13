@@ -1,1 +1,6 @@
 ﻿Step,Action,Selector,Input,Screenshot
+1,Open https://www.amazon.com/,{},https://www.amazon.com/,
+2,"Click Click the button below to continue shopping
+Continue shopping
+Conditions of Use","{""primary"": ""body:nth-of-type(1) > div:nth-of-type(1)"", ""x"": 706, ""y"": 266, ""text"": ""Click the button below to continue shopping\nContinue shopping\nConditions of Use "", ""tag"": ""div""}",,step-002.png
+3,Click Continue shopping,"{""primary"": ""form:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > span:nth-of-type(1) > span:nth-of-type(1) > button:nth-of-type(1)"", ""x"": 568, ""y"": 213, ""text"": ""Continue shopping"", ""tag"": ""button""}",,step-003.png

@@ -9,6 +9,45 @@
   "project_id": "qa-sample-app",
   "start_url": "https://www.amazon.com/",
   "status": "active",
-  "steps": [],
+  "steps": [
+    {
+      "action": "navigate",
+      "id": "156ac500-7ca3-4429-8019-c8c6c0d895bb",
+      "label": "Open https://www.amazon.com/",
+      "order": 1,
+      "selector": null,
+      "value": "https://www.amazon.com/"
+    },
+    {
+      "action": "click",
+      "id": "b95bddf3-99ea-4c57-aacc-4e30c3186e74",
+      "label": "Click Click the button below to continue shopping\nContinue shopping\nConditions of Use",
+      "order": 2,
+      "screenshot": "step-002.png",
+      "selector": {
+        "primary": "body:nth-of-type(1) > div:nth-of-type(1)",
+        "tag": "div",
+        "text": "Click the button below to continue shopping\nContinue shopping\nConditions of Use ",
+        "x": 706,
+        "y": 266
+      },
+      "value": null
+    },
+    {
+      "action": "click",
+      "id": "a221cac7-21fb-4012-bcbd-31169fed807f",
+      "label": "Click Continue shopping",
+      "order": 3,
+      "screenshot": "step-003.png",
+      "selector": {
+        "primary": "form:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > span:nth-of-type(1) > span:nth-of-type(1) > button:nth-of-type(1)",
+        "tag": "button",
+        "text": "Continue shopping",
+        "x": 568,
+        "y": 213
+      },
+      "value": null
+    }
+  ],
   "tags": ""
 }
