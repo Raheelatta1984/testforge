@@ -882,6 +882,32 @@ def get_recording(recording_id: str) -> dict | None:
     return _recording_payload(data, with_steps=True)
 
 
+def list_variables_current(project_id: str) -> list[dict]:
+    """Project variables and parameters exactly as they are on disk right now.
+
+    The Inputs screen needs what was saved a moment ago (for example the values
+    adopted from an AI recording), so this skips the cache and does not scan
+    every recording's files to compute tags, which the screen never shows.
+    """
+    require_id(project_id, "project id")
+    if _read_project(project_id) is None:
+        raise NotFound("Project not found")
+    result = []
+    for variable in _read_variables(project_id):
+        name = variable.get("name") or ""
+        encrypted = bool(variable.get("is_secret")) or str(variable.get("value", "")).startswith("enc:v1:")
+        result.append({
+            "id": variable.get("id"),
+            "name": name,
+            "value": "" if encrypted else variable.get("value") or "",
+            "is_secret": encrypted,
+            "category": variable.get("category") or "General",
+            "source": "repository",
+            "repository_path": variables_repo_path(project_id),
+        })
+    return result
+
+
 def list_variables(project_id: str) -> list[dict]:
     require_id(project_id, "project id")
     if _read_project(project_id) is None:
@@ -1714,7 +1740,13 @@ def create_project(name: str, base_url: str, entity_id: str | None = None,
             raise
 
 
-def create_recording(project_id: str, name: str, start_url: str, parent_id: str | None = None, *, steps: list | None = None, tags: str = "", execution_plan: dict | None = None) -> dict:
+def create_recording(project_id: str, name: str, start_url: str, parent_id: str | None = None, *, steps: list | None = None, tags: str = "", execution_plan: dict | None = None, publish: bool = True) -> dict:
+    """Create a recording row and its files.
+
+    ``publish=False`` writes the files and the catalog and returns at once: the
+    network push is then left to the caller (the recorder's start path runs it in
+    the background, so pressing START never waits on GitHub).
+    """
     require_id(project_id, "project id")
     if execution_plan is not None:
         from app.plan_runtime import normalize_plan
@@ -1748,6 +1780,12 @@ def create_recording(project_id: str, name: str, start_url: str, parent_id: str 
                 db.refresh(recording)
                 recording_id = recording.id
             payload = _write_recording_files(recording_id)
+            if not publish:
+                _CACHE["plan_catalog"] = None
+                _write_catalog()
+                payload.update({"published": False, "publish_state": "pending", "publish_message": "Recording created. Library publish runs in the background.",
+                                "retry_scheduled": False, "retry_in_seconds": None})
+                return payload
             payload.update(publish_outcome(_finish(f"Save library recording {name} - Project {project_id}")))
             return payload
         except Exception:

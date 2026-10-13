@@ -254,6 +254,121 @@ async def preview_bundle(request: Request, smart: bool = True):
     return await _exclusive(parse_bundle, decoded)
 
 
+def _paste_fields(body):
+    """Validated pasted-script fields, the same checks as the synchronous paste preview."""
+    from app.script_import import detect_pasted_filename
+    content = body.get("content", body.get("script", body.get("text")))
+    if not isinstance(content, str) or not content.strip():
+        raise HTTPException(422, "Paste or type a script first (the script area is empty)")
+    try:
+        data = content.encode("utf-8")
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise HTTPException(422, "The pasted script could not be read as UTF-8 text") from exc
+    if len(data) > MAX_BYTES:
+        raise HTTPException(413, "Pasted script exceeds the 1 MiB import limit")
+    filename_hint = body.get("filename", body.get("file_name"))
+    if filename_hint is not None and not isinstance(filename_hint, str):
+        raise HTTPException(422, "filename must be a file name such as login.spec.ts")
+    format_hint = body.get("format", body.get("language"))
+    if format_hint is not None and not isinstance(format_hint, str):
+        raise HTTPException(422, "format must be one of the paste formats (or auto)")
+    try:
+        resolved = detect_pasted_filename(content, filename_hint, format_hint)
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return content, data, resolved, format_hint
+
+
+def _decode_files(files):
+    if not isinstance(files, list) or not 1 <= len(files) <= 8:
+        raise HTTPException(422, "Provide 1–8 files")
+    try:
+        return [(str(f["name"])[:255], base64.b64decode(f["base64"], validate=True)) for f in files]
+    except (KeyError, ValueError, TypeError) as exc:
+        raise HTTPException(422, "Each file needs name and valid base64 fields") from exc
+
+
+@router.post("/api/imports/onboard", status_code=202)
+async def start_onboarding(request: Request):
+    """Start a background AI onboarding job for a pasted script, a file or a bundle.
+
+    The job loops (convert -> validate every step -> AI fix -> re-validate) until
+    every step validates, and runs until it does or until POST .../stop. Poll
+    GET /api/imports/onboard/{job_id} for progress and the final preview.
+    """
+    from app import ai_onboarding, onboarding_jobs
+    body = await body_json(request)
+    if not ai_onboarding.available():
+        raise HTTPException(409, "AI onboarding needs ANTHROPIC_API_KEY on this server. The static validator "
+                                 "still runs on PROCESS; fix the reported lines or set the key.")
+    mode = body.get("mode", "text")
+    if mode == "text":
+        content, data, resolved, format_hint = _paste_fields(body)
+        filename = resolved[:255]
+
+        def prepare():
+            return filename, parse_file(filename, data), ai_onboarding._decode_source(data)
+
+        def finalize(result):
+            result = {**result, "input_method": "paste",
+                      "paste": {"filename": resolved, "format": str(format_hint or "auto").strip().lower() or "auto",
+                                "characters": len(content), "lines": content.count("\n") + 1, "smart": True}}
+            result["name"] = _pasted_display_name(content, result.get("name") or "", resolved)
+            return result
+    elif mode == "file":
+        filename = str(body.get("filename") or "upload")[:255]
+        try:
+            data = base64.b64decode(body.get("base64") or "", validate=True)
+        except (ValueError, TypeError, binascii.Error) as exc:
+            raise HTTPException(422, "The file must be sent as base64 in the base64 field") from exc
+        if len(data) > MAX_BYTES:
+            raise HTTPException(413, "Import exceeds the 1 MiB limit")
+
+        def prepare():
+            return filename, parse_file(filename, data), ai_onboarding._decode_source(data)
+
+        def finalize(result):
+            return result
+    elif mode == "bundle":
+        decoded = _decode_files(body.get("files"))
+
+        def prepare():
+            static = parse_bundle(decoded)
+            script = static.get("filename") or ""
+            payload = next((blob for name, blob in decoded if name == script), None)
+            source = ai_onboarding._decode_source(payload) if payload is not None else None
+            return script, static, source
+
+        def finalize(result):
+            return result
+    else:
+        raise HTTPException(422, "mode must be text, file or bundle")
+    try:
+        job = onboarding_jobs.start(mode, prepare, finalize)
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    return job.snapshot()
+
+
+@router.get("/api/imports/onboard/{job_id}")
+def onboarding_status(job_id: str):
+    from app import onboarding_jobs
+    job = onboarding_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(404, "Onboarding job not found (it may have expired)")
+    return job.snapshot()
+
+
+@router.post("/api/imports/onboard/{job_id}/stop")
+def stop_onboarding(job_id: str):
+    """Stop the loop after the current model call; the best conversion so far is returned."""
+    from app import onboarding_jobs
+    job = onboarding_jobs.request_stop(job_id)
+    if job is None:
+        raise HTTPException(404, "Onboarding job not found (it may have expired)")
+    return job.snapshot()
+
+
 @router.post("/api/imports/save", status_code=201)
 async def save(request: Request):
     body = await body_json(request)

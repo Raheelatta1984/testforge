@@ -122,6 +122,10 @@ def api_key():
     return os.environ.get("ANTHROPIC_API_KEY", "")
 
 
+class AIPermanentError(RuntimeError):
+    """The service refused the request (bad key, unknown model...). Retrying cannot help."""
+
+
 class Budget:
     """One import's AI spend: calls, per-step repairs and wall clock, all capped.
 
@@ -129,24 +133,33 @@ class Budget:
     imports, so a slow or retrying AI service must not be able to hold the
     import gate open for long. When any budget runs out the loop stops and the
     result so far is returned (the static result if nothing landed).
+
+    Background onboarding jobs pass their own limits and a ``should_stop`` hook,
+    so the user's STOP button ends the loop between two model calls.
     """
 
-    def __init__(self):
+    def __init__(self, *, max_calls=None, max_step_fixes=None, time_limit=None, should_stop=None):
+        self.max_calls = MAX_AI_CALLS if max_calls is None else max_calls
+        self.max_step_fixes = MAX_STEP_FIXES if max_step_fixes is None else max_step_fixes
         self.calls = 0
         self.step_fixes = 0
-        self.deadline = time.monotonic() + TIME_BUDGET_SECONDS
+        self.deadline = time.monotonic() + (TIME_BUDGET_SECONDS if time_limit is None else time_limit)
+        self.should_stop = should_stop
+
+    def stopped(self):
+        return bool(self.should_stop and self.should_stop())
 
     def exhausted(self):
-        return time.monotonic() >= self.deadline
+        return self.stopped() or time.monotonic() >= self.deadline
 
     def take_call(self):
-        if self.calls >= MAX_AI_CALLS or self.exhausted():
+        if self.calls >= self.max_calls or self.exhausted():
             return False
         self.calls += 1
         return True
 
     def take_step_fix(self):
-        if self.step_fixes >= MAX_STEP_FIXES or self.exhausted():
+        if self.step_fixes >= self.max_step_fixes or self.exhausted():
             return False
         self.step_fixes += 1
         return True
@@ -209,7 +222,7 @@ def _post(payload, key):
         except urllib.error.HTTPError as exc:
             last_error = exc
             if exc.code not in {429, 500, 502, 503, 504, 529}:
-                break
+                raise AIPermanentError("AI service refused the request (HTTP %s): %s" % (exc.code, exc.reason))
         except (urllib.error.URLError, TimeoutError, OSError) as exc:
             last_error = exc
         if attempt < CALL_RETRIES:
@@ -272,31 +285,42 @@ def validate_steps(raw_steps, source, budget, trace):
 
     This is the per-step loop the onboarding is built on: validate -> AI fix ->
     re-validate, for every single step, until it is canonical, its attempt budget
-    is spent, or the import-wide repair budget is spent. Returns (steps, failures).
+    is spent, or the import-wide repair budget is spent. Every repaired step is
+    validated again, including the last one, and a step that still fails is
+    reported with its reason rather than dropped silently.
+    Returns (steps, failures).
     """
     accepted, failures = [], []
     for index, raw in enumerate(raw_steps[:MAX_STEPS], 1):
         step = raw if isinstance(raw, dict) else {}
         outcome = None
-        for attempt in range(1, STEP_FIX_ATTEMPTS + 1):
+        last_error = None
+        # One first try plus STEP_FIX_ATTEMPTS repairs; each repair is validated.
+        for attempt in range(1, STEP_FIX_ATTEMPTS + 2):
             try:
                 accepted.append(normalize_step(step, len(accepted) + 1))
                 outcome = "accepted%s" % ("" if attempt == 1 else " after %d AI repair(s)" % (attempt - 1))
                 break
             except (ValueError, TypeError, OverflowError) as exc:
-                error = exc
+                last_error = exc
+                if attempt > STEP_FIX_ATTEMPTS:
+                    break
                 if not budget.take_step_fix():
-                    outcome = "dropped: repair budget exhausted (%s)" % error
+                    if budget.stopped():
+                        outcome = "not repaired: the onboarding job was stopped"
+                    else:
+                        outcome = "dropped: repair budget exhausted (%s)" % exc
                     break
                 try:
-                    step = fix_one_step(step, error, source, budget)
-                    outcome = None  # loop: re-validate the fixed step
+                    step = fix_one_step(step, exc, source, budget)
                 except (RuntimeError, ValueError) as fix_error:
                     outcome = "dropped: AI repair failed (%s)" % fix_error
                     break
-        if outcome and outcome.startswith("accepted"):
+        if outcome is None:
+            outcome = "dropped: still invalid after %d AI repair(s) (%s)" % (STEP_FIX_ATTEMPTS, last_error)
+        if outcome.startswith("accepted"):
             trace.append({"step": index, "result": outcome})
-        elif outcome:
+        else:
             failures.append({"step": index, "raw": step, "reason": outcome})
             trace.append({"step": index, "result": outcome})
     return accepted, failures
@@ -404,6 +428,177 @@ def smart_repair(filename, source, static_result):
                    elapsed_seconds=round(time.monotonic() - started, 1),
                    trace=trace[:200])
     return _merge_result(static_result, steps, notes, ai_meta)
+
+
+# Limits for a background onboarding job. They are safety ceilings for runaway
+# spend, not the goal: the loop keeps going until every step validates or the
+# user presses STOP. Override per deployment with the TF_ONBOARD_* variables.
+JOB_MAX_ROUNDS = int(os.environ.get("TF_ONBOARD_MAX_ROUNDS", "25"))
+JOB_MAX_CALLS = int(os.environ.get("TF_ONBOARD_MAX_CALLS", "300"))
+JOB_MAX_STEP_FIXES = int(os.environ.get("TF_ONBOARD_MAX_STEP_FIXES", "400"))
+JOB_TIME_LIMIT = float(os.environ.get("TF_ONBOARD_TIME_LIMIT", "1800"))
+TRANSPORT_FAILURE_LIMIT = 3          # consecutive transport failures before giving up
+
+
+def job_budget(should_stop=None):
+    """The budget a background onboarding job runs under."""
+    return Budget(max_calls=JOB_MAX_CALLS, max_step_fixes=JOB_MAX_STEP_FIXES,
+                  time_limit=JOB_TIME_LIMIT, should_stop=should_stop)
+
+
+def _budget_status(budget):
+    if budget.stopped():
+        return "stopped"
+    if time.monotonic() >= budget.deadline:
+        return "time-limit"
+    return "call-limit"
+
+
+def _pause(budget, seconds):
+    """Back off between retries, but wake up at once when the job is stopped."""
+    end = time.monotonic() + seconds
+    while time.monotonic() < end and not budget.stopped():
+        time.sleep(0.2)
+
+
+def _incomplete_message(status, valid, proposed, failures, rounds, reason=""):
+    where = "%d of %d step(s) validated" % (valid, proposed) if proposed else "no steps validated yet"
+    if status == "stopped":
+        return ("AI onboarding was stopped with %s. Nothing is saved from an incomplete conversion: "
+                "press PROCESS again to continue the loop, or fix the script." % where)
+    if status == "round-limit":
+        return ("AI onboarding reached its round limit (%d) with %s. Raise TF_ONBOARD_MAX_ROUNDS to let it "
+                "run longer, or fix the failing steps by hand." % (rounds, where))
+    if status == "time-limit":
+        return "AI onboarding reached its time limit with %s. Raise TF_ONBOARD_TIME_LIMIT or fix the script." % where
+    if status == "call-limit":
+        return "AI onboarding reached its model-call limit with %s. Raise TF_ONBOARD_MAX_CALLS or fix the script." % where
+    if status == "no-steps":
+        return ("The AI found no browser steps to convert in this script (%s). If it is a runner that loads "
+                "steps from a data file, upload that file together with the script as a bundle." % (reason or "no steps proposed"))
+    if status == "failed":
+        return "AI onboarding stopped because the AI service failed repeatedly: %s" % (reason or "unknown error")
+    return "AI onboarding did not finish: %s" % where
+
+
+def onboard_until_valid(filename, source, static_result, budget, on_progress=None):
+    """Loop validate -> convert -> per-step fix -> re-validate until every step passes.
+
+    Each round asks the model for the whole script as canonical steps, re-validates
+    every step with the same validator that guards saved recordings, and sends the
+    exact failures back for another round. The loop ends when:
+
+    * every step validates (``passed``), or
+    * the user stops it, or a limit is reached (``stopped``, ``round-limit``,
+      ``time-limit``, ``call-limit``), or
+    * the service refuses the request, or keeps failing (``failed``), or
+      the model finds no steps twice (``no-steps``).
+
+    Anything short of ``passed`` is reported as an error diagnostic, so an
+    incomplete conversion can never be saved as if it were complete.
+    """
+    started = time.monotonic()
+    trace, steps, notes, failures = [], [], [], []
+    feedback, status, reason = "", "running", ""
+    rounds, proposed, empty_rounds, transport_failures = 0, 0, 0, 0
+
+    def report(phase):
+        if on_progress:
+            on_progress({"round": rounds, "max_rounds": JOB_MAX_ROUNDS, "phase": phase,
+                         "calls": budget.calls, "step_fixes": budget.step_fixes,
+                         "valid_steps": len(steps), "proposed_steps": proposed,
+                         "failing_steps": len(failures)})
+
+    for round_no in range(1, JOB_MAX_ROUNDS + 1):
+        if budget.exhausted():
+            status = _budget_status(budget)
+            break
+        rounds = round_no
+        report("convert")
+        try:
+            reply = convert_whole_file(filename, source, static_result, budget, feedback)
+        except AIPermanentError as exc:
+            trace.append({"stage": "convert round %d" % round_no, "result": "refused: %s" % exc})
+            status, reason = "failed", str(exc)
+            break
+        except (RuntimeError, ValueError) as exc:
+            if budget.exhausted():
+                status = _budget_status(budget)
+                break
+            trace.append({"stage": "convert round %d" % round_no, "result": "failed: %s" % exc})
+            if isinstance(exc, ValueError):
+                # The reply was not the JSON object asked for: say so and ask again.
+                feedback = "Your last reply could not be read as the required JSON object (%s). Return ONLY that JSON object." % exc
+                continue
+            transport_failures += 1
+            reason = str(exc)
+            if transport_failures >= TRANSPORT_FAILURE_LIMIT:
+                status = "failed"
+                break
+            _pause(budget, min(10, 2 * transport_failures))
+            continue
+        transport_failures = 0
+        raw_steps = reply.get("steps") if isinstance(reply, dict) else None
+        if not isinstance(raw_steps, list):
+            raw_steps = []
+        reply_notes = reply.get("notes") if isinstance(reply, dict) else None
+        if isinstance(reply_notes, list):
+            for note in reply_notes[:10]:
+                text = str(note)[:300]
+                if text not in notes:
+                    notes.append(text)
+        trace.append({"stage": "convert round %d" % round_no, "result": "%d step(s) proposed" % len(raw_steps)})
+        if not raw_steps:
+            empty_rounds += 1
+            if empty_rounds >= 2:
+                status, reason = "no-steps", "the model proposed none twice"
+                break
+            feedback = ("Your reply contained no steps. Convert every browser action the script performs into "
+                        "steps, in order, or explain in notes why it cannot be converted.")
+            continue
+        empty_rounds = 0
+        proposed = len(raw_steps)
+        batch, failures = validate_steps(raw_steps, source, budget, trace)
+        if len(batch) >= len(steps):
+            steps = batch                       # keep the best attempt so far
+        if budget.exhausted():
+            status = _budget_status(budget)
+            break
+        if batch and not failures:
+            status, failures = "passed", []
+            break
+        feedback = ("Round %d validated %d of %d step(s). These steps still fail TestForge validation: %s. "
+                    "Return the COMPLETE corrected step list for the whole script, every step, in order."
+                    % (round_no, len(batch), len(raw_steps),
+                       "; ".join("step %s: %s" % (f["step"], str(f["reason"])[:160]) for f in failures[:12]) or "none listed"))
+        report("fix")
+    else:
+        status = "round-limit"
+
+    total = len(steps) + len(failures) if status != "passed" else len(steps)
+    percent = 100 if status == "passed" else (round(100.0 * len(steps) / proposed) if proposed else 0)
+    ai_meta = {"available": True, "used": True, "model": MODEL, "calls": budget.calls,
+               "step_fixes": budget.step_fixes, "converted_steps": len(steps),
+               "repaired_steps": sum(1 for item in trace if "repair" in str(item.get("result", ""))),
+               "unconverted": len(failures),
+               "loop": "validate → convert → validate per step → fix → re-validate, until every step passes or the job is stopped",
+               "elapsed_seconds": round(time.monotonic() - started, 1),
+               "trace": trace[-200:]}
+    ai_meta["onboarding"] = {
+        "status": status, "rounds": rounds, "max_rounds": JOB_MAX_ROUNDS, "percent": percent,
+        "valid_steps": len(steps), "proposed_steps": proposed or total,
+        "failing": [{"step": f["step"], "reason": str(f["reason"])[:300]} for f in failures[:50]],
+        "stopped": budget.stopped(), "reason": reason[:300],
+        "limits": {"calls": JOB_MAX_CALLS, "step_fixes": JOB_MAX_STEP_FIXES, "time_seconds": JOB_TIME_LIMIT},
+    }
+    result = _merge_result(static_result, steps, notes, ai_meta)
+    if status != "passed":
+        result["diagnostics"].append({
+            "file": static_result.get("filename", ""), "line": 1, "severity": "error",
+            "message": "[ai-onboarding] " + _incomplete_message(status, len(steps), proposed, failures, rounds, reason)})
+        result["can_save"] = False
+    report("done")
+    return result
 
 
 def _ai_unavailable_meta(reason):

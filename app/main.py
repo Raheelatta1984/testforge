@@ -665,8 +665,35 @@ def delete_var(vid: str):
     return {"ok": True}
 
 
+# Background library publishes started by the fast create path. Held here so the
+# tasks are not garbage-collected while they run.
+_background_publishes: set = set()
+
+
+def spawn_background_publish():
+    """Push the library without the caller waiting for GitHub.
+
+    Used by the recorder's START path: writing the recording files is quick, but
+    the push to GitHub can take seconds, and nobody should wait for it to press
+    START. A failed push is retried exactly like any other unsynced save.
+    """
+    async def publish():
+        try:
+            published = await asyncio.to_thread(library_store.publish_pending)
+            if not published and library_store.publish_enabled():
+                schedule_publish_retry()
+        except Exception as exc:  # never let a background push crash the server
+            from app.config import logger
+            logger.warning("BACKGROUND PUBLISH FAILED: %s", redact(exc))
+
+    task = asyncio.create_task(publish())
+    _background_publishes.add(task)
+    task.add_done_callback(_background_publishes.discard)
+    return task
+
+
 @app.post("/api/recordings", status_code=201)
-def create_rec(body: dict, request: Request):
+async def create_rec(body: dict, request: Request):
     project_id = body.get("project_id")
     name = body.get("name")
     if not project_id or not isinstance(name, str) or not name.strip():
@@ -682,14 +709,20 @@ def create_rec(body: dict, request: Request):
         # column cannot hold is a clear 422 here instead of a failed insert.
         raise HTTPException(status_code=422, detail="Recording name or start URL is too long")
     try:
-        return library_store.create_recording(
+        # Files only, on a worker thread: START returns as soon as the recording
+        # exists. The GitHub push follows in the background (see below).
+        created = await asyncio.to_thread(
+            library_store.create_recording,
             project_id,
             name.strip(),
             start_url,
             parent_id=body.get("parent_id") or None,
+            publish=False,
         )
     except LibraryError as exc:
         raise _library_http(exc) from exc
+    spawn_background_publish()
+    return created
 
 
 @app.get("/api/projects/{project_id}/recordings")
