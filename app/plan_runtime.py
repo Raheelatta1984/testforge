@@ -10,12 +10,12 @@ import time
 from pathlib import Path
 
 try:
-    from .step_runtime import interpolate, normalize_steps, resolve, StepRuntime
+    from .step_runtime import interpolate, normalize_steps, resolve, StepClock, StepRuntime
     from .execution_speed import normalize_speed, speed_profile
     from .desktop_runner import DESKTOP_ACTIONS, DESKTOP_FRAMEWORKS, DesktopRunner, validate_custom_app
     from .mobile_runner import MOBILE_ACTIONS, MOBILE_PLATFORMS, ORIENTATIONS, MobileRunner
 except ImportError:  # exported companion source
-    from testforge_runtime import interpolate, normalize_steps, resolve, StepRuntime
+    from testforge_runtime import interpolate, normalize_steps, resolve, StepClock, StepRuntime
     from testforge_speed import normalize_speed, speed_profile
     from testforge_desktop import DESKTOP_ACTIONS, DESKTOP_FRAMEWORKS, DesktopRunner, validate_custom_app
     from testforge_mobile import MOBILE_ACTIONS, MOBILE_PLATFORMS, ORIENTATIONS, MobileRunner
@@ -314,6 +314,7 @@ async def _run_nonweb_profile(plan, profile, base_variables, output, results,
                             'value': step['value'] if step['action'] in {'ui_grid_read', 'table_lookup', 'capture_text'} else interpolate(step.get('value'), values),
                             'selector': resolve(step.get('selector') or {}, values),
                         }
+                        clock = StepClock()
                         try:
                             result = await adapter.perform(resolved_step, values)
                         except Exception as exc:
@@ -339,6 +340,7 @@ async def _run_nonweb_profile(plan, profile, base_variables, output, results,
                                         evidence['screenshot'] = name
                                     except OSError:
                                         evidence['evidence_error'] = 'ScreenshotUnavailable'
+                        evidence.update(clock.finish())
                         record['steps'].append(evidence)
                         if pace_ms > 0:
                             await asyncio.sleep(pace_ms / 1000)
@@ -426,12 +428,14 @@ async def _run_plan(plan, base_variables, artifact_dir, *, chromium_options=None
                                         evidence_index += 1
                                         evidence = {'stage': stage, 'step': index + 1, 'repeat': repetition + 1,
                                                     'action': step['action'], 'status': 'passed'}
+                                        clock = StepClock()
                                         try:
                                             await runtime.perform(step, values)
                                         except Exception as exc:
                                             failed = True
                                             record['status'] = 'failed'
                                             evidence.update(status='failed', error_type=type(exc).__name__)
+                                        evidence.update(clock.finish())
                                         try:
                                             # One capture per expanded action, including teardown and retries.
                                             if capture_evidence:

@@ -212,6 +212,7 @@ def _run_dict(run: Run, with_log: bool = True) -> dict:
         "created_at": run.created_at,
         "started_at": run.started_at,
         "finished_at": run.finished_at,
+        "execution_speed": run.execution_speed,
         "batch_id": run.batch_id,
         # Set when queue hygiene cancelled a run: without it the row reads
         # "cancelled" and gives the operator no way to know why.
@@ -1219,7 +1220,8 @@ async def queue_run(body: dict):
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         base, overrides = freeze_inputs([recording.project_id], recording.input_defaults, overrides)
-        run = Run(recording_id=recording.id, status="queued", variable_snapshot=base, input_overrides=overrides)
+        run = Run(recording_id=recording.id, status="queued", variable_snapshot=base, input_overrides=overrides,
+                  execution_speed=execution_speed)
         db.add(run)
         db.commit()
         db.refresh(run)
@@ -1554,7 +1556,7 @@ async def start_batch(body: dict | None = None):
                 if not scenario_meta:
                     source = db.get(Recording, item['id'])
                     item['variable_snapshot'], item['input_overrides'] = freeze_inputs([item['project_id']], source.input_defaults if source else {})
-                run = Run(recording_id=item["id"], status="queued", batch_id=batch_id, sequence=sequence, variable_snapshot=item.get("variable_snapshot"), input_overrides=item.get("input_overrides"), snapshot_steps=item.get("snapshot_steps"))
+                run = Run(recording_id=item["id"], status="queued", batch_id=batch_id, sequence=sequence, variable_snapshot=item.get("variable_snapshot"), input_overrides=item.get("input_overrides"), snapshot_steps=item.get("snapshot_steps"), execution_speed=execution_speed)
                 db.add(run)
                 db.commit()
                 db.refresh(run)

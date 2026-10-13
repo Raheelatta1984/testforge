@@ -23,7 +23,7 @@ from app.browser import Preview, explain_launch_error, launch_kwargs, video_ok
 from app.config import ARTIFACTS, logger
 from app.db import Recording, Run, SessionLocal, interpolate, resolve_variables
 from app.guardrails import browser_budget, live_frames
-from app.step_runtime import audit_selector, StepRuntime, BASIC, normalize_step, interpolate as strict_interpolate
+from app.step_runtime import audit_selector, StepClock, StepRuntime, BASIC, normalize_step, interpolate as strict_interpolate
 from app.library_store import playback_url
 
 # Per-step body-text excerpt kept for the run audit and the library scenarios.
@@ -471,6 +471,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                     total = len(steps)
                     for index, step in enumerate(steps, 1):
                         percent = int((index - 1) / total * 100)
+                        clock = StepClock()
                         entry = {
                             "order": step.get("order") or index,
                             "step_index": index,
@@ -480,6 +481,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                             "selector": audit_selector(step.get("selector")),
                             "status": "running",
                             "percent": percent,
+                            "started_at": clock.started_at,
                         }
                         # The same sanitized step identity tags every frame until
                         # the next step starts. This keeps the screen and log in
@@ -496,8 +498,12 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                             if (step.get("action") or "").lower() == "log":
                                 entry["status"] = "passed"
                                 entry["percent"] = int(index / total * 100)
+                                entry.update(clock.finish())
                             else:
                                 result = await replay_step(page, step, variables, runtime=runtime)
+                                # Action finished: stamp before screenshot evidence so
+                                # durations compare the speed setting, not encoding time.
+                                entry.update(clock.finish())
                                 page = runtime.page
                                 preview.page = page
                                 if result:
@@ -521,6 +527,8 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                                 entry["status"] = "passed"
                                 entry["percent"] = int(index / total * 100)
                         except Exception as exc:
+                            if "finished_at" not in entry:
+                                entry.update(clock.finish())
                             entry["status"] = "failed"
                             entry["error"] = scrub(str(exc), sensitive).splitlines()[0][:500]
                             if screenshots in {"all", "failure"}:

@@ -36,7 +36,7 @@ Nothing here imports a second automation stack: steps are replayed by
 
 from __future__ import annotations
 
-from app.step_runtime import audit_selector, StepRuntime
+from app.step_runtime import audit_selector, StepClock, StepRuntime
 
 import asyncio
 import datetime
@@ -634,6 +634,7 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                         selector = step.get("selector") if isinstance(step.get("selector"), dict) else {}
                         budgets = pacer.budgets_for(action, selector)
                         attempt_started = time.time()
+                        step_clock = StepClock()
                         entry = {
                             "order": step.get("order") or index,
                             "action": step.get("action"),
@@ -642,6 +643,7 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                             "selector": audit_selector(step.get("selector")),
                             "status": "running",
                             "percent": int((index - 1) / total_steps * 100) if total_steps else 100,
+                            "started_at": step_clock.started_at,
                         }
                         try:
                             if action == "log":
@@ -653,6 +655,8 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                                     entry["result"] = result
                                 steps_executed += 1
                             elapsed_ms = (time.time() - attempt_started) * 1000
+                            # Action finished: stamp before screenshot evidence is captured.
+                            entry.update(step_clock.finish())
                             pacer.observe(action, selector, elapsed_ms, True)
                             entry["ms"] = round(elapsed_ms, 1)
                             entry["budget_ms"] = budgets.get("navigate_ms") if action == "navigate" else budgets.get("action_ms")
@@ -668,6 +672,8 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                                     screenshots_skipped += 1
                         except Exception as exc:
                             elapsed_ms = (time.time() - attempt_started) * 1000
+                            if "finished_at" not in entry:
+                                entry.update(step_clock.finish())
                             kind = classify_failure(str(exc))
                             pacer.observe(action, selector, elapsed_ms, False)
                             retried = False
@@ -684,6 +690,7 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                                     entry["status"] = "passed"
                                     entry["ms"] = round((time.time() - attempt_started) * 1000, 1)
                                     entry["retried"] = True
+                                    entry.update(step_clock.finish())
                                     retried = True
                                     if mode in {'all', 'changes'}:
                                         await _capture(page, run_dir, index, entry, shot_tasks, sensitive)

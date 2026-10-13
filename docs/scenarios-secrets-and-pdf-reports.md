@@ -72,6 +72,20 @@ Stored ciphertext is not decrypted and rewritten on every action. A wrapper reta
 
 Capturing every step costs more than failure-only capture. JPEG encoding, encryption, redaction, PDF layout, disk I/O and uploads have unavoidable cost. There are no extra browser workers, paid AI calls, scheduled GitHub Actions or added paid services, but **zero CPU increase, zero latency and zero hosting/provider charges cannot be guaranteed**. Check account quotas and workload limits.
 
+### Step timing and speed comparison
+
+Every step in an execution log carries `started_at` and `finished_at` (UTC, millisecond
+precision, ending in `Z`) and `duration_ms`. A step starts when its action begins and
+finishes when the action returns; screenshot encoding is not counted, so durations compare
+the speed setting itself. Each run also records the speed factor it replayed at
+(`execution_speed`, 0.25-3.0; batches use the speed chosen for the batch).
+
+The execution PDF starts with the run's start date and time, finish, duration and speed,
+then a timing summary: one row per recording and one row per step. Each step page repeats
+its own start time. The committed `library/reports` summary and `index.md` carry the start
+time and speed too, so 1x, 2x and 3x executions can be compared directly. Runs created
+before this change show "not recorded" rather than a guessed value.
+
 ## GitHub storage and 48-hour expiry
 
 Binary PDFs are **release assets**, not committed files. Committing a PDF then deleting it would leave it in Git history and would not meet retention intent.

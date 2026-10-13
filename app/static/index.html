@@ -1144,6 +1144,9 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
                         e("span", { className: "font-mono text-slate-500" }, "#" + (step.step_index || step.order || i + 1) + " · ", step.label || step.action),
                         e("span", {}, step.status === "passed" ? "✅" : step.status === "failed" ? "❌" : "⏳")
                       ),
+                      step.started_at && e("div", { className: "font-mono text-[9px] text-slate-500 mt-0.5" },
+                        "started " + String(step.started_at).replace("T", " ").replace("Z", " UTC") +
+                        (step.duration_ms != null ? " · " + Number(step.duration_ms).toFixed(1) + " ms" : "")),
                       step.error && e("div", { className: "text-red-300 mt-1" }, step.error)
                     );
                   })

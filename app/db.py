@@ -1,7 +1,7 @@
 import uuid
 import re
 from datetime import datetime
-from sqlalchemy import (create_engine, String, Text, Integer, Boolean, DateTime, ForeignKey, JSON, func, Column)
+from sqlalchemy import (create_engine, String, Text, Integer, Float, Boolean, DateTime, ForeignKey, JSON, func, Column)
 from sqlalchemy import inspect, text, types as sqltypes
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, validates
 from sqlalchemy.pool import StaticPool, QueuePool
@@ -142,6 +142,9 @@ class Run(Base):
     batch_id: Mapped[str] = mapped_column(String(36), nullable=True)   # Batch this run belongs to
     started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)  # when the browser actually took it
     cancel_reason: Mapped[str] = mapped_column(String(500), nullable=True) # why the queue dropped it
+    # Speed factor this run replayed at (0.25-3.0). Nullable: runs created before
+    # it existed have no recorded speed, and reports say so rather than guess.
+    execution_speed: Mapped[float] = mapped_column(Float, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)

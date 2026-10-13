@@ -386,6 +386,10 @@ for the browser checks; Firefox/WebKit are opt-in paths, not verified claims.
   labels, selectors, error text or PDF; a batch publishes in one commit, not one per
   recording, and still back-fills every child; `GET /api/reports/...` returns the
   `repository_path`.
+- `UT-SCENE-19`: every step records UTC `started_at`/`finished_at` and a monotonic
+  `duration_ms`; a run keeps the speed factor it replayed at (`Run.execution_speed`, batch
+  speed as fallback); the PDF prints the start date and time, the speed, a per-recording
+  and per-step timing summary, and the committed summary/index carries the start time and speed.
 - `BR-SCENE-01`: real Chromium cross-project login→logout, one shared session,
   encrypted one-off password override, masked JPEG pixel check, nine captures for
   nine actions, single and aggregate PDFs without any additional capture; single
