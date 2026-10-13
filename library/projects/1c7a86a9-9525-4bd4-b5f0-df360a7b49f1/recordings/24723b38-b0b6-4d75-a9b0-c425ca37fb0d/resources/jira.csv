@@ -1,1 +1,45 @@
 ﻿Summary,Step,Action,Description,Selector,Input,Screenshot
+"Session 14/10/2026, 01:45:44",1,navigate,Open https://www.harrisfarm.com.au/,{},https://www.harrisfarm.com.au/,
+"Session 14/10/2026, 01:45:44",2,click,Click DELIVERY,"{""primary"": ""#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)"", ""x"": 651, ""y"": 506, ""text"": ""DELIVERY"", ""tag"": ""button""}",,step-002.png
+"Session 14/10/2026, 01:45:44",3,click,Click e.g. 2066,"{""primary"": ""#store-picker-postcode"", ""x"": 476, ""y"": 474, ""text"": ""e.g. 2066"", ""tag"": ""input""}",,step-003.png
+"Session 14/10/2026, 01:45:44",4,type,Type: 2,"{""primary"": ""#store-picker-postcode""}",2,step-004.png
+"Session 14/10/2026, 01:45:44",5,type,Type: 0,"{""primary"": ""#store-picker-postcode""}",0,step-005.png
+"Session 14/10/2026, 01:45:44",6,type,Type: 4,"{""primary"": ""#store-picker-postcode""}",4,step-006.png
+"Session 14/10/2026, 01:45:44",7,type,Type: 7,"{""primary"": ""#store-picker-postcode""}",7,step-007.png
+"Session 14/10/2026, 01:45:44",8,click,Click CHECK DELIVERY,"{""primary"": ""#store-picker-find"", ""x"": 659, ""y"": 464, ""text"": ""CHECK DELIVERY"", ""tag"": ""button""}",,step-008.png
+"Session 14/10/2026, 01:45:44",9,click,Click CONTINUE,"{""primary"": ""#store-picker-select-slot"", ""x"": 413, ""y"": 542, ""text"": ""CONTINUE"", ""tag"": ""button""}",,step-009.png
+"Session 14/10/2026, 01:45:44",10,click,"Click THU
+15 Oct","{""primary"": ""#cart-slot-days > button:nth-of-type(2)"", ""x"": 474, ""y"": 168, ""text"": ""THU\n15 Oct"", ""tag"": ""button""}",,step-010.png
+"Session 14/10/2026, 01:45:44",11,click,Click Afternoon,"{""primary"": ""#cart-slot-periods > button:nth-of-type(2)"", ""x"": 528, ""y"": 260, ""text"": ""Afternoon"", ""tag"": ""button""}",,step-011.png
+"Session 14/10/2026, 01:45:44",12,click,"Click 12:00 PM-1:00 PM
+12:30 PM-1:30 PM
+1:00 PM-2:00 PM
+1:30 PM-2:30 PM
+2:00 PM-3:00 P","{""primary"": ""#cart-slot-slots"", ""x"": 617, ""y"": 409, ""text"": ""12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P"", ""tag"": ""div""}",,step-012.png
+"Session 14/10/2026, 01:45:44",13,click,Click 12:30 PM-1:30 PM,"{""primary"": ""#cart-slot-slots > button:nth-of-type(2)"", ""x"": 591, ""y"": 390, ""text"": ""12:30 PM-1:30 PM"", ""tag"": ""button""}",,step-013.png
+"Session 14/10/2026, 01:45:44",14,click,Click RESERVE TIME,"{""primary"": ""#cart-slot-reserve"", ""x"": 633, ""y"": 584, ""text"": ""RESERVE TIME"", ""tag"": ""button""}",,step-014.png
+"Session 14/10/2026, 01:45:44",15,click,Click Same day express delivery 🍉🥑,"{""primary"": ""#shopify-section-sections--19725413744699__announcement-bar > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1)"", ""x"": 405, ""y"": 29, ""text"": ""Same day express delivery \ud83c\udf49\ud83e\udd51"", ""tag"": ""div""}",,step-015.png
+"Session 14/10/2026, 01:45:44",16,click,Click Search,"{""primary"": ""#Search-In-Template"", ""x"": 390, ""y"": 61, ""text"": ""Search"", ""tag"": ""input""}",,step-016.png
+"Session 14/10/2026, 01:45:44",17,type,Type: {{Product1}},"{""primary"": ""#Search-In-Modal""}",{{Product1}},step-017.png
+"Session 14/10/2026, 01:45:44",18,click,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""x"": 411, ""y"": 464, ""text"": ""ADD TO CART"", ""tag"": ""button""}",,step-018.png
+"Session 14/10/2026, 01:45:44",19,click,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""x"": 670, ""y"": 464, ""text"": ""ADD TO CART"", ""tag"": ""button""}",,step-019.png
+"Session 14/10/2026, 01:45:44",20,click,Click ADD TO CART,"{""primary"": ""button[name=\""add\""]"", ""x"": 892, ""y"": 495, ""text"": ""ADD TO CART"", ""tag"": ""button""}",,step-020.png
+"Session 14/10/2026, 01:45:44",21,click,"Click 413,451","{""primary"": ""#predictive-search-option-product-1 > div:nth-of-type(1) > div:nth-of-type(2) > a:nth-of-type(1)"", ""x"": 413, ""y"": 451, ""text"": """", ""tag"": ""a""}",,
+"Session 14/10/2026, 01:45:44",22,click,"Click 411,464","{""primary"": null, ""x"": 411, ""y"": 464, ""text"": null, ""tag"": null}",,
+"Session 14/10/2026, 01:45:44",23,click,"Click Apple Granny Smith Organic 1kg
+AUSTRALIA
+$12.99 EA $12.99 / kg
+ADD TO CART
+Apple","{""primary"": ""#MainProduct-template--19725411582011__main > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 476, ""y"": 464, ""text"": ""Apple Granny Smith Organic 1kg\nAUSTRALIA\n$12.99 EA $12.99 / kg\nADD TO CART\nApple"", ""tag"": ""div""}",,step-023.png
+"Session 14/10/2026, 01:45:44",24,click,Click Apple Granny Smith Organic,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(3) > h3:nth-of-type(1)"", ""x"": 712, ""y"": 458, ""text"": ""Apple Granny Smith Organic"", ""tag"": ""h3""}",,step-024.png
+"Session 14/10/2026, 01:45:44",25,click,"Click Apple Granny Smith Organic
+
+Crisp and tangy, our Apple Granny Smith Organic 1kg","{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(3)"", ""x"": 937, ""y"": 474, ""text"": ""Apple Granny Smith Organic\n\nCrisp and tangy, our Apple Granny Smith Organic 1kg "", ""tag"": ""div""}",,step-025.png
+"Session 14/10/2026, 01:45:44",26,click,Click ADD TO CART,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)"", ""x"": 678, ""y"": 338, ""text"": ""ADD TO CART"", ""tag"": ""div""}",,step-026.png
+"Session 14/10/2026, 01:45:44",27,click,"Click 675,370","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 675, ""y"": 370, ""text"": """", ""tag"": ""div""}",,step-027.png
+"Session 14/10/2026, 01:45:44",28,click,"Click 709,351","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 709, ""y"": 351, ""text"": """", ""tag"": ""div""}",,step-028.png
+"Session 14/10/2026, 01:45:44",29,click,"Click 701,349","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 701, ""y"": 349, ""text"": """", ""tag"": ""div""}",,step-029.png
+"Session 14/10/2026, 01:45:44",30,click,"Click 696,354","{""primary"": ""#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)"", ""x"": 696, ""y"": 354, ""text"": """", ""tag"": ""div""}",,step-030.png
+"Session 14/10/2026, 01:45:44",31,click,Click ADD TO CART,"{""primary"": ""#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)"", ""x"": 709, ""y"": 333, ""text"": ""ADD TO CART"", ""tag"": ""div""}",,step-031.png
+"Session 14/10/2026, 01:45:44",32,click,Click $67.53,"{""primary"": ""#cart-icon-bubble > div:nth-of-type(1) > span:nth-of-type(2)"", ""x"": 957, ""y"": 63, ""text"": ""$67.53"", ""tag"": ""span""}",,step-032.png
+"Session 14/10/2026, 01:45:44",33,click,Click VIEW CART,"{""primary"": ""button[aria-label=\""View cart\""]"", ""x"": 829, ""y"": 589, ""text"": ""VIEW CART"", ""tag"": ""button""}",,

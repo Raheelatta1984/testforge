@@ -1,1 +1,467 @@
-[]
+[
+  {
+    "id": "0ca41c7e-674f-408e-a1e5-44a3004b2eda",
+    "order": 1,
+    "action": "navigate",
+    "value": "https://www.harrisfarm.com.au/",
+    "label": "Open https://www.harrisfarm.com.au/",
+    "selector": null
+  },
+  {
+    "id": "d5b8a59b-0d86-4995-830c-9f0424967119",
+    "order": 2,
+    "action": "click",
+    "value": null,
+    "label": "Click DELIVERY",
+    "selector": {
+      "primary": "#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)",
+      "x": 651,
+      "y": 506,
+      "text": "DELIVERY",
+      "tag": "button"
+    },
+    "screenshot": "step-002.png"
+  },
+  {
+    "id": "1b861c71-f96f-4bab-8300-1b496926c4d1",
+    "order": 3,
+    "action": "click",
+    "value": null,
+    "label": "Click e.g. 2066",
+    "selector": {
+      "primary": "#store-picker-postcode",
+      "x": 476,
+      "y": 474,
+      "text": "e.g. 2066",
+      "tag": "input"
+    },
+    "screenshot": "step-003.png"
+  },
+  {
+    "id": "82697a9b-9c6f-40a0-bc02-0049a8fe8968",
+    "order": 4,
+    "action": "type",
+    "value": "2",
+    "label": "Type: 2",
+    "selector": {
+      "primary": "#store-picker-postcode"
+    },
+    "screenshot": "step-004.png"
+  },
+  {
+    "id": "58562845-5049-45b9-9f02-1f6bb3a6b9a2",
+    "order": 5,
+    "action": "type",
+    "value": "0",
+    "label": "Type: 0",
+    "selector": {
+      "primary": "#store-picker-postcode"
+    },
+    "screenshot": "step-005.png"
+  },
+  {
+    "id": "1409bd58-6a0e-4bf6-9fcb-9aa18df9b4a7",
+    "order": 6,
+    "action": "type",
+    "value": "4",
+    "label": "Type: 4",
+    "selector": {
+      "primary": "#store-picker-postcode"
+    },
+    "screenshot": "step-006.png"
+  },
+  {
+    "id": "3bc9b782-b03b-4e23-a26a-31b55c7a5e23",
+    "order": 7,
+    "action": "type",
+    "value": "7",
+    "label": "Type: 7",
+    "selector": {
+      "primary": "#store-picker-postcode"
+    },
+    "screenshot": "step-007.png"
+  },
+  {
+    "id": "f8d84d92-db0c-442c-8093-8421c6bb83e9",
+    "order": 8,
+    "action": "click",
+    "value": null,
+    "label": "Click CHECK DELIVERY",
+    "selector": {
+      "primary": "#store-picker-find",
+      "x": 659,
+      "y": 464,
+      "text": "CHECK DELIVERY",
+      "tag": "button"
+    },
+    "screenshot": "step-008.png"
+  },
+  {
+    "id": "27a985f8-6ae2-4607-990f-165e66068f68",
+    "order": 9,
+    "action": "click",
+    "value": null,
+    "label": "Click CONTINUE",
+    "selector": {
+      "primary": "#store-picker-select-slot",
+      "x": 413,
+      "y": 542,
+      "text": "CONTINUE",
+      "tag": "button"
+    },
+    "screenshot": "step-009.png"
+  },
+  {
+    "id": "83d604d6-c3fd-400b-adab-bf470da268cd",
+    "order": 10,
+    "action": "click",
+    "value": null,
+    "label": "Click THU\n15 Oct",
+    "selector": {
+      "primary": "#cart-slot-days > button:nth-of-type(2)",
+      "x": 474,
+      "y": 168,
+      "text": "THU\n15 Oct",
+      "tag": "button"
+    },
+    "screenshot": "step-010.png"
+  },
+  {
+    "id": "c259f027-f42a-4c15-9339-d6a8dc4420bc",
+    "order": 11,
+    "action": "click",
+    "value": null,
+    "label": "Click Afternoon",
+    "selector": {
+      "primary": "#cart-slot-periods > button:nth-of-type(2)",
+      "x": 528,
+      "y": 260,
+      "text": "Afternoon",
+      "tag": "button"
+    },
+    "screenshot": "step-011.png"
+  },
+  {
+    "id": "b86dff3b-247e-4156-a05f-2c4a0c922d13",
+    "order": 12,
+    "action": "click",
+    "value": null,
+    "label": "Click 12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P",
+    "selector": {
+      "primary": "#cart-slot-slots",
+      "x": 617,
+      "y": 409,
+      "text": "12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P",
+      "tag": "div"
+    },
+    "screenshot": "step-012.png"
+  },
+  {
+    "id": "07b5a655-0f2b-4d0c-8acf-8b7583400282",
+    "order": 13,
+    "action": "click",
+    "value": null,
+    "label": "Click 12:30 PM-1:30 PM",
+    "selector": {
+      "primary": "#cart-slot-slots > button:nth-of-type(2)",
+      "x": 591,
+      "y": 390,
+      "text": "12:30 PM-1:30 PM",
+      "tag": "button"
+    },
+    "screenshot": "step-013.png"
+  },
+  {
+    "id": "fb0ec76e-c045-4abc-b2c2-57c5474cf451",
+    "order": 14,
+    "action": "click",
+    "value": null,
+    "label": "Click RESERVE TIME",
+    "selector": {
+      "primary": "#cart-slot-reserve",
+      "x": 633,
+      "y": 584,
+      "text": "RESERVE TIME",
+      "tag": "button"
+    },
+    "screenshot": "step-014.png"
+  },
+  {
+    "id": "81f55db2-0d6d-44e2-9aff-ee597f1896af",
+    "order": 15,
+    "action": "click",
+    "value": null,
+    "label": "Click Same day express delivery 🍉🥑",
+    "selector": {
+      "primary": "#shopify-section-sections--19725413744699__announcement-bar > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1)",
+      "x": 405,
+      "y": 29,
+      "text": "Same day express delivery 🍉🥑",
+      "tag": "div"
+    },
+    "screenshot": "step-015.png"
+  },
+  {
+    "id": "25629a0f-f8d8-4047-b6cb-233c068c42e1",
+    "order": 16,
+    "action": "click",
+    "value": null,
+    "label": "Click Search",
+    "selector": {
+      "primary": "#Search-In-Template",
+      "x": 390,
+      "y": 61,
+      "text": "Search",
+      "tag": "input"
+    },
+    "screenshot": "step-016.png"
+  },
+  {
+    "id": "d09e28bc-7588-48b7-a7fb-538b2b434ba0",
+    "order": 17,
+    "action": "type",
+    "value": "{{Product1}}",
+    "label": "Type: {{Product1}}",
+    "selector": {
+      "primary": "#Search-In-Modal"
+    },
+    "screenshot": "step-017.png"
+  },
+  {
+    "id": "964e6535-6875-42f6-9d70-1f37461d7398",
+    "order": 18,
+    "action": "click",
+    "value": null,
+    "label": "Click ADD TO CART",
+    "selector": {
+      "primary": "button[name=\"add\"]",
+      "x": 411,
+      "y": 464,
+      "text": "ADD TO CART",
+      "tag": "button"
+    },
+    "screenshot": "step-018.png"
+  },
+  {
+    "id": "fe243684-fc70-4dc9-8aa5-92851ace1425",
+    "order": 19,
+    "action": "click",
+    "value": null,
+    "label": "Click ADD TO CART",
+    "selector": {
+      "primary": "button[name=\"add\"]",
+      "x": 670,
+      "y": 464,
+      "text": "ADD TO CART",
+      "tag": "button"
+    },
+    "screenshot": "step-019.png"
+  },
+  {
+    "id": "e90518e5-e4f4-43c6-af61-4889e1763bfa",
+    "order": 20,
+    "action": "click",
+    "value": null,
+    "label": "Click ADD TO CART",
+    "selector": {
+      "primary": "button[name=\"add\"]",
+      "x": 892,
+      "y": 495,
+      "text": "ADD TO CART",
+      "tag": "button"
+    },
+    "screenshot": "step-020.png"
+  },
+  {
+    "id": "092bdd06-f7ff-49b9-bb4b-b34a4ecadb02",
+    "order": 21,
+    "action": "click",
+    "value": null,
+    "label": "Click 413,451",
+    "selector": {
+      "primary": "#predictive-search-option-product-1 > div:nth-of-type(1) > div:nth-of-type(2) > a:nth-of-type(1)",
+      "x": 413,
+      "y": 451,
+      "text": "",
+      "tag": "a"
+    }
+  },
+  {
+    "id": "30890142-11b0-4471-a5ce-81804cd8283c",
+    "order": 22,
+    "action": "click",
+    "value": null,
+    "label": "Click 411,464",
+    "selector": {
+      "primary": null,
+      "x": 411,
+      "y": 464,
+      "text": null,
+      "tag": null
+    }
+  },
+  {
+    "id": "55a80051-da15-4029-9c35-73bb356e4336",
+    "order": 23,
+    "action": "click",
+    "value": null,
+    "label": "Click Apple Granny Smith Organic 1kg\nAUSTRALIA\n$12.99 EA $12.99 / kg\nADD TO CART\nApple",
+    "selector": {
+      "primary": "#MainProduct-template--19725411582011__main > div:nth-of-type(1) > div:nth-of-type(2)",
+      "x": 476,
+      "y": 464,
+      "text": "Apple Granny Smith Organic 1kg\nAUSTRALIA\n$12.99 EA $12.99 / kg\nADD TO CART\nApple",
+      "tag": "div"
+    },
+    "screenshot": "step-023.png"
+  },
+  {
+    "id": "25a34f79-f3a4-4fb2-87d8-79a0222eee58",
+    "order": 24,
+    "action": "click",
+    "value": null,
+    "label": "Click Apple Granny Smith Organic",
+    "selector": {
+      "primary": "#ProductInfo-template--19725411582011__main > div:nth-of-type(3) > h3:nth-of-type(1)",
+      "x": 712,
+      "y": 458,
+      "text": "Apple Granny Smith Organic",
+      "tag": "h3"
+    },
+    "screenshot": "step-024.png"
+  },
+  {
+    "id": "8b406baf-6cd6-4e32-bdaf-883fdd2b6a66",
+    "order": 25,
+    "action": "click",
+    "value": null,
+    "label": "Click Apple Granny Smith Organic\n\nCrisp and tangy, our Apple Granny Smith Organic 1kg",
+    "selector": {
+      "primary": "#ProductInfo-template--19725411582011__main > div:nth-of-type(3)",
+      "x": 937,
+      "y": 474,
+      "text": "Apple Granny Smith Organic\n\nCrisp and tangy, our Apple Granny Smith Organic 1kg ",
+      "tag": "div"
+    },
+    "screenshot": "step-025.png"
+  },
+  {
+    "id": "b66fc692-e36e-4c42-846c-77cfbf0a9fb0",
+    "order": 26,
+    "action": "click",
+    "value": null,
+    "label": "Click ADD TO CART",
+    "selector": {
+      "primary": "#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)",
+      "x": 678,
+      "y": 338,
+      "text": "ADD TO CART",
+      "tag": "div"
+    },
+    "screenshot": "step-026.png"
+  },
+  {
+    "id": "f7bbb803-326b-4bed-a4b9-6e1b019f8b5a",
+    "order": 27,
+    "action": "click",
+    "value": null,
+    "label": "Click 675,370",
+    "selector": {
+      "primary": "#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)",
+      "x": 675,
+      "y": 370,
+      "text": "",
+      "tag": "div"
+    },
+    "screenshot": "step-027.png"
+  },
+  {
+    "id": "cfa0cefd-bd43-4acd-bb80-138cafbcdc6a",
+    "order": 28,
+    "action": "click",
+    "value": null,
+    "label": "Click 709,351",
+    "selector": {
+      "primary": "#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)",
+      "x": 709,
+      "y": 351,
+      "text": "",
+      "tag": "div"
+    },
+    "screenshot": "step-028.png"
+  },
+  {
+    "id": "e17f94ed-99ab-47c0-b428-dae1dee90ae0",
+    "order": 29,
+    "action": "click",
+    "value": null,
+    "label": "Click 701,349",
+    "selector": {
+      "primary": "#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)",
+      "x": 701,
+      "y": 349,
+      "text": "",
+      "tag": "div"
+    },
+    "screenshot": "step-029.png"
+  },
+  {
+    "id": "354b3db5-371b-4568-91b1-c8ec29925221",
+    "order": 30,
+    "action": "click",
+    "value": null,
+    "label": "Click 696,354",
+    "selector": {
+      "primary": "#product-form-142501355 > div:nth-of-type(3) > div:nth-of-type(1) > div:nth-of-type(2)",
+      "x": 696,
+      "y": 354,
+      "text": "",
+      "tag": "div"
+    },
+    "screenshot": "step-030.png"
+  },
+  {
+    "id": "22461752-209c-479f-b8c0-de3c8d51ca71",
+    "order": 31,
+    "action": "click",
+    "value": null,
+    "label": "Click ADD TO CART",
+    "selector": {
+      "primary": "#ProductInfo-template--19725411582011__main > div:nth-of-type(2) > div:nth-of-type(4)",
+      "x": 709,
+      "y": 333,
+      "text": "ADD TO CART",
+      "tag": "div"
+    },
+    "screenshot": "step-031.png"
+  },
+  {
+    "id": "3bd01642-76fa-44be-a8b4-5dfd73d5c7a9",
+    "order": 32,
+    "action": "click",
+    "value": null,
+    "label": "Click $67.53",
+    "selector": {
+      "primary": "#cart-icon-bubble > div:nth-of-type(1) > span:nth-of-type(2)",
+      "x": 957,
+      "y": 63,
+      "text": "$67.53",
+      "tag": "span"
+    },
+    "screenshot": "step-032.png"
+  },
+  {
+    "id": "277b7b26-3cce-4945-889e-1ebe8b370af4",
+    "order": 33,
+    "action": "click",
+    "value": null,
+    "label": "Click VIEW CART",
+    "selector": {
+      "primary": "button[aria-label=\"View cart\"]",
+      "x": 829,
+      "y": 589,
+      "text": "VIEW CART",
+      "tag": "button"
+    }
+  }
+]
