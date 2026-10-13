@@ -112,16 +112,20 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
   const dataset = (packDetail && packDetail.execution_plan && packDetail.execution_plan.dataset) || [];
 
   return e('div', { className: 'space-y-4' },
+    e(GuideSection, { id: 'demo-intro', label: 'Demo tab · start here',
+      action: 'Read this card, then work down steps 1–4. Nothing here touches a real system.' },
     e('div', { className: 'bg-slate-900 border border-indigo-800 rounded-2xl p-4 space-y-2' },
       e('h2', { className: 'font-bold text-lg text-indigo-300' }, '🧪 Demo · try TestForge without a real application'),
       e('p', { className: 'text-xs text-slate-400' },
         'Both pages below are static files served by this instance. Nothing here signs in anywhere, reaches an external site, or touches a real account, payment, policy, employee or booking. Use this tab to prove recording, replay and evidence work before you point TestForge at your own application.'),
       !sample && e('p', { role: 'alert', className: 'text-xs text-amber-300' },
-        'No sample project found in this library. Create it below to follow the walkthrough.')),
+        'No sample project found in this library. Create it below to follow the walkthrough.'))),
 
     error && e('p', { role: 'alert', className: 'text-sm text-red-300' }, error),
     notice && e('p', { role: 'status', className: 'text-sm text-emerald-300' }, notice),
 
+    e(GuideSection, { id: 'demo-step1', label: 'Step 1 · pick the sample project',
+      action: 'Press USE THE SAMPLE PROJECT — every other tab then works against it.' },
     e(DemoStep, { index: 1, title: 'Select the sample project' },
       e('p', { className: 'text-xs text-slate-400' },
         sample ? `“${sample.name}” points at the built-in page /demo.html and already holds the variable {{user}} = Ada.`
@@ -130,8 +134,10 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
         ? e('button', { type: 'button', className: 'key-btn', onClick: chooseSample, disabled: sampleActive },
             sampleActive ? '✓ ACTIVE PROJECT' : 'USE THE SAMPLE PROJECT')
         : e('button', { type: 'button', className: 'key-btn', onClick: createSample, disabled: busy === 'project' },
-            busy === 'project' ? 'CREATING…' : 'CREATE SAMPLE PROJECT')),
+            busy === 'project' ? 'CREATING…' : 'CREATE SAMPLE PROJECT'))),
 
+    e(GuideSection, { id: 'demo-step2', label: 'Step 2 · replay a ready-made test',
+      action: 'Press RUN on “Hello variable” to watch {{user}} get substituted at replay time.' },
     e(DemoStep, { index: 2, title: 'Replay a ready-made test' },
       e('p', { className: 'text-xs text-slate-400' },
         'These two recordings ship with the repository. “Hello literal” types a fixed name; “Hello variable” types {{user}}, so it shows how a variable is substituted at replay time. Each run opens the single server-side Chromium, captures one low-quality JPEG per step, and lands in Runs and Artifacts.'),
@@ -142,30 +148,40 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
           e('div', { className: 'text-xs font-bold text-indigo-300 truncate' }, r.name),
           e('div', { className: 'text-[10px] text-slate-500 truncate' }, `${r.step_count != null ? r.step_count + ' steps · ' : ''}${r.start_url || '/demo.html'}`)),
         e('button', { type: 'button', className: 'key-btn shrink-0', disabled: !!busy, onClick: () => replay(r) },
-          busy === r.id ? 'QUEUEING…' : 'RUN')))),
+          busy === r.id ? 'QUEUEING…' : 'RUN'))))),
 
+    e(GuideSection, { id: 'demo-step3', label: 'Step 3 · record your own test',
+      action: 'Open the ⏺ Record tab, leave the URL blank, press START — that records against the sample app.' },
     e(DemoStep, { index: 3, title: 'Record your own against the sample app' },
       e('p', { className: 'text-xs text-slate-400' },
         'Open the Record tab and press START with the URL left blank — a blank URL opens /demo.html on the server browser. Click the picture to click, type into the text box, then SAVE.'),
       e('div', { className: 'flex flex-wrap gap-2' },
         e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('record') }, 'OPEN RECORD TAB'),
-        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('library') }, 'OPEN LIBRARY TAB'))),
+        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('library') }, 'OPEN LIBRARY TAB')))),
 
+    e(GuideSection, { id: 'demo-step4', label: 'Step 4 · check the evidence',
+      action: 'Open ▶ Runs and 🎥 Artifacts for the per-step screenshots and the PDF report.' },
     e(DemoStep, { index: 4, title: 'Check the evidence' },
       e('p', { className: 'text-xs text-slate-400' },
         'Runs shows each step with its status and live picture; Artifacts collects the screenshots and any video; Comparison diffs the step logs of recent runs. A PDF report is available per run.'),
       e('div', { className: 'flex flex-wrap gap-2' },
         e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('runs') }, 'OPEN RUNS TAB'),
-        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('artifacts') }, 'OPEN ARTIFACTS TAB'))),
+        e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('artifacts') }, 'OPEN ARTIFACTS TAB')))),
 
+    e(GuideSection, { id: 'demo-sample-app', label: 'The sample app itself',
+      action: 'Type a name and press Continue — this is the exact page the server browser drives on replay.' },
     e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-2' },
       e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'The sample app · /demo.html'),
       e('p', { className: 'text-xs text-slate-400' },
         'This is the page your recordings drive. It is rendered here by your own browser so you can see what the steps are doing; replay drives the identical page in the server browser. Type a name and press Continue.'),
-      e(DemoFrame, { src: '/demo.html', title: 'TestForge sample app', height: 300 })),
+      e(DemoFrame, { src: '/demo.html', title: 'TestForge sample app', height: 300 }))),
 
-    e(VoiceDemo, null),
+    e(GuideSection, { id: 'demo-voice', label: 'Voice input + text cleanup',
+      action: 'Tap 🎤, speak a sentence, then ✨. Speech recognition runs in your own browser, not here.' },
+    e(VoiceDemo, null)),
 
+    e(GuideSection, { id: 'demo-domains', label: 'Synthetic domain fixtures',
+      action: 'Pick a domain to see one positive and one negative dataset row, then save it as a real test.' },
     e('div', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3' },
       e('h3', { className: 'text-sm font-bold text-indigo-300' }, 'Synthetic domain fixtures · /domain-demo.html'),
       e('p', { className: 'text-xs text-slate-400' },
@@ -191,5 +207,5 @@ function DemoTab({ project, setActiveProject, setTab, liveWindow, onRun }) {
       packDetail && e('p', { className: 'text-xs text-slate-400' },
         `To save this as a real test: Library tab → UPLOAD TEST SCRIPTS → “Or start with a synthetic domain pack” → ${packDetail.name}, then TEST BEFORE PUBLISHING and SAVE TO LIBRARY.`),
       packDetail && e('button', { type: 'button', className: 'key-btn', onClick: () => setTab('library') }, 'OPEN LIBRARY TAB'),
-      packDetail && packDetail.notice && e('p', { className: 'text-[10px] text-amber-300' }, packDetail.notice)));
+      packDetail && packDetail.notice && e('p', { className: 'text-[10px] text-amber-300' }, packDetail.notice))));
 }

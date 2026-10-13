@@ -463,7 +463,9 @@ function ImportScripts({ project, onSaved, onRun }) {
     '';
   const canSave = !!preview?.can_save && !!name.trim() && receiptLive && !saved;
   const canOverride = !!preview?.can_save && !!name.trim() && !saved && !testRunning;
-  return e('details',{className:'border border-indigo-800 bg-slate-900 p-4 rounded-xl space-y-3'},
+  return e(GuideSection,{id:'imp-upload',label:'Upload test scripts',
+    action:'Upload or paste a script, VALIDATE & PREVIEW, TEST BEFORE PUBLISHING, then SAVE TO LIBRARY.'},
+  e('details',{className:'border border-indigo-800 bg-slate-900 p-4 rounded-xl space-y-3'},
     e('summary',{className:'font-bold text-indigo-300 cursor-pointer'},'UPLOAD TEST SCRIPTS'),
     e('p',{className:'text-xs text-slate-300'},'Upload a file — or use PASTE / TYPE SCRIPT below to type or paste the script directly, with no file at all. Any format you already have: plain text/Markdown/logs, CSV/TSV/PSV or any smart table, Excel (.xlsx/.xls), Word (.docx), PDF text layers, XML/YAML, JUnit-style case lists, Selenium IDE (.side) or legacy HTML suites, Postman collections, Robot Framework, Cypress, Playwright Python/JS/TS, restricted Java/C# Selenium, HAR captures, BDD/Cucumber (.feature), a restricted Jenkinsfile + its test script, or a runner script + its steps.json/execution-plan.json. The file is sniffed when the extension is unknown; a paste is auto-detected or parsed as the format you pick. Unsupported syntax is converted by AI smart onboarding when enabled, and anything it cannot convert is named in the notes. Arbitrary code, shell commands, macros and custom step definitions never run.'),
     e('p',{className:'text-xs text-amber-300'},'Use {{variables}} instead of passwords. Saving uses the existing GitHub publication settings. Unsupported source is never silently treated as tested. AI smart onboarding: the static validator runs first; if it reports unsupported syntax and an AI key is configured, the AI converts the script to canonical steps and every step is re-validated (validate → AI fix → re-validate, looping per step). Uploaded code is still never executed, and publishing still requires a passing test.'),
@@ -610,7 +612,7 @@ function ImportScripts({ project, onSaved, onRun }) {
           'I understand this recording has not passed a test and will be listed as unverified.'),
         e('button',{onClick:saveUnverified,disabled:busy || !overrideReason.trim() || !overrideAck,
           className:'bg-amber-700 px-4 py-2 rounded text-xs disabled:opacity-50'},'SAVE AS UNVERIFIED'))
-    )
+    ))
   );
 }
 
@@ -751,7 +753,9 @@ function PreviousRecordings({ project, recordings, onResume, onRun, onOpen, busy
     } catch (err) { setRescueNote('Rescue failed: ' + err.message); }
     finally { setRescueBusy(false); }
   };
-  return e('details', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3',
+  return e(GuideSection, { id: 'imp-previous', label: 'Previous recordings',
+      action: 'RESUME appends to an old recording; RUN replays it in a fresh browser.' },
+  e('details', { className: 'bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3',
       open: show, onToggle: ev => setShow(ev.target.open) },
     e('summary', { className: 'font-bold text-indigo-300 cursor-pointer text-sm' },
       `📼 Previous recordings · ${recordings.length} in the library`),
@@ -791,7 +795,7 @@ function PreviousRecordings({ project, recordings, onResume, onRun, onOpen, busy
       rescue.database_only_recordings.slice(0, 8).map(row => e('div', { key: row.id },
         `• ${row.name || row.id} · ${row.step_count || 0} step(s) · project ${row.project_id}`))),
     rescue && (rescue.unreadable_recordings || []).length > 0 && e('div', { className: 'text-[10px] text-amber-400' },
-      `${rescue.unreadable_recordings.length} folder(s) hold no readable recording.json and cannot be listed.`));
+      `${rescue.unreadable_recordings.length} folder(s) hold no readable recording.json and cannot be listed.`)));
 }
 
 function RunExistingRecording({ recId, recordings, onDone }) {
@@ -811,7 +815,9 @@ function RunExistingRecording({ recId, recordings, onDone }) {
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
-  return e('details', { className: 'bg-slate-900 border border-slate-800 rounded-xl p-2' },
+  return e(GuideSection, { id: 'imp-runexisting', label: 'Run a saved recording inside this session',
+      action: 'Pick a saved recording and RUN NOW — its steps happen live in the browser you already have open.' },
+  e('details', { className: 'bg-slate-900 border border-slate-800 rounded-xl p-2' },
     e('summary', { className: 'text-xs font-bold text-indigo-300 cursor-pointer' },
       '▶ RUN AN EXISTING RECORDING IN THIS SESSION'),
     e('p', { className: 'text-[10px] text-slate-400 mt-1' },
@@ -831,5 +837,5 @@ function RunExistingRecording({ recId, recordings, onDone }) {
     busy && e('p', { role: 'status', className: 'text-[10px] text-indigo-300' },
       'Running the saved recording in the live browser — watch the window above.'),
     note && e('p', { role: 'status', className: 'text-[10px] text-emerald-300' }, note),
-    error && e('p', { role: 'alert', className: 'text-[10px] text-red-300' }, error));
+    error && e('p', { role: 'alert', className: 'text-[10px] text-red-300' }, error)));
 }
