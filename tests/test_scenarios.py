@@ -318,11 +318,21 @@ class ScenarioTests(unittest.TestCase):
         self.assertIn('id: "rec-learning-site"', dashboard)
         future = (static / 'future-components.js').read_text()
         self.assertIn('function FuturePlanningTab', future)
+        self.assertIn('function RoadmapAiPromptPanel', future)
+        self.assertIn('function buildRoadmapAiPrompt', future)
+        self.assertIn('TESTFORGE_COMPLETE_ROADMAP_PROMPT', future)
+        self.assertIn('COPY AI PROMPT', future)
+        self.assertIn('AI prompt to implement the future roadmap plan', future)
         for target in ('Oracle web applications', 'SAP · Fiori / web UI', 'JD Edwards',
                        'Odoo', 'Salesforce', '.NET / C# desktop apps', 'C++ desktop apps',
                        'WinForms · legacy and current', 'Android apps', 'iPhone / iPad apps',
                        'Zebra rugged devices'):
             self.assertIn(target, future)
+        for phase in ('Phase 1 · ERP / CRM Web Application Packs',
+                      'Phase 2 · Windows Desktop Application Runner',
+                      'Phase 3 · Mobile & Rugged Device Runner',
+                      'Phase 4 · Pilot, Security Review, Support Matrix & Remaining Playwright Roadmap (R01–R15)'):
+            self.assertIn(phase, future)
         for fixture in ('/demo.html', '/domain-demo.html'):
             self.assertTrue((static / fixture.lstrip('/')).is_file(), fixture)
             self.assertIn(fixture, component)

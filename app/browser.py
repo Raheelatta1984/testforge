@@ -21,6 +21,14 @@ from .config import IS_TERMUX
 # idle. Checking is free; rendering a frame nobody will see is not.
 VIEWER_RECHECK = float(os.environ.get("TF_VIEWER_RECHECK", "0.15"))
 
+# Standard desktop Chrome UA without the `HeadlessChrome` token that causes
+# CDN bot managers (Akamai, Cloudflare) to tarpit HTTP/2 navigation streams.
+DEFAULT_USER_AGENT = os.environ.get(
+    "TF_BROWSER_USER_AGENT",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+)
+
 
 def _mode() -> str:
     mode = os.environ.get("TF_BROWSER_MODE", "auto").lower()
@@ -86,6 +94,8 @@ def launch_kwargs() -> dict:
         "--disable-popup-blocking",
         "--disable-prompt-on-repost",
         "--disable-dev-tools",
+        "--disable-blink-features=AutomationControlled",
+        "--disable-http2",
     ]
     # Single process reduces memory on free tier (configurable)
     if os.environ.get("TF_BROWSER_SINGLE_PROCESS", "1") == "1":
@@ -199,9 +209,16 @@ class Preview:
             except Exception:
                 frame_context = None
         try:
-            # Use lower quality for speed. Read page/context before awaiting the
-            # screenshot so the frame retains the step context it began with.
-            data = await page.screenshot(type="jpeg", quality=self._jpeg_quality)
+            # Use lower quality for speed and disable animation/font waits so a
+            # slow external stylesheet never stalls the live preview. Read
+            # page/context before awaiting the screenshot so the frame retains
+            # the step context it began with.
+            data = await page.screenshot(
+                type="jpeg",
+                quality=self._jpeg_quality,
+                animations="disabled",
+                timeout=3000,
+            )
             self.captures += 1
         except Exception:
             # Page might be closed or navigating; the next live frame will retry.

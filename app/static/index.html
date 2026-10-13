@@ -443,7 +443,10 @@ function Recorder({ project, onRun, liveWindow }) {
       if (stop) return;
       if (document.hidden) { setTimeout(tick, 500); return; }
       try {
-        const session = await API.get("/api/recordings/" + recId + "/session");
+        const [session, res] = await Promise.all([
+          API.get("/api/recordings/" + recId + "/session"),
+          fetch("/api/recordings/" + recId + "/frame?t=" + Date.now())
+        ]);
         if (session.error) { setError(session.error); setStatus("Browser error"); }
         else if (session.status === "live") {
           setStatus("Browser live ⚡ FAST");
@@ -456,7 +459,6 @@ function Recorder({ project, onRun, liveWindow }) {
           }
         }
         else if (session.status === "starting") setStatus("Launching browser… FAST");
-        const res = await fetch("/api/recordings/" + recId + "/frame?t=" + Date.now());
         if (res.ok && (res.headers.get("content-type") || "").indexOf("image") !== -1) {
           const blob = await res.blob();
           const next = URL.createObjectURL(blob);

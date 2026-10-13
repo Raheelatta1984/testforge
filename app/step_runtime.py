@@ -230,6 +230,24 @@ def check_url(url):
     return url
 
 
+async def _goto_resilient(page, url: str, timeout_ms: int) -> None:
+    """Navigate with domcontentloaded, recovering if slow scripts stall the event."""
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+    except Exception as exc:
+        if "Timeout" not in type(exc).__name__ and "Timeout" not in str(exc):
+            raise
+        current = getattr(page, "url", None) or ""
+        if current and current != "about:blank":
+            if hasattr(page, "evaluate"):
+                try:
+                    await page.evaluate("() => { try { window.stop(); } catch (_) {} }")
+                except Exception:
+                    pass
+            return
+        await page.goto(url, wait_until="commit", timeout=min(max(timeout_ms, 1000), 15000))
+
+
 def upload_buffer(options):
     name = options.get("filename", "")
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", name):
@@ -300,7 +318,7 @@ class StepRuntime:
         page = self.page
         loc = locator(page, opts) if action not in NO_LOCATOR and opts.get("primary") else None
         if action == "navigate":
-            await page.goto(check_url(value), wait_until="domcontentloaded", timeout=opts.get("timeout_ms", 20000))
+            await _goto_resilient(page, check_url(value), opts.get("timeout_ms", 20000))
         elif action in POINTER_ACTIONS and loc is None:
             # A recorded coordinate click has no element to wait for; it clicks the
             # point the operator actually clicked.
@@ -363,7 +381,7 @@ class StepRuntime:
             new = await page.context.new_page()
             self.pages[alias] = new
             self.page = new
-            await new.goto(check_url(value), wait_until="domcontentloaded", timeout=timeout)
+            await _goto_resilient(new, check_url(value), timeout)
         elif action == "open_popup":
             alias = opts["alias"]
             if alias in self.pages or len(self.pages) >= 4:

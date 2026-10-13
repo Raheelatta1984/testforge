@@ -20,7 +20,7 @@ import time
 from playwright.async_api import async_playwright
 from sqlalchemy.exc import SQLAlchemyError
 
-from app.browser import Preview, explain_launch_error, launch_kwargs
+from app.browser import DEFAULT_USER_AGENT, Preview, explain_launch_error, launch_kwargs
 from app.config import ARTIFACTS, logger
 from app.guardrails import browser_budget
 from app.db import (RecordingStep, SessionLocal, resolve_variables, interpolate,
@@ -121,6 +121,15 @@ MERGE_REPEAT_STEPS = os.environ.get("TF_MERGE_REPEAT_STEPS", "1").strip().lower(
 MAX_REPLAY_STEPS = int(os.environ.get("TF_MAX_REPLAY_STEPS", "2000"))
 MAX_RECORDED_STEPS = 500
 
+# Fast navigation budgets for the live recorder.
+# `wait_until="commit"` resolves as soon as response headers arrive so the live
+# browser does not sit blank waiting for every third-party script. A short
+# non-fatal `domcontentloaded` wait follows so fast local pages settle before
+# the first frame, while slow or tarpitted external pages never kill the session
+# with `Page.goto: Timeout 30000ms exceeded`.
+RECORDER_GOTO_TIMEOUT_MS = int(os.environ.get("TF_RECORDER_GOTO_TIMEOUT_MS", "12000"))
+RECORDER_DOM_SETTLE_MS = int(os.environ.get("TF_RECORDER_DOM_SETTLE_MS", "3500"))
+
 # A database the service cannot ALTER (someone else owns the table) still must not
 # lose a step. A label a narrow column refuses is retried at a width every
 # revision of this schema has accepted -- 300 is the oldest width we know of, so
@@ -187,6 +196,46 @@ class RecorderSession:
             except Exception:
                 self.remove_listener(callback)
 
+    async def _goto_fast(self, url: str) -> str:
+        """Open `url` quickly and never fail the recording session on a slow page.
+
+        1. Navigate with `wait_until="commit"` (bounded by `RECORDER_GOTO_TIMEOUT_MS`)
+           so the browser commits as soon as HTTP headers arrive instead of blocking
+           for 30s on slow subresources or third-party scripts.
+        2. Wait up to `RECORDER_DOM_SETTLE_MS` for `domcontentloaded` so fast pages
+           (such as `/demo.html`) have their full DOM ready before the first frame,
+           while slow external sites proceed to live preview immediately after the
+           short settle window.
+        3. If `page.goto` itself times out or fails on a slow/protected external URL,
+           stop any hung network stream via `window.stop()`, log the warning, and
+           keep the browser session live instead of raising `Page.goto: Timeout ...`.
+        """
+        wait_mode = "commit" if hasattr(self.page, "wait_for_load_state") else "domcontentloaded"
+        try:
+            await self.page.goto(url, wait_until=wait_mode, timeout=RECORDER_GOTO_TIMEOUT_MS)
+            if wait_mode == "commit" and hasattr(self.page, "wait_for_load_state"):
+                try:
+                    await self.page.wait_for_load_state("domcontentloaded", timeout=RECORDER_DOM_SETTLE_MS)
+                except Exception:
+                    # Page committed and is rendering; do not block the live preview
+                    # waiting on slow synchronous scripts or trackers.
+                    pass
+        except Exception as exc:
+            logger.warning("RECORDER GOTO PARTIAL/TIMEOUT %s %s: %s", self.recording_id, url, exc)
+            self._save_logs.append(f"{time.time()}: initial goto partial/timeout: {exc}")
+            if hasattr(self.page, "evaluate"):
+                try:
+                    await asyncio.wait_for(
+                        self.page.evaluate("() => { try { window.stop(); } catch (_) {} }"),
+                        timeout=2.0,
+                    )
+                except Exception:
+                    pass
+        current = getattr(self.page, "url", None) or ""
+        if not current or current == "about:blank":
+            return url
+        return current
+
     async def start(self):
         os.makedirs(os.path.join(ARTIFACTS, "rec", self.recording_id), exist_ok=True)
         try:
@@ -199,20 +248,28 @@ class RecorderSession:
             self.context = await self.browser.new_context(
                 viewport=VIEWPORT,
                 device_scale_factor=1,
+                user_agent=DEFAULT_USER_AGENT,
+                ignore_https_errors=True,
                 # Speed: disable animations, reduced motion
                 reduced_motion="reduce",
             )
+            if hasattr(self.context, "add_init_script"):
+                try:
+                    await self.context.add_init_script(
+                        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+                    )
+                except Exception:
+                    pass
             self.page = await self.context.new_page()
             self._last_viewed_at = time.monotonic()
             self.preview = Preview(self.page, on_jpeg=self._on_jpeg,
                                    should_capture=lambda: bool(self.listeners) or time.monotonic() - self._last_viewed_at < 3)
             if self.start_url:
-                await self.page.goto(self.start_url, wait_until="domcontentloaded", timeout=30000)
-                self.current_url = self.page.url
-                await self._record("navigate", value=self.page.url, label=f"Open {self.page.url}", force_new=True)
-            self.preview.start()
+                self.current_url = await self._goto_fast(self.start_url)
+                await self._record("navigate", value=self.current_url, label=f"Open {self.current_url}", force_new=True)
             await self.preview.capture(force=True)
             self.status = "live"
+            self.preview.start()
             logger.info("RECORDER LIVE %s %s viewport=%sx%s", self.recording_id, self.current_url, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)
         except Exception as exc:
             self.status = "error"
@@ -336,7 +393,7 @@ class RecorderSession:
             try:
                 # Screenshot after the action, not the preceding frame. Persist off the
                 # input path so screenshots and exports do not stall the next click.
-                png = await self.page.screenshot(type="png", animations="disabled")
+                png = await self.page.screenshot(type="png", animations="disabled", timeout=5000)
                 task = asyncio.create_task(self._attach_image(step, png))
                 self._image_tasks.add(task)
                 task.add_done_callback(self._image_tasks.discard)
