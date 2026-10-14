@@ -67,6 +67,18 @@ def registered_apps() -> list[dict]:
         custom = []
     rows.extend({**app, "id": app["app_id"], "name": app["window_title"], "builtin": False}
                 for app in custom if isinstance(app, dict) and app.get("app_id"))
+    try:
+        # An app that was installed through the desktop install panel carries its
+        # receipt, so the recorder can say how it got onto the target machine.
+        from app.desktop_install import installed_apps, public_receipt
+        installs = {row.get("app_id"): row for row in installed_apps()}
+    except Exception:
+        installs, public_receipt = {}, None
+    for row in rows:
+        record = installs.get(row["id"])
+        if record:
+            row["install"] = public_receipt(record)
+            row["installed"] = record.get("status") == "installed"
     return rows
 
 
@@ -162,12 +174,15 @@ class DesktopRecordingSession:
     """One app, one version target, one live frame and an append-only step log."""
 
     def __init__(self, recording_id: str, profile: dict, *, builtin: bool,
-                 windows_version: str, purpose: str = ""):
+                 windows_version: str, purpose: str = "", install: dict | None = None):
         self.recording_id = recording_id
         self.profile = profile
         self.builtin = builtin
         self.windows_version = windows_version
         self.purpose = purpose
+        # Install receipt for the application, when it was installed through the
+        # desktop install panel before this recording started.
+        self.install = install
         self.mode = "agent" if agent_configured() else "simulator"
         self.status = "starting"
         self.started_at = _iso()
@@ -194,6 +209,8 @@ class DesktopRecordingSession:
             "started_at": self.started_at,
             "step_count": self.step_count,
             "error": self.error,
+            # How the application reached this machine, when it was installed here.
+            "install": self.install,
         }
 
     async def start(self) -> dict:
@@ -392,12 +409,20 @@ async def start_session(recording_id: str, app_id: str, windows_version: str,
     if windows_version not in WINDOWS_VERSIONS:
         raise ValueError("Choose Windows 10 or Windows 11")
     profile, builtin = _application(app_id)
+    install = None
+    try:
+        from app.desktop_install import get_install, public_receipt
+        record = get_install(app_id)
+        install = public_receipt(record) if record else None
+    except Exception:
+        install = None
     async with _SESSION_LOCK:
         other = next((session for session in ACTIVE_SESSIONS.values() if session.active), None)
         if other is not None and other.recording_id != recording_id:
             raise RuntimeError("Only one Windows desktop recording can be open at a time")
         session = DesktopRecordingSession(recording_id, profile, builtin=builtin,
-                                          windows_version=windows_version, purpose=purpose)
+                                          windows_version=windows_version, purpose=purpose,
+                                          install=install)
         ACTIVE_SESSIONS[recording_id] = session
         try:
             return await session.start()

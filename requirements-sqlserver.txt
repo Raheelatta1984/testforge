@@ -1,0 +1,15 @@
+# Extra dependencies for a SQL Server deployment only.
+#
+# Deliberately NOT part of requirements.txt: pyodbc needs a system ODBC driver
+# manager and the Microsoft ODBC Driver 18 package, so adding it there would
+# break every image build that does not install them. Install this file in
+# addition to requirements.txt when DATABASE_URL is a mssql+pyodbc URL.
+#
+#   Debian/Ubuntu host or image:
+#     ACCEPT_EULA=Y apt-get install -y msodbcsql18 unixodbc-dev
+#   then:
+#     pip install -r requirements.txt -r requirements-sqlserver.txt
+#
+# See docs/dev-azure-sql-server.md section 5 for the connection string and the
+# pooling arithmetic this service assumes.
+pyodbc==5.2.0

@@ -6,6 +6,7 @@
 # and stops a developer's .venv (with its host-specific binaries) reaching the
 # 512MB deployment by accident.
 .git
+.github
 .gitignore
 .venv
 venv

@@ -29,6 +29,32 @@ def _custom_apps():
         return []
 
 
+def save_custom_app(app):
+    """Persist one validated desktop app profile, replacing any with the same id.
+
+    Shared by the roadmap route and the desktop installer, which registers the
+    application it has just installed so the recorder can launch it.
+    """
+    apps = [existing for existing in _custom_apps() if existing.get("app_id") != app["app_id"]]
+    apps.append(app)
+    if len(apps) > MAX_CUSTOM_APPS:
+        raise ValueError("At most 20 custom desktop apps")
+    CUSTOM_APPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CUSTOM_APPS_FILE.write_text(json.dumps(apps, indent=2), encoding="utf-8")
+    return app
+
+
+def remove_custom_app(app_id):
+    """Forget a registered desktop app profile. Returns True when one was removed."""
+    apps = _custom_apps()
+    kept = [existing for existing in apps if existing.get("app_id") != app_id]
+    if len(kept) == len(apps):
+        return False
+    CUSTOM_APPS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CUSTOM_APPS_FILE.write_text(json.dumps(kept, indent=2), encoding="utf-8")
+    return True
+
+
 @router.get('/api/roadmap/support-matrix')
 def roadmap_support_matrix():
     return support_matrix()
@@ -60,14 +86,9 @@ class DesktopAppIn(BaseModel):
 def roadmap_add_desktop_app(body: DesktopAppIn):
     try:
         app = validate_custom_app(body.profile)
+        save_custom_app(app)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    apps = [existing for existing in _custom_apps() if existing.get('app_id') != app['app_id']]
-    apps.append(app)
-    if len(apps) > MAX_CUSTOM_APPS:
-        raise HTTPException(422, 'At most 20 custom desktop apps')
-    CUSTOM_APPS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CUSTOM_APPS_FILE.write_text(json.dumps(apps, indent=2), encoding="utf-8")
     return {'app': {**app, 'id': app['app_id'], 'name': app['window_title'], 'builtin': False}}
 
 

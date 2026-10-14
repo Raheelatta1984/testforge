@@ -231,6 +231,19 @@ SCHEMA_STATUS = {
 }
 
 
+def _boolean_literal(dialect, value):
+    """A boolean literal the target dialect accepts in raw SQL.
+
+    `true`/`false` are PostgreSQL and SQLite spellings. SQL Server stores a
+    boolean as BIT, and `UPDATE ... SET flag = 'false'` there fails with
+    "Conversion failed when converting the varchar value 'false' to data type
+    bit", which would leave the new NOT NULL column unfilled.
+    """
+    if getattr(dialect, "name", "") == "mssql":
+        return "1" if value else "0"
+    return "true" if value else "false"
+
+
 def _backfill_sql(column, dialect):
     """SQL literal used to populate a newly added column on rows that already exist.
 
@@ -243,7 +256,7 @@ def _backfill_sql(column, dialect):
         if arg is None:
             continue
         if isinstance(arg, bool):
-            return "true" if arg else "false"
+            return _boolean_literal(dialect, arg)
         if isinstance(arg, (int, float)):
             return str(arg)
         if isinstance(arg, str):
@@ -257,7 +270,7 @@ def _backfill_sql(column, dialect):
     if isinstance(column_type, sqltypes.JSON):
         return "'{}'"
     if isinstance(column_type, sqltypes.Boolean):
-        return "false"
+        return _boolean_literal(dialect, False)
     if isinstance(column_type, (sqltypes.Integer, sqltypes.Numeric)):
         return "0"
     if isinstance(column_type, sqltypes.DateTime):

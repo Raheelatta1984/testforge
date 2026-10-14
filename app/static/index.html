@@ -101,6 +101,8 @@
 <script src="/scenario-components.js"></script>
 <script src="/demo-components.js"></script>
 <script src="/future-components.js"></script>
+<script src="/desktop-install-components.js"></script>
+<script src="/devdeploy-components.js"></script>
 <script>
 const { useState, useEffect, useRef } = React;
 const e = React.createElement;
@@ -302,6 +304,7 @@ function TabSupportFooter({ tab, setTab }) {
     logs: ["Logs fall back to this instance when a repository checkout is not available.", "github"],
     github: ["Publishing status is shown above. A locally saved recording remains available even when sync is offline.", "library"],
     azure: ["Keep the deployment guide and security runbook handy when configuring a hosted instance.", "future"],
+    devdeploy: ["The guides and AI prompts here are served from this instance and downloadable as markdown, so the in-house dev team gets the same text the repository holds.", "azure"],
     settings: ["Master setup applies one region, time zone, date and time format and language to every screen. Changes are saved for all users of this instance.", "projects"],
     future: ["Support Matrix distinguishes live agent integrations from deterministic local simulator coverage.", "desktop-record"]
   }[tab] || ["Need help? Include the relevant project, recording or run ID so an issue can be traced.", "logs"];
@@ -339,6 +342,7 @@ function App({ access }) {
     ["runs", "▶", "Runs"], ["comparison", "⚖️", "Compare"],
     ["artifacts", "🎥", "Artifacts"], ["logs", "📜", "Logs"],
     ["github", "🐙", "GitHub"], ["azure", "☁️", "Azure"],
+    ["devdeploy", "🛠️", "Dev & Deploy"],
     ["settings", "⚙️", "Settings"], ["future", "🗺️", "Future release planning"]
   ];
 
@@ -368,6 +372,7 @@ function App({ access }) {
       tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts),
       tab === "logs" && e(Logs), tab === "github" && e(Github),
       tab === "azure" && e(Azure),
+      tab === "devdeploy" && e(DevDeployTab, { setTab }),
       tab === "settings" && e(SettingsTab),
       tab === "future" && e(FuturePlanningTab),
       e(TabSupportFooter, { tab, setTab })
@@ -1066,6 +1071,24 @@ function DesktopRecorder({ project }) {
     finally { setBusy(false); }
   };
 
+  // Installing an app registers it as a desktop profile, so the selector has to
+  // be re-read before the new application can be chosen for recording.
+  const refreshApps = async () => {
+    try {
+      const catalog = await API.get("/api/desktop/apps");
+      setApps(catalog.apps || []);
+      setMode(catalog.mode || "simulator");
+    } catch (err) { setError("Desktop profiles could not be reloaded: " + err.message); }
+  };
+  const onAppInstalled = async (installed) => {
+    await refreshApps();
+    if (installed && installed.id) {
+      setAppId(installed.id);
+      setName(previous => previous || installed.name || "");
+    }
+  };
+  const selectedApp = apps.find(item => item.id === appId) || null;
+
   const registerApp = async (event) => {
     event.preventDefault();
     if (!appDraft.name.trim()) { setError("Enter an application name to register it."); return; }
@@ -1107,12 +1130,19 @@ function DesktopRecorder({ project }) {
       ),
       mode === "simulator" && e("p", { className: "text-[11px] text-amber-200 bg-amber-950/30 border border-amber-900/50 rounded-xl p-3" },
         "No Windows agent is configured on this server. The screen below is the deterministic desktop simulator, not a native Windows desktop. To launch real applications and capture their UI, configure TF_WINDOWS_AGENT_URL and TF_WINDOWS_AGENT_TOKEN for an authenticated Windows host."),
+      e(DesktopInstallPanel, { mode, busy: busy || active, disabled: active, onInstalled: onAppInstalled }),
       e("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3" },
         e("div", {},
           e("label", { className: "block text-xs text-slate-400 mb-1", htmlFor: "desktop-app-select" }, "Suggested or registered desktop app"),
           e("select", { id: "desktop-app-select", value: appId, disabled: active || busy || loading,
             onChange: evt => setAppId(evt.target.value), className: "w-full bg-slate-800 rounded-lg px-3 py-3 text-sm border border-slate-700" },
-            apps.map(app => e("option", { key: app.id, value: app.id }, `${app.name} · ${app.builtin ? "suggested" : "registered"}`)))),
+            apps.map(app => e("option", { key: app.id, value: app.id },
+              `${app.name} · ${app.builtin ? "suggested" : (app.installed ? "installed" : "registered")}`))),
+          selectedApp && selectedApp.install && e("p", { className: "text-[10px] text-emerald-300 mt-1" },
+            `${selectedApp.install.status === "installed" ? "Installed" : "Install failed"} via ${
+              (selectedApp.install.installer_kind || "installer").toUpperCase()} · ${
+              selectedApp.install.mode === "simulator" ? "simulated" : "Windows agent"} · ${
+              selectedApp.install.installed_at || "time unavailable"}`)),
         e("div", {},
           e("label", { className: "block text-xs text-slate-400 mb-1", htmlFor: "desktop-windows-version" }, "Windows version"),
           e("select", { id: "desktop-windows-version", value: windowsVersion, disabled: active || busy,
@@ -1133,7 +1163,10 @@ function DesktopRecorder({ project }) {
           : e("button", { type: "button", onClick: stop, disabled: busy,
               className: "bg-slate-700 hover:bg-red-700 disabled:opacity-50 px-5 py-3 rounded-xl font-bold" }, busy ? "SAVING & CLOSING…" : "■ STOP, SAVE & CLOSE APP"),
         !project && !active && e("span", { className: "text-xs text-amber-300" }, "Select a project first."),
-        active && e("span", { className: "text-xs text-emerald-300" }, `${session.app_name} · ${session.windows_version.replace("_", " ")} · ${session.step_count || 0} step(s)`)),
+        active && e("span", { className: "text-xs text-emerald-300" }, `${session.app_name} · ${session.windows_version.replace("_", " ")} · ${session.step_count || 0} step(s)`),
+        active && session.install && e("span", { className: "text-[10px] text-slate-400" },
+          `Recording the app installed at ${session.install.installed_at || "an unknown time"} · ${
+            session.install.mode === "simulator" ? "simulated install" : "installed by the Windows agent"}`)),
       e("details", { className: "rounded-xl border border-slate-800 bg-slate-950 p-3", open: registerOpen, onToggle: evt => setRegisterOpen(evt.currentTarget.open) },
         e("summary", { className: "text-xs font-bold text-indigo-300 cursor-pointer" }, "REGISTER A DESKTOP APPLICATION"),
         e("form", { className: "mt-3 grid grid-cols-1 md:grid-cols-2 gap-2", onSubmit: registerApp },

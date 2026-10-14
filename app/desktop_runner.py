@@ -37,6 +37,10 @@ DESKTOP_ACTIONS = {
     "window_launch", "window_attach", "window_close", "ui_click", "ui_double_click",
     "ui_right_click", "ui_type", "ui_select", "ui_check", "ui_menu_invoke",
     "ui_grid_read", "assert_control_text", "assert_control_state", "wait_window_ready",
+    # Installing the target before driving it. Only the Windows agent can really
+    # install anything; the simulator validates the request and records a log so
+    # the install-then-record flow is testable without a Windows machine.
+    "app_install",
 }
 DESKTOP_FRAMEWORKS = {"dotnet", "cpp", "winforms"}
 DESKTOP_LOCATOR_KEYS = {
@@ -236,7 +240,7 @@ def validate_desktop_selector(selector, action):
     """
     if not isinstance(selector, dict):
         raise ValueError("Desktop locator must be an object")
-    if action in {"window_launch", "window_attach"}:
+    if action in {"window_launch", "window_attach", "app_install"}:
         if not (selector.get("app_id") or selector.get("window_title") or
                 selector.get("process_name") or selector.get("class_name")):
             raise ValueError(action + " needs app_id, window_title, process_name or class_name")
@@ -492,6 +496,28 @@ class DesktopSimulator:
             result = {"action": action, **self.attach(selector, value), "launched": True}
         elif action == "window_attach":
             result = {"action": action, **self.attach(selector, value)}
+        elif action == "app_install":
+            # The simulator installs nothing. It checks that the profile can be
+            # opened and reports what a real agent would have been asked to run,
+            # so the install-then-record flow is testable without Windows.
+            try:
+                attached = self.attach(selector, value)
+            except ValueError:
+                attached = None
+            title = ((attached or {}).get("window_title")
+                     or str(selector.get("window_title") or "Custom Application")[:200])
+            result = {
+                "action": action, "installed": True, "exit_code": 0,
+                "registered": bool(attached), "window_title": title,
+                "log": [
+                    "simulator: install request accepted; nothing was installed on a real machine",
+                    "simulator: command that would run: " + (value or "(none)"),
+                ],
+            }
+            if attached and attached.get("app_id") in self.catalog:
+                result["controls"] = [dict(control)
+                                      for control in self.catalog[attached["app_id"]]["controls"]]
+                result["process_name"] = attached.get("process_name")
         elif action == "window_close":
             title = (self.app or {}).get("window_title")
             self.app = None

@@ -3560,7 +3560,8 @@ class FrontendBootTests(unittest.TestCase):
 
     STATIC = ROOT / "app" / "static"
     COMPONENT_FILES = ("tf-settings.js", "variable-review.js", "settings-components.js", "import-components.js",
-                       "scenario-components.js", "demo-components.js", "future-components.js")
+                       "scenario-components.js", "demo-components.js", "future-components.js",
+                       "desktop-install-components.js", "devdeploy-components.js")
     # Allocations that are never Object.is-stable, so returning one from a
     # getSnapshot guarantees an infinite render loop.
     FRESH_RETURN = re.compile(r"return\s+(?:new\b|[{[])")
