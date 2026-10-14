@@ -2598,6 +2598,13 @@ from app.roadmap_routes import router as roadmap_router
 app.include_router(roadmap_router)
 from app.settings_routes import router as settings_router
 app.include_router(settings_router)
+# Dev & Deploy kit: the development, SQL-on-Azure and CI/CD guides plus the AI
+# prompt library, served as markdown and as downloads.
+from app.dev_kit import router as dev_kit_router
+app.include_router(dev_kit_router)
+# Install a custom desktop application on the Windows target before recording it.
+from app.desktop_install import router as desktop_install_router
+app.include_router(desktop_install_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

@@ -188,6 +188,36 @@ Resource guardrails (`UT-MEM-*`) cover the limits that keep a 512MB instance ins
 
 Schema drift (`UT-DB-*`) covers a database that disagrees with the model: a label longer than the column it is stored in, a legacy `varchar(300)` that `create_all()` never widens because the table already exists, and the repair-and-retry that saves the user's step instead of failing their recording.
 
+## Dev & Deploy kit and desktop application installation
+
+`tests/test_dev_kit.py` covers the dashboard's Dev & Deploy tab: the guides it
+serves from `docs/`, the AI prompt library generated from `app/dev_prompts.py`,
+and the downloads. `tests/test_desktop_install.py` covers installing a custom
+desktop application on the Windows target before recording it.
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| UT-DEVKIT-01 | Kit index | `/api/dev/kit` lists all seven documents with sizes, plus the prompt library and its phases. |
+| UT-DEVKIT-02 | Guide markdown | The Azure SQL guide and the SQL script companion are served with their repository path and no truncation. |
+| UT-DEVKIT-03 | Slug allowlist | An unknown slug is a 404 naming the known documents; a traversal path never reaches the handler. |
+| UT-DEVKIT-04 | Prompt download | `ai-prompt-library.md` is generated from the prompt list: every prompt id, prompt text and phase heading is present. |
+| UT-DEVKIT-05 | Bundle | One zip holds every guide plus a reading-order README. |
+| UT-DEVKIT-06 | Prompt quality | Every prompt has a unique id, a known phase, inputs, an expected output, review checks, and asks for no credential. |
+| UT-DEVKIT-07 | Dashboard wiring | `index.html` loads `devdeploy-components.js`, declares the `Dev & Deploy` tab and renders `DevDeployTab`. |
+| UT-DEVKIT-08 | Missing guide | A deployment without the file returns 404 pointing at GitHub, and the bundle skips it instead of failing. |
+| UT-DEVKIT-09 | Boolean backfill on SQL Server | `BIT` columns are backfilled with `0`/`1` on `mssql` and stay `false`/`true` on PostgreSQL and SQLite. |
+| UT-DEVKIT-10 | SQL script parity | The committed `CREATE TABLE` statements list exactly the columns the models declare, and JSON columns are `NVARCHAR(max)`. |
+| UT-DSKINS-01 | Install registers the app | A simulated install is recorded with exit code 0 and the app becomes selectable with its receipt. |
+| UT-DSKINS-02 | Command template | `msi` and `exe` installs build the documented command, with the operator's extra arguments appended. |
+| UT-DSKINS-03 | Metacharacters refused | `&`, `|` and `;` in the installer or command are rejected with 422 before anything is sent to an agent. |
+| UT-DSKINS-04 | Installer reference | A relative path, a plain-http URL and a wrong extension are rejected; an https URL is accepted. |
+| UT-DSKINS-05 | Package managers | `winget` and `choco` take a package id and build the expected command; a path is rejected for them. |
+| UT-DSKINS-06 | Verify before recording | Verification launches and closes the installed app, counts its controls, and refuses an unknown app. |
+| UT-DSKINS-07 | Receipt on the recording | A desktop recording started against an installed app reports the install receipt in its session state. |
+| UT-DSKINS-08 | Remove | Deleting an install drops the receipt, unregisters the profile and 404s the second time. |
+| UT-DSKINS-09 | Agent dispatch | With an agent configured the `app_install` command and context are sent, the reported exit code decides the status, and the log is bounded. |
+| UT-DSKINS-10 | Simulator action | `app_install` is a validated desktop action the simulator can run, reporting that nothing was really installed. |
+
 ## Library scenarios
 
 These run against a live `uvicorn` process started by the harness.

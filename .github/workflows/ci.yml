@@ -1,0 +1,56 @@
+name: ci
+
+# Two jobs on purpose. `unit` answers "is this branch broken?" in a couple of
+# minutes without a browser; `harness` runs the whole catalog, including the
+# library scenarios that drive a real server and a real Chromium. A missing
+# browser must fail the build here (--require-browser), because a skipped
+# scenario is not a passed one.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Unit suite (no browser)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      - run: python -m unittest discover -s tests -p "test_*.py" -t .
+
+  harness:
+    name: Full harness (with Chromium)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        # The harness records the commit it tested with `git rev-parse`.
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      - run: python -m playwright install --with-deps chromium
+      # No GitHub publishing credentials are set here on purpose: tests must never
+      # be able to push to a repository. The harness also strips them from the
+      # server environment it starts and sets TF_LIBRARY_PUBLISH=0.
+      - run: python -m tests.harness --require-browser
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: harness-logs
+          path: logs/
+          retention-days: 14

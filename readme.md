@@ -271,6 +271,42 @@ The **Settings** tab (⚙️) holds the instance-wide defaults. They are stored 
 
 Dates and times across the dashboard are shown through one formatter (`app/static/tf-settings.js`). Stored values stay UTC, and the formatter converts them to the chosen zone when displayed. Only the navigation and the Master setup screen are translated so far; everything else stays in English. PDF report times stay in UTC and are labelled `(UTC)`.
 
+## Dev & Deploy tab
+The **Dev & Deploy** tab (🛠️) is the hand-over pack for the in-house development team: the codebase
+map, local setup, SQL Server on Azure end to end, deployment, CI/CD, the copy-paste SQL scripts and the
+AI prompt library. It is served from this instance (`GET /api/dev/kit`,
+`GET /api/docs/dev-kit/{slug}`), so the team reads the same text the repository holds. Every document
+is downloadable on its own (`/api/docs/dev-kit/{slug}/download`) or as one archive
+(`/api/docs/dev-kit/bundle`).
+
+The guides live in `docs/` and are registered in `app/dev_kit.py`; add one there and it appears in the
+tab, in the bundle and in the download endpoint. The prompt library is different: it is data in
+`app/dev_prompts.py`, rendered by the tab and generated into `ai-prompt-library.md` on demand, so the
+file you email cannot drift from the dashboard. Nothing in either is a credential: the guides use
+placeholders and Key Vault references.
+
+For a SQL Server database the ODBC driver is **not** in `requirements.txt` — install
+`requirements-sqlserver.txt` in addition, and see
+[docs/dev-azure-sql-server.md](docs/dev-azure-sql-server.md) for the connection string, the pooling
+arithmetic and the two schema repairs that are gated to PostgreSQL.
+
+## Windows desktop: install an application before recording it
+The **Windows Desktop** tab records an application that is already on the target machine, so the
+**INSTALL A DESKTOP APPLICATION BEFORE RECORDING** panel comes first: name the app, choose the
+installer type (`msi`, `exe`, `msix`, `winget`, `choco`, `portable`), point at the installer on the
+Windows target (an absolute path or an https URL the agent can download, or a package id), then
+**INSTALL & REGISTER APPLICATION**. The application is registered, selected in the list below, and
+**VERIFY IT OPENS** launches and closes it once before you record. The recording's session state
+carries the install receipt, so the evidence says what was installed and when.
+
+The install command is built from a template per installer kind, or checked against an allowlist when
+you supply one, and shell metacharacters are rejected: the dashboard host never runs an installer and
+never touches a Windows file system. With `TF_WINDOWS_AGENT_URL` and `TF_WINDOWS_AGENT_TOKEN` the
+command goes to the authenticated agent over HTTPS and the agent's own exit code decides the status.
+Without an agent the install is validated and registered against the deterministic simulator and is
+labelled **SIMULATED** everywhere it appears. Install records live under
+`$TF_ARTIFACTS/roadmap/desktop-installs.json` (at most 20, `GET/POST /api/desktop/installs`).
+
 ## Windows desktop: screen size and variables
 The live Windows screen during recording and the screen in **Runs** share one viewer. **Fit** shows the whole screen, **−/+** steps through 50%–300%, **100%** shows real size, and **Enlarge** (or Esc to close) fills the window. Scroll inside the viewer to move around a zoomed screen.
 
@@ -278,6 +314,8 @@ When you press STOP on a Windows recording, TestForge reviews the values you typ
 
 ## Database migrations
 `app/db.py` runs an idempotent schema check at startup. It creates missing tables, adds columns that the models declare but an older table lacks (backfilling existing rows), and relaxes `NOT NULL` on legacy columns the models no longer write. `create_all()` alone only creates missing tables, so a database created by an older revision keeps its original columns and every write to it fails until this migration runs.
+
+The check is dialect-aware where it has to be: a new `NOT NULL` boolean column is backfilled with `false` on PostgreSQL and SQLite and with `0` on SQL Server, whose `BIT` type rejects the word `false`. The two legacy repairs that relax `NOT NULL` on columns the models no longer write, and widen a legacy `VARCHAR`, run on PostgreSQL only — on SQL Server, widen such a column by hand (see [docs/dev-azure-sql-server.md](docs/dev-azure-sql-server.md) §6.3).
 
 ## QA acceptance criteria and exports
 See [docs/qa-automation-acceptance.md](docs/qa-automation-acceptance.md) for the ten testable recording, execution and GitHub acceptance criteria and implementation limitations. The Library editor can modify saved steps. Recording resources include Playwright Python, Jenkins, Gherkin and Azure/Jira/TestComplete CSV/XLSX templates; proprietary vendor imports require mapping. Recorder PNGs remain alongside recorded steps; execution evidence is a reusable low-quality JPEG per step and optional video is WebM.
