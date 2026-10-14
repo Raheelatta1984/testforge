@@ -188,6 +188,30 @@ Resource guardrails (`UT-MEM-*`) cover the limits that keep a 512MB instance ins
 
 Schema drift (`UT-DB-*`) covers a database that disagrees with the model: a label longer than the column it is stored in, a legacy `varchar(300)` that `create_all()` never widens because the table already exists, and the repair-and-retry that saves the user's step instead of failing their recording.
 
+## QA agent hub
+
+The QA agent hub (`app/qa_agents/`, dashboard tab "QA Agents") runs nine deterministic agents on pasted input or on stored runs, recordings and projects. Its checks live in `QAAgentHubTests` and cover the agents, the optional AI layer, the routes and the dashboard wiring.
+
+| ID | Scenario | Expected result |
+| --- | --- | --- |
+| UT-AGT-01 | Catalogue and routes | `GET /api/agents` lists the nine agents in order and the four `/api/agents` routes are mounted on the app. |
+| UT-AGT-02 | Every sample runs on rules | Each agent's built-in sample returns the common envelope (`engine` = `rules`, `ai_insights` = `[]`, AI not used) with no network call. |
+| UT-AGT-03 | Requirement review wording | Vague terms, open questions and performance wording without a number are flagged; empty text is rejected with a 400-class error. |
+| UT-AGT-04 | Test case generation | Numeric limits yield boundary cases at min-1, min, max and max+1; a criterion without "required" does not create empty-value cases for its field; the score is `None`. |
+| UT-AGT-05 | API contract | Contract test IDs are unique across operations; Swagger 2 and YAML documents are accepted; `security: []` means unsecured. |
+| UT-AGT-06 | Automation code review | A credential literal passed to `fill()` is critical (CR-06), a hard-coded sleep is flagged, and an environment-variable reference is not. |
+| UT-AGT-07 | Failure triage | Timeouts classify as automation and HTTP 500 as product; an executor "other" bucket gives `executor_agrees` = `None` (no opinion); confidence stays within 0.2–0.95. |
+| UT-AGT-08 | Flaky analysis | Plain "waiting for locator" timeouts count as timing, not as a locator fault; fewer than three runs gives "insufficient history". |
+| UT-AGT-09 | Defect drafting | HTTP 500 is critical; an explicit reporter severity is kept (`low` becomes Jira `minor`); tokens and e-mail addresses are scrubbed from the draft; the title has no truncated "when…" suffix. |
+| UT-AGT-10 | Regression selection | Tests matching a changed area and smoke-tagged tests are selected; the batch payload is `{recording_ids, name, screenshots: "failure"}`. |
+| UT-AGT-11 | Release decision policy | No runs gives INSUFFICIENT EVIDENCE; a failing critical test gives NO-GO; all passing gives GO; a 90% pass rate gives CONDITIONAL GO. |
+| UT-AGT-12 | AI layer is optional and safe | With a key, one call adds insights and leaves the rule findings unchanged; rules mode makes no call; a malformed reply or an exception is recorded and the rules result is kept; secrets and e-mail addresses are removed before sending. |
+| UT-AGT-13 | Route errors | Input over 200,000 characters gives 413; empty text gives 400; an unknown agent gives 404; a bad mode, a non-object body and a stored source the agent does not accept give 400. |
+| UT-AGT-14 | Stored-data sources | Failure triage and defect drafting read a run, flaky analysis reads a recording, and release summary and regression read a project; an unknown project gives 404. |
+| UT-AGT-15 | Scrubbing stays linear | Scrubbing a 200,000-character word finishes in under two seconds (guards against a quadratic e-mail pattern). |
+| UT-AGT-16 | Dashboard wiring | `index.html` loads the component, adds the "QA Agents" tab and keeps all sixteen existing tab keys. |
+| UT-AGT-17 | Component classes exist in the stylesheet | Every Tailwind-style class in `qa-agents-components.js` has a rule in the committed `vendor/tailwind.css` (or is a known custom class), so no control renders unstyled. |
+
 ## Dev & Deploy kit and desktop application installation
 
 `tests/test_dev_kit.py` covers the dashboard's Dev & Deploy tab: the guides it

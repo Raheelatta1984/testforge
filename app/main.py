@@ -2605,6 +2605,11 @@ app.include_router(dev_kit_router)
 # Install a custom desktop application on the Windows target before recording it.
 from app.desktop_install import router as desktop_install_router
 app.include_router(desktop_install_router)
+# QA agent hub: requirement review, test design, API contract, code review,
+# failure triage, flaky analysis, defect drafting, regression selection and
+# release summary. Stateless; reads run history, never starts a browser.
+from app.qa_agents import router as qa_agents_router
+app.include_router(qa_agents_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

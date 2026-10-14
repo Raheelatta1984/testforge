@@ -1,6 +1,6 @@
 # TestForge Testing Tool
 - **Database:** Permanently stored in Neon PostgreSQL / SQLite (Configured in config.py).
-- **Architecture:** 13-tab persistent dashboard (optimized for Android 12) with visible, horizontally scrollable tab names and accessible labels.
+- **Architecture:** 17-tab persistent dashboard (optimized for Android 12) with visible, horizontally scrollable tab names and accessible labels.
 - **Demo tab:** guided walkthrough over the built-in sample app and five synthetic fixtures, plus optional public shopping/grocery/fashion learning URLs.
 - **Future release planning tab:** a clearly labeled, non-committal roadmap view for browser ERP/CRM packs, Windows desktop (.NET/C#/C++/WinForms) and Android/iOS/Zebra device automation; proposed items are not described as current support.
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
@@ -150,6 +150,10 @@ The coordinates come from the git checkout when there is one, and from `TF_GITHU
 
 The dashboard also stops polling while its tab is hidden.
 
+## QA agent hub
+
+The **QA Agents** tab runs nine QA agents: Requirement Review, Test Case Generation, API Contract, Automation Code Review, Failure Triage, Flaky Test Analysis, Defect Drafting, Regression Selection and Release Summary. Paste an input (LOAD SAMPLE fills one in) or run on data already stored here: a run, a recording, or a project. The rules engine always answers and needs no network. With `ANTHROPIC_API_KEY` set, one bounded call per run adds short AI insights; it never changes a rule finding. Endpoints: `GET /api/agents`, `GET /api/agents/{id}/sample`, `POST /api/agents/{id}/run`, `POST /api/agents/{id}/from-source`. Full behaviour, limits, the decision rules, and the comparison with existing functionality are in [`docs/qa-agent-hub.md`](docs/qa-agent-hub.md). Test IDs are `UT-AGT-01` to `UT-AGT-17`.
+
 ## Environment variables
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -191,6 +195,11 @@ The dashboard also stops polling while its tab is hidden.
 | `TF_LOGS_DIR` | `<repo>/logs` | Where the local log reader looks. |
 | `TF_MAX_LOG_FILE_BYTES` | `262144` | Largest tail the local log reader returns. |
 | `TF_MAX_LOG_INDEX_ROWS` | `40` | Most runs the local log index lists. |
+| `ANTHROPIC_API_KEY` | unset | Enables the optional AI insights of the QA agent hub. Rules run without it. |
+| `TF_AGENT_AI` | `1` | `0` turns the QA agent AI insights off even when a key is set. |
+| `TF_AGENT_AI_MODEL` | `claude-sonnet-4-5` | Model used for QA agent insights. |
+| `TF_AGENT_AI_URL` | Anthropic Messages API | Endpoint for QA agent insights (proxy or test double). |
+| `TF_AGENT_AI_TIMEOUT` | `30` | Seconds before a QA agent AI call is abandoned. |
 
 ## Testing
 The harness runs the unit suite and the library scenarios. Library scenarios are the recordings and projects in `library/`, executed through the same recorder and runner the dashboard uses. From the repository root:

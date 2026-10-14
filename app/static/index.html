@@ -103,6 +103,7 @@
 <script src="/future-components.js"></script>
 <script src="/desktop-install-components.js"></script>
 <script src="/devdeploy-components.js"></script>
+<script src="/qa-agents-components.js"></script>
 <script>
 const { useState, useEffect, useRef } = React;
 const e = React.createElement;
@@ -306,7 +307,8 @@ function TabSupportFooter({ tab, setTab }) {
     azure: ["Keep the deployment guide and security runbook handy when configuring a hosted instance.", "future"],
     devdeploy: ["The guides and AI prompts here are served from this instance and downloadable as markdown, so the in-house dev team gets the same text the repository holds.", "azure"],
     settings: ["Master setup applies one region, time zone, date and time format and language to every screen. Changes are saved for all users of this instance.", "projects"],
-    future: ["Support Matrix distinguishes live agent integrations from deterministic local simulator coverage.", "desktop-record"]
+    future: ["Support Matrix distinguishes live agent integrations from deterministic local simulator coverage.", "desktop-record"],
+    "qa-agents": ["Agents read pasted text or stored runs and recordings. Rules always run; AI insights are added only when the server has a key.", "runs"]
   }[tab] || ["Need help? Include the relevant project, recording or run ID so an issue can be traced.", "logs"];
   return e("footer", { className: "mt-6 mb-4 rounded-2xl border border-indigo-900/60 bg-indigo-950/30 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3" },
     e("div", { className: "min-w-0" },
@@ -343,7 +345,8 @@ function App({ access }) {
     ["artifacts", "🎥", "Artifacts"], ["logs", "📜", "Logs"],
     ["github", "🐙", "GitHub"], ["azure", "☁️", "Azure"],
     ["devdeploy", "🛠️", "Dev & Deploy"],
-    ["settings", "⚙️", "Settings"], ["future", "🗺️", "Future release planning"]
+    ["settings", "⚙️", "Settings"], ["future", "🗺️", "Future release planning"],
+    ["qa-agents", "🧰", "QA Agents"]
   ];
 
   return e('div', { className: "h-full flex flex-col" },
@@ -373,6 +376,7 @@ function App({ access }) {
       tab === "logs" && e(Logs), tab === "github" && e(Github),
       tab === "azure" && e(Azure),
       tab === "devdeploy" && e(DevDeployTab, { setTab }),
+      tab === "qa-agents" && e(QAAgentsTab, { project: activeProject, setTab }),
       tab === "settings" && e(SettingsTab),
       tab === "future" && e(FuturePlanningTab),
       e(TabSupportFooter, { tab, setTab })
