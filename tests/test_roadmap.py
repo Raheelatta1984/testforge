@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -149,6 +150,31 @@ class DesktopTests(unittest.TestCase):
             self.assertTrue(any(step.get('screenshot', '').endswith('.png') for step in steps))
             self.assertTrue(list(Path(tmp).glob('step-*.png')))
 
+    def test_desktop_execution_streams_timed_screenshots_in_step_order(self):
+        async def exercise(tmp):
+            events = []
+            async def on_step(event, screenshot):
+                events.append((event, screenshot))
+            plan = desktop_plan(
+                setup=[{'action': 'window_launch', 'selector': {'app_id': 'calculator'}, 'value': ''}],
+                teardown=[{'action': 'window_close', 'selector': {'app_id': 'calculator'}, 'value': ''}],
+            )
+            result = await run_plan(plan, {}, tmp, on_step=on_step)
+            return result, events
+        with tempfile.TemporaryDirectory() as tmp:
+            result, events = asyncio.run(exercise(tmp))
+            self.assertEqual(result['status'], 'passed')
+            self.assertEqual([event['action'] for event, _ in events],
+                             ['window_launch', 'ui_type', 'ui_click', 'assert_control_text', 'window_close'])
+            for event, screenshot in events:
+                with self.subTest(action=event['action']):
+                    self.assertTrue(event['started_at'])
+                    self.assertTrue(event['finished_at'])
+                    self.assertGreaterEqual(event['duration_ms'], 0)
+                    self.assertTrue(event['screenshot'].endswith('.png'))
+                    self.assertTrue(screenshot.startswith(b'\x89PNG'))
+                    self.assertTrue((Path(tmp) / event['screenshot']).is_file())
+
     def test_desktop_failure_evidence_withholds_expected_values(self):
         plan = desktop_plan(dataset=[{'expr': '2+3', 'expected': 'top-secret-expected'}])
         with tempfile.TemporaryDirectory() as tmp:
@@ -167,15 +193,21 @@ class DesktopTests(unittest.TestCase):
         class Response:
             def __enter__(self): return self
             def __exit__(self, *args): return False
-            def read(self, limit): return b'{"ok": true}'
+            def read(self, limit):
+                captured['response_limit'] = limit
+                return b'{"ok": true}'
 
         def fake_open(request, timeout=0):
             captured['auth'] = request.headers.get('Authorization')
+            captured['body'] = json.loads(request.data)
             return Response()
 
         with patch('app.desktop_runner.urllib.request.urlopen', fake_open):
-            result = agent.dispatch({'action': 'ui_click', 'selector': {'name': 'OK'}, 'value': ''})
+            result = agent.dispatch({'action': 'ui_click', 'selector': {'name': 'OK'}, 'value': ''},
+                                   include_screenshot=True)
         self.assertEqual(captured['auth'], 'Bearer agent-token-value')
+        self.assertTrue(captured['body']['capture_screenshot'])
+        self.assertGreater(captured['response_limit'], 512 * 1024)
         self.assertNotIn('agent-token-value', json.dumps(result))
 
     def test_desktop_runner_facade_uses_simulator_without_agent(self):
@@ -186,6 +218,92 @@ class DesktopTests(unittest.TestCase):
             await runner.perform({'action': 'assert_control_text', 'selector': {'automation_id': 'cmbStatus'}, 'value': 'Posted'}, {})
             return result
         self.assertEqual(asyncio.run(go())['mode'], 'simulator')
+
+
+class DesktopRecordingApiTests(unittest.TestCase):
+    def test_desktop_capture_is_live_timed_and_exclusive_with_browser(self):
+        with patch.dict(os.environ, {"TF_WINDOWS_AGENT_URL": "", "TF_WINDOWS_AGENT_TOKEN": ""}):
+            with TestClient(app) as client:
+                project = client.post('/api/projects', json={'name': 'Desktop capture API'}).json()
+                with patch('app.main._active_browser_recording_ids', return_value={'browser-session'}):
+                    blocked = client.post('/api/desktop/recordings', json={
+                        'project_id': project['id'], 'name': 'Desktop blocked',
+                        'app_id': 'calculator', 'windows_version': 'windows_10',
+                    })
+                self.assertEqual(blocked.status_code, 409)
+                start = client.post('/api/desktop/recordings', json={
+                    'project_id': project['id'], 'name': 'Calculator proof',
+                    'purpose': 'Confirm desktop evidence is captured',
+                    'app_id': 'calculator', 'windows_version': 'windows_10',
+                })
+                self.assertEqual(start.status_code, 201)
+                session = start.json()
+                self.assertEqual(session['mode'], 'simulator')
+                self.assertTrue(session['active'])
+                self.assertTrue(session['frame'])
+                recording_id = session['recording_id']
+
+                browser = client.post('/api/recordings', json={
+                    'project_id': project['id'], 'name': 'Exclusive browser', 'start_url': '/demo.html',
+                    'interactive_session': True,
+                })
+                self.assertEqual(browser.status_code, 409)
+
+                captured = client.post(f'/api/desktop/recordings/{recording_id}/input', json={
+                    'action': 'ui_click', 'x': 0.80, 'y': 0.33,
+                    'field_name': 'Two button', 'value': '',
+                })
+                self.assertEqual(captured.status_code, 200)
+                step = captured.json()['step']
+                self.assertEqual(step['selector']['automation_id'], 'num2Button')
+                self.assertEqual(captured.json()['matched_control']['name'], 'Two')
+                self.assertTrue(step['started_at'])
+                self.assertTrue(step['finished_at'])
+                self.assertGreaterEqual(step['duration_ms'], 0)
+                self.assertTrue(step['screenshot'].endswith('/screenshot'))
+                image = client.get(step['screenshot'])
+                self.assertEqual(image.status_code, 200)
+                self.assertEqual(image.headers['content-type'], 'image/png')
+                self.assertTrue(image.content.startswith(b'\x89PNG'))
+
+                live = client.get(f'/api/recordings/{recording_id}').json()
+                self.assertEqual(live['purpose'], 'Confirm desktop evidence is captured')
+                self.assertEqual(len(live['steps']), 1)
+                self.assertEqual(live['source'], 'live')
+
+                stopped = client.post(f'/api/desktop/recordings/{recording_id}/stop', json={})
+                self.assertEqual(stopped.status_code, 200)
+                self.assertTrue(stopped.json()['window_closed'])
+                self.assertEqual(stopped.json()['step_count'], 1)
+                self.assertFalse(client.get('/api/desktop/recording/session').json()['active'])
+
+                queued = client.post('/api/runs', json={'target_id': recording_id, 'display_window': False})
+                self.assertEqual(queued.status_code, 201)
+                self.assertTrue(queued.json()['display_window'])
+                run_id = queued.json()['run_id']
+                for _ in range(100):
+                    run = client.get(f'/api/runs/{run_id}?full=true').json()
+                    if run.get('status') not in {'queued', 'running'}:
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(run['status'], 'passed')
+                self.assertEqual(run['execution_target'], 'windows_desktop')
+                self.assertGreaterEqual(run['elapsed_seconds'], 0)
+                self.assertTrue(run['started_at'])
+                self.assertTrue(run['last_step_finished_at'])
+                self.assertGreaterEqual(len(run['log']), 3)  # launch, captured step, close
+                for item in run['log']:
+                    self.assertTrue(item['started_at'])
+                    self.assertTrue(item['finished_at'])
+                    self.assertIn('duration_ms', item)
+                    self.assertTrue(item['screenshot'].endswith('.png'))
+
+                browser = client.post('/api/recordings', json={
+                    'project_id': project['id'], 'name': 'Browser after desktop', 'start_url': '/demo.html',
+                    'interactive_session': True,
+                })
+                self.assertEqual(browser.status_code, 201)
+                self.assertEqual(client.post(f"/api/recordings/{browser.json()['id']}/stop", json={}).status_code, 200)
 
 
 class MobileTests(unittest.TestCase):

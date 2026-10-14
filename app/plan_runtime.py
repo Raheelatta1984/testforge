@@ -10,14 +10,16 @@ import time
 from pathlib import Path
 
 try:
-    from .step_runtime import interpolate, normalize_steps, resolve, StepClock, StepRuntime
+    from .step_runtime import audit_selector, interpolate, normalize_steps, resolve, StepClock, StepRuntime
     from .execution_speed import normalize_speed, speed_profile
-    from .desktop_runner import DESKTOP_ACTIONS, DESKTOP_FRAMEWORKS, DesktopRunner, validate_custom_app
+    from .desktop_runner import (DESKTOP_ACTIONS, DESKTOP_FRAMEWORKS, WINDOWS_VERSIONS,
+                                 DesktopRunner, normalize_screenshot, validate_custom_app)
     from .mobile_runner import MOBILE_ACTIONS, MOBILE_PLATFORMS, ORIENTATIONS, MobileRunner
 except ImportError:  # exported companion source
-    from testforge_runtime import interpolate, normalize_steps, resolve, StepClock, StepRuntime
+    from testforge_runtime import audit_selector, interpolate, normalize_steps, resolve, StepClock, StepRuntime
     from testforge_speed import normalize_speed, speed_profile
-    from testforge_desktop import DESKTOP_ACTIONS, DESKTOP_FRAMEWORKS, DesktopRunner, validate_custom_app
+    from testforge_desktop import (DESKTOP_ACTIONS, DESKTOP_FRAMEWORKS, WINDOWS_VERSIONS,
+                                   DesktopRunner, normalize_screenshot, validate_custom_app)
     from testforge_mobile import MOBILE_ACTIONS, MOBILE_PLATFORMS, ORIENTATIONS, MobileRunner
 
 NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_.-]{0,63}$")
@@ -218,7 +220,7 @@ def normalize_plan(raw):
     plan_speed = normalize_speed(raw.get('execution_speed', 1.0))
     profiles = []
     for item in matrix:
-        if not isinstance(item, dict) or set(item) - {'browser', 'device', 'auth_profile', 'runner', 'framework', 'platform', 'device_model', 'os_version', 'orientation', 'desktop_app', 'app_profile', 'execution_speed'}:
+        if not isinstance(item, dict) or set(item) - {'browser', 'device', 'auth_profile', 'runner', 'framework', 'platform', 'device_model', 'os_version', 'orientation', 'desktop_app', 'app_profile', 'windows_version', 'execution_speed'}:
             raise ValueError("Unknown matrix profile fields")
         browser, device = item.get('browser', 'chromium'), item.get('device', 'desktop')
         if browser not in {'chromium', 'firefox', 'webkit'} or device not in DEVICES:
@@ -236,6 +238,10 @@ def normalize_plan(raw):
             if framework not in DESKTOP_FRAMEWORKS:
                 raise ValueError("framework must be dotnet, cpp or winforms")
             profile['framework'] = framework
+            windows_version = str(item.get('windows_version', 'windows_11')).strip().lower()
+            if windows_version not in WINDOWS_VERSIONS:
+                raise ValueError("windows_version must be windows_10 or windows_11")
+            profile['windows_version'] = windows_version
             if item.get('desktop_app') is not None:
                 if not re.fullmatch(r"[a-z0-9][a-z0-9_.-]{0,63}", str(item['desktop_app'])):
                     raise ValueError("desktop_app must be a simple app slug")
@@ -269,7 +275,7 @@ def normalize_plan(raw):
 
 
 async def _run_nonweb_profile(plan, profile, base_variables, output, results,
-                              evidence_index, on_progress, input_overrides=None):
+                              evidence_index, on_progress, input_overrides=None, on_step=None):
     """Sequential desktop/mobile cases: agent/hub when configured, else simulator.
 
     Evidence deliberately omits typed values and expected/actual payloads (they
@@ -286,7 +292,8 @@ async def _run_nonweb_profile(plan, profile, base_variables, output, results,
             case_dir.mkdir(parents=True, exist_ok=True)
             if profile['runner'] == 'windows_desktop':
                 adapter = DesktopRunner(app_id=profile.get('desktop_app'), app_profile=profile.get('app_profile'),
-                                        framework=profile.get('framework'), artifact_dir=case_dir)
+                                        framework=profile.get('framework'), artifact_dir=case_dir,
+                                        windows_version=profile.get('windows_version', 'windows_11'))
             else:
                 adapter = MobileRunner(platform=profile.get('platform', 'android'),
                                        device_model=profile.get('device_model', 'simulator'),
@@ -315,21 +322,43 @@ async def _run_nonweb_profile(plan, profile, base_variables, output, results,
                             'selector': resolve(step.get('selector') or {}, values),
                         }
                         clock = StepClock()
+                        desktop_step = profile['runner'] == 'windows_desktop'
+                        screenshot_data = None
+                        result = None
                         try:
-                            result = await adapter.perform(resolved_step, values)
+                            if desktop_step:
+                                result = await adapter.perform(resolved_step, values, capture_screenshot=True)
+                                raw_screenshot = result.pop('_screenshot_data', None) if isinstance(result, dict) else None
+                                if raw_screenshot:
+                                    screenshot_data = normalize_screenshot(raw_screenshot)
+                                    name = f"step-{evidence_index}.png"
+                                    (output / name).write_bytes(screenshot_data)
+                                    evidence['screenshot'] = name
+                                else:
+                                    raise RuntimeError("Windows desktop step did not return its required screenshot")
+                            else:
+                                result = await adapter.perform(resolved_step, values)
                         except Exception as exc:
                             failed = True
                             record['status'] = 'failed'
                             evidence.update(status='failed', error_type=type(exc).__name__)
                             if isinstance(exc, AssertionError):
                                 evidence['diagnostic'] = 'assertion mismatch (expected/actual withheld from plan evidence)'
+                            if desktop_step and screenshot_data is None and not adapter._use_agent():
+                                try:
+                                    screenshot_data = normalize_screenshot(adapter.simulator.screenshot_bytes())
+                                    name = f"step-{evidence_index}.png"
+                                    (output / name).write_bytes(screenshot_data)
+                                    evidence['screenshot'] = name
+                                except Exception:
+                                    evidence['evidence_error'] = 'ScreenshotUnavailable'
                         else:
                             if isinstance(result, dict):
                                 for key in ('mode', 'framework', 'window_title', 'platform', 'orientation', 'symbology', 'matched'):
                                     if key in result:
                                         evidence[key] = result[key]
                                 shot = result.get('screenshot')
-                                if shot:
+                                if shot and not desktop_step:
                                     # Reports resolve screenshots from the run
                                     # root, so re-home the per-case synthetic
                                     # PNG under its unique evidence index.
@@ -342,6 +371,26 @@ async def _run_nonweb_profile(plan, profile, base_variables, output, results,
                                         evidence['evidence_error'] = 'ScreenshotUnavailable'
                         evidence.update(clock.finish())
                         record['steps'].append(evidence)
+                        if desktop_step and on_step:
+                            action_count = sum(item['repeat_count'] for stage_steps in
+                                               (plan['setup'], plan['steps'], plan['teardown'])
+                                               for item in stage_steps)
+                            total_actions = max(1, len(plan['dataset']) * len(plan['matrix']) *
+                                                action_count * (1 + plan['retries']))
+                            event = {
+                                **evidence,
+                                'type': 'step',
+                                'order': evidence_index,
+                                'step_index': evidence_index,
+                                'label': step.get('label') or step.get('action'),
+                                'selector': audit_selector(step.get('selector')),
+                                'case': case['case'],
+                                'row': row_index + 1,
+                                'attempt': attempt + 1,
+                                'mode': evidence.get('mode', getattr(adapter, 'mode', None)),
+                                'percent': min(99, int(evidence_index * 100 / total_actions)),
+                            }
+                            await on_step(event, screenshot_data)
                         if pace_ms > 0:
                             await asyncio.sleep(pace_ms / 1000)
                         if evidence['status'] == 'failed':
@@ -364,7 +413,7 @@ async def run_plan(plan, base_variables, artifact_dir, **options):
         return await _run_plan(plan, base_variables, artifact_dir, **options)
 
 
-async def _run_plan(plan, base_variables, artifact_dir, *, chromium_options=None, on_progress=None, borrowed_browser=None, playwright=None, relaunch=None, evidence=None, input_overrides=None):
+async def _run_plan(plan, base_variables, artifact_dir, *, chromium_options=None, on_progress=None, on_step=None, borrowed_browser=None, playwright=None, relaunch=None, evidence=None, input_overrides=None):
     """Caller owns the global browser slot. Never more than one context/browser.
 
     No retry unless explicitly requested. Teardown runs after setup/test failure.
@@ -388,7 +437,7 @@ async def _run_plan(plan, base_variables, artifact_dir, *, chromium_options=None
             if profile['runner'] != 'web':
                 evidence_index = await _run_nonweb_profile(
                     plan, profile, base_variables, output, results, evidence_index,
-                    on_progress, input_overrides)
+                    on_progress, input_overrides, on_step)
                 continue
             options = chromium_options if profile['browser'] == 'chromium' and chromium_options else {'headless': True}
             browser = borrowed_browser or await getattr(pw, profile['browser']).launch(**options)

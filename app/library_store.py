@@ -504,6 +504,14 @@ def _iso(value) -> str:
     return datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
 
 
+def _iso_optional(value):
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.replace(microsecond=0).isoformat() + "Z"
+    return str(value)
+
+
 def _parse_dt(value) -> datetime:
     if isinstance(value, datetime):
         return value.replace(tzinfo=None)
@@ -512,6 +520,17 @@ def _parse_dt(value) -> datetime:
         return datetime.fromisoformat(text)
     except ValueError:
         return datetime.utcnow().replace(microsecond=0)
+
+
+def _parse_dt_optional(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=None)
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", ""))
+    except ValueError:
+        return None
 
 
 def _dump(path: Path, payload) -> None:
@@ -606,6 +625,9 @@ def _step_payload(step: dict) -> dict:
     }
     if step.get("screenshot"):
         payload["screenshot"] = step["screenshot"]
+    for key in ("started_at", "finished_at", "duration_ms"):
+        if step.get(key) is not None:
+            payload[key] = step[key]
     # Preserve repeat info
     if step.get("repeat") is not None:
         payload["repeat"] = step["repeat"]
@@ -625,6 +647,7 @@ def _recording_payload(data: dict, *, with_steps: bool, published: bool | None =
         "project_id": data["project_id"],
         "parent_id": data.get("parent_id"),
         "name": data.get("name") or "",
+        "purpose": data.get("purpose") or "",
         "start_url": data.get("start_url") or "",
         "status": data.get("status") or "active",
         "tags": data.get("tags") or "",
@@ -657,6 +680,7 @@ def catalog_recording_row(project_id: str, rec: dict, project_name: str | None =
         "project_id": project_id,
         "parent_id": rec.get("parent_id"),
         "name": rec.get("name") or "",
+        "purpose": rec.get("purpose") or "",
         "start_url": rec.get("start_url") or "",
         "status": "active",
         "tags": tags,
@@ -987,6 +1011,7 @@ def _write_catalog() -> None:
                     recordings.append({
                         "id": rdata["id"],
                         "name": rdata.get("name") or "",
+                        "purpose": rdata.get("purpose") or "",
                         "start_url": rdata.get("start_url") or "",
                         "tags": rdata.get("tags") or "",
                         "parent_id": rdata.get("parent_id"),
@@ -1073,6 +1098,9 @@ def _steps_from_db(recording: Recording) -> list[dict]:
             "value": step.value,
             "label": step.label,
             "selector": step.selector if isinstance(step.selector, dict) else step.selector,
+            "started_at": _iso_optional(step.started_at),
+            "finished_at": _iso_optional(step.finished_at),
+            "duration_ms": step.duration_ms,
         }
         if step.screenshot_path:
             item["screenshot"] = Path(step.screenshot_path).name
@@ -1234,6 +1262,7 @@ def _write_recording_files(recording_id: str, *, include_exports: bool = True) -
             "project_id": project_id,
             "parent_id": recording.parent_id,
             "name": recording.name,
+            "purpose": recording.purpose or "",
             "start_url": recording.start_url or "",
             "tags": recording.tags or "",
             "status": recording.status or "active",
@@ -1740,7 +1769,7 @@ def create_project(name: str, base_url: str, entity_id: str | None = None,
             raise
 
 
-def create_recording(project_id: str, name: str, start_url: str, parent_id: str | None = None, *, steps: list | None = None, tags: str = "", execution_plan: dict | None = None, publish: bool = True) -> dict:
+def create_recording(project_id: str, name: str, start_url: str, parent_id: str | None = None, *, steps: list | None = None, tags: str = "", purpose: str = "", execution_plan: dict | None = None, publish: bool = True) -> dict:
     """Create a recording row and its files.
 
     ``publish=False`` writes the files and the catalog and returns at once: the
@@ -1774,6 +1803,7 @@ def create_recording(project_id: str, name: str, start_url: str, parent_id: str 
                     execution_plan=execution_plan,
                     tags=tags[:500],
                     name=name.strip()[:255],
+                    purpose=str(purpose or "").strip()[:1000],
                     start_url=start_url,
                     created_at=datetime.utcnow().replace(microsecond=0),
                 )
@@ -2025,6 +2055,7 @@ def plan_catalog() -> dict:
         recordings.append({
             "id": item.get("id"), "project_id": item.get("project_id"),
             "project_name": item.get("project_name"), "name": item.get("name"),
+            "purpose": item.get("purpose") or "",
             "start_url": item.get("start_url") or "", "tags": item.get("tags") or "",
             "parent_id": item.get("parent_id"), "step_count": item.get("step_count") or 0,
             "unverified": bool(item.get("unverified")),
@@ -2271,6 +2302,7 @@ def _upsert_recording(db, data: dict) -> None:
     row.project_id = data["project_id"]
     row.parent_id = data.get("parent_id")
     row.name = data.get("name") or "Recording"
+    row.purpose = data.get("purpose") or ""
     row.start_url = data.get("start_url") or ""
     row.tags = data.get("tags") or ""
     row.execution_plan = data.get("execution_plan")
@@ -2300,6 +2332,9 @@ def _upsert_recording(db, data: dict) -> None:
             label=step.get("label"),
             selector=step.get("selector"),
             screenshot_path=step.get("screenshot"),
+            started_at=_parse_dt_optional(step.get("started_at")),
+            finished_at=_parse_dt_optional(step.get("finished_at")),
+            duration_ms=step.get("duration_ms"),
             repeat_count=repeat_count,
         ))
 
@@ -2395,12 +2430,20 @@ def _live_recording_ids() -> set[str]:
     """
     import sys
     recorder_module = sys.modules.get("app.recorder")
-    if recorder_module is None or not hasattr(recorder_module, "SESSIONS"):
-        return set()
-    try:
-        return {str(rid) for rid in recorder_module.SESSIONS.keys()}
-    except Exception:
-        return set()
+    live = set()
+    if recorder_module is not None and hasattr(recorder_module, "SESSIONS"):
+        try:
+            live.update(str(rid) for rid, session in recorder_module.SESSIONS.items()
+                        if getattr(session, "status", "live") in {"starting", "live"})
+        except Exception:
+            pass
+    desktop_module = sys.modules.get("app.desktop_recording")
+    if desktop_module is not None:
+        try:
+            live.update(desktop_module.active_recording_ids())
+        except Exception:
+            pass
+    return live
 
 
 def library_health() -> dict:

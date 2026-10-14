@@ -84,6 +84,7 @@ class Recording(Base):
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id"))
     parent_id: Mapped[str] = mapped_column(String(36), ForeignKey("recordings.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(Text, default="")
     start_url: Mapped[str] = mapped_column(String(1000))
     execution_plan: Mapped[dict] = mapped_column(JSON, nullable=True)
     input_defaults: Mapped[dict] = mapped_column(JSON, nullable=True)
@@ -105,6 +106,9 @@ class RecordingStep(Base):
     value: Mapped[str] = mapped_column(Text, nullable=True)
     label: Mapped[str] = mapped_column(String(500), nullable=True)
     screenshot_path: Mapped[str] = mapped_column(String(1000), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime] = mapped_column(DateTime, nullable=True)
+    duration_ms: Mapped[float] = mapped_column(Float, nullable=True)
     repeat_count: Mapped[int] = mapped_column(Integer, default=1)  # how many times to repeat this step
     recording: Mapped["Recording"] = relationship(back_populates="steps")
 

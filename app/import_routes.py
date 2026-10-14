@@ -536,6 +536,10 @@ def update_metadata(rid, body):
                 if not isinstance(body["name"], str) or not body["name"].strip():
                     raise ValueError("Recording name cannot be empty")
                 recording.name = body["name"].strip()[:255]
+            if "purpose" in body:
+                if not isinstance(body["purpose"], str) or len(body["purpose"].strip()) > 1000:
+                    raise ValueError("Recording purpose must be text up to 1000 characters")
+                recording.purpose = body["purpose"].strip()
             if "tags" in body:
                 if not isinstance(body["tags"], str):
                     raise ValueError("Tags must be comma-separated text")
