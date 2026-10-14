@@ -2596,6 +2596,8 @@ from app.report_routes import router as report_router
 app.include_router(report_router)
 from app.roadmap_routes import router as roadmap_router
 app.include_router(roadmap_router)
+from app.settings_routes import router as settings_router
+app.include_router(settings_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

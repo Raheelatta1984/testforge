@@ -44,8 +44,6 @@
   .dot.red { background: #ef4444; } .dot.yellow { background: #eab308; } .dot.green { background: #22c55e; }
   .browser-viewport { position: relative; background: #000; min-height: 200px; }
   .browser-viewport img { width: 100%; height: auto; display: block; cursor: crosshair; user-select: none; -webkit-user-drag: none; }
-  .run-preview-viewport { min-height: 180px; max-height: 300px; display: flex; align-items: center; justify-content: center; }
-  .run-preview-image { width: 100%; max-height: 300px; height: auto; object-fit: contain; cursor: default; }
   .browser-wait { min-height: 180px; display: flex; align-items: center; justify-content: center; color: #94a3b8; text-align: center; padding: 24px; font-size: 13px; background: #000; }
   .fast-badge { background: linear-gradient(90deg, #22c55e, #16a34a); color: white; font-size: 8px; padding: 2px 6px; border-radius: 999px; font-weight: bold; }
   .var-chip { background: #1e1b4b; border: 1px solid #4338ca; color: #a5b4fc; padding: 2px 8px; border-radius: 999px; font-size: 10px; cursor: pointer; }
@@ -96,6 +94,9 @@
 </head>
 <body>
 <div id="root"></div>
+<script src="/tf-settings.js"></script>
+<script src="/variable-review.js"></script>
+<script src="/settings-components.js"></script>
 <script src="/import-components.js"></script>
 <script src="/scenario-components.js"></script>
 <script src="/demo-components.js"></script>
@@ -301,6 +302,7 @@ function TabSupportFooter({ tab, setTab }) {
     logs: ["Logs fall back to this instance when a repository checkout is not available.", "github"],
     github: ["Publishing status is shown above. A locally saved recording remains available even when sync is offline.", "library"],
     azure: ["Keep the deployment guide and security runbook handy when configuring a hosted instance.", "future"],
+    settings: ["Master setup applies one region, time zone, date and time format and language to every screen. Changes are saved for all users of this instance.", "projects"],
     future: ["Support Matrix distinguishes live agent integrations from deterministic local simulator coverage.", "desktop-record"]
   }[tab] || ["Need help? Include the relevant project, recording or run ID so an issue can be traced.", "logs"];
   return e("footer", { className: "mt-6 mb-4 rounded-2xl border border-indigo-900/60 bg-indigo-950/30 p-4 flex flex-col md:flex-row md:items-center md:justify-between gap-3" },
@@ -320,6 +322,11 @@ function App({ access }) {
   // Live browser window for execution. Off means the replay runs without the
   // screencast, which is the cheapest way to run a suite.
   const [liveWindow, setLiveWindow] = useState(() => localStorage.getItem("tf_live_window") === "1");
+  // Master setup: re-render the whole dashboard when region, time zone, format or language change.
+  React.useSyncExternalStore(tfSubscribeSettings, tfSettings, tfSettings);
+  useEffect(() => {
+    API.get("/api/settings").then(data => tfSetSettings(data.settings, data.options)).catch(() => {});
+  }, []);
   const toggleLiveWindow = (next) => {
     setLiveWindow(next);
     localStorage.setItem("tf_live_window", next ? "1" : "0");
@@ -332,7 +339,7 @@ function App({ access }) {
     ["runs", "▶", "Runs"], ["comparison", "⚖️", "Compare"],
     ["artifacts", "🎥", "Artifacts"], ["logs", "📜", "Logs"],
     ["github", "🐙", "GitHub"], ["azure", "☁️", "Azure"],
-    ["future", "🗺️", "Future release planning"]
+    ["settings", "⚙️", "Settings"], ["future", "🗺️", "Future release planning"]
   ];
 
   return e('div', { className: "h-full flex flex-col" },
@@ -361,17 +368,18 @@ function App({ access }) {
       tab === "comparison" && e(Comparison), tab === "artifacts" && e(Artifacts),
       tab === "logs" && e(Logs), tab === "github" && e(Github),
       tab === "azure" && e(Azure),
+      tab === "settings" && e(SettingsTab),
       tab === "future" && e(FuturePlanningTab),
       e(TabSupportFooter, { tab, setTab })
     ),
     e('nav', { id: "main-tabs", 'aria-label': "Main navigation tabs",
       title: "Swipe horizontally to see all named tabs",
       className: "fixed bottom-0 left-0 right-0 bg-slate-900 border-t border-slate-800 flex" },
-      tabs.map(([k, icon, label]) => e('button', { key: k, onClick: () => setTab(k), title: label,
+      tabs.map(([k, icon, english]) => { const label = tfT(english); return e('button', { key: k, onClick: () => setTab(k), title: label,
         'aria-label': label, 'aria-current': tab === k ? 'page' : undefined,
         className: `nav-btn ${tab===k?'active':''}` },
         e('span', { className: "nav-btn-icon", 'aria-hidden': true }, icon),
-        e('span', { className: "nav-btn-label" }, label)))
+        e('span', { className: "nav-btn-label" }, label)); })
     )
   );
 }
@@ -407,9 +415,12 @@ function Recorder({ project, onRun, liveWindow }) {
   const [variableName, setVariableName] = useState("");
   const [varsList, setVarsList] = useState([]);
   const [publishInfo, setPublishInfo] = useState(null);
-  const [varReview, setVarReview] = useState(null);
-  const [varNote, setVarNote] = useState("");
-  const [varBusy, setVarBusy] = useState(false);
+  // Variable onboarding after SAVE: shared with the Windows desktop recorder.
+  const onboarding = useVariableReview({ onApplied: () => {
+    if (project) API.get(`/api/projects/${project.id}/variables`).then(data => setVarsList(data.variables || [])).catch(() => {});
+  } });
+  const { review: varReview, setReview: setVarReview, note: varNote, setNote: setVarNote, busy: varBusy,
+    open: openVariableReview, apply: applyVariableReview, edit: editCandidate } = onboarding;
   // Every recording already in the library, so the tab can show a tree of what
   // exists and reuse (resume / run) instead of someone re-recording it.
   const [libraryRecs, setLibraryRecs] = useState([]);
@@ -458,7 +469,7 @@ function Recorder({ project, onRun, liveWindow }) {
   useEffect(() => {
     if (!project) return;
     setUrl(prev => prev || project.base_url || "");
-    setName(prev => prev || ("Session " + new Date().toLocaleString()));
+    setName(prev => prev || ("Session " + tfFormatDateTime(new Date())));
     // Load variables for reuse in recording tab (requirement 2)
     API.get(`/api/projects/${project.id}/variables`).then(data => {
       setVarsList(data.variables || []);
@@ -580,36 +591,6 @@ function Recorder({ project, onRun, liveWindow }) {
     finally { setResumeBusy(""); }
   };
 
-  // End-of-recording onboarding (requirement: ask before the values become data).
-  // The proposal is computed server-side from the saved steps, so naming and
-  // substitution behave exactly like the imported-script flow.
-  const openVariableReview = async (id) => {
-    setVarBusy(true);
-    try {
-      const plan = await API.post("/api/recordings/" + id + "/variable-plan", {});
-      if (plan.candidates && plan.candidates.length) { setVarReview(plan); setVarNote(""); }
-      else setVarNote("Every input already uses a variable — nothing to onboard.");
-    } catch (err) { setVarNote("Variable review unavailable: " + err.message); }
-    finally { setVarBusy(false); }
-  };
-  const applyVariableReview = async () => {
-    const chosen = (varReview.candidates || []).filter(item => item.selected !== false);
-    if (!chosen.length) { setVarReview(null); setVarNote("Values kept as typed."); return; }
-    setVarBusy(true);
-    try {
-      const result = await API.post("/api/recordings/" + varReview.recording.id + "/variables", {
-        assignments: chosen.map(item => ({ name: item.name, value: item.value, is_secret: !!item.is_secret, category: item.category, create: !!item.create }))
-      });
-      const counts = result.counts || {};
-      setVarNote(`✅ ${counts.variables_created || 0} variable(s) created, ${counts.steps_changed || 0} step(s) now use {{variables}}` +
-        (counts.variables_reused ? `, ${counts.variables_reused} linked to existing variables` : "") + ".");
-      setVarReview(null);
-      API.get(`/api/projects/${project.id}/variables`).then(data => setVarsList(data.variables || [])).catch(() => {});
-    } catch (err) { setVarNote("Could not apply variables: " + err.message); }
-    finally { setVarBusy(false); }
-  };
-  const editCandidate = (item, change) => setVarReview(plan => ({ ...plan,
-    candidates: (plan.candidates || []).map(entry => entry.value === item.value ? { ...entry, ...change } : entry) }));
   const stop = async () => {
     const id = recId;
     recRef.current = null;
@@ -864,42 +845,78 @@ function Recorder({ project, onRun, liveWindow }) {
         (saveState === "published" ? "✅ " : saveState === "retry" ? "⏳ " : "💾 ") + saveNote),
       varNote && e("p", { role: "status", className: "text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-300" }, varNote),
       varBusy && e("p", { role: "status", className: "text-xs text-indigo-300" }, "Checking recorded values…"),
-      varReview && e("div", { className: "bg-amber-950/30 border border-amber-800/50 p-4 rounded-2xl space-y-3" },
-        e("p", { className: "text-sm font-bold text-amber-200" }, "Save complete — name the values you typed"),
-        e("p", { className: "text-xs text-amber-100/80" }, `${varReview.summary}. Tick what should become a reusable variable/parameter; the saved steps will carry {{name}} instead of the literal value.`),
-        (varReview.candidates || []).map((item, i) => e("div", { key: i, className: "bg-slate-950/70 p-2 rounded-xl space-y-1" },
-          e("label", { className: "flex flex-wrap items-center gap-2 text-xs" },
-            e("input", { type: "checkbox", checked: item.selected !== false, onChange: evt => editCandidate(item, { selected: evt.target.checked }) }),
-            e("span", { className: "text-slate-400" }, `${item.usages_count}×`),
-            e("input", { "aria-label": "Variable name", value: item.name, onChange: evt => editCandidate(item, { name: evt.target.value }), className: "bg-slate-800 p-1 rounded w-40" }),
-            e("span", { className: "text-slate-300 break-all" }, `= ${item.is_secret ? "••••••" : item.value}`),
-            e("label", { className: "flex items-center gap-1 text-slate-400" },
-              e("input", { type: "checkbox", checked: !!item.is_secret, onChange: evt => editCandidate(item, { is_secret: evt.target.checked }) }), "secret"),
-            e("select", { "aria-label": "Variable category", value: item.category, onChange: evt => editCandidate(item, { category: evt.target.value }), className: "bg-slate-800 rounded" },
-              ["General", "Parameter", "Auth"].map(name => e("option", { key: name, value: name }, name))),
-            item.reuse && !item.create && e("label", { className: "flex items-center gap-1 text-emerald-300" },
-              e("input", { type: "checkbox", checked: !!item.create, onChange: evt => editCandidate(item, { create: evt.target.checked }) }), "create separate"),
-            item.reuse && e("span", { className: "text-emerald-300" }, "already a variable")),
-          (item.preview || []).map((row, j) => e("p", { key: j, className: "text-[10px] text-slate-500 break-all" }, `#${row.order} ${row.before} → ${row.after}`)))),
-        e("div", { className: "flex gap-2" },
-          e("button", { onClick: applyVariableReview, disabled: varBusy, className: "bg-emerald-700 px-4 py-2 rounded text-xs disabled:opacity-50" }, "APPLY TO RECORDING"),
-          e("button", { onClick: () => { setVarReview(null); setVarNote("Values kept as typed."); }, disabled: varBusy, className: "bg-slate-700 px-4 py-2 rounded text-xs" }, "KEEP LITERALS")))
+      varReview && e(VariableReviewPanel, { review: varReview, busy: varBusy, onEdit: editCandidate,
+        onApply: applyVariableReview, onKeep: () => { setVarReview(null); setVarNote("Values kept as typed."); } })
     ))
   );
 }
 
 function desktopTimestamp(value) {
+  // Shown in the instance's date, time format and time zone (Master setup).
   if (!value) return "Not recorded";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString(undefined, { timeZone: "UTC", dateStyle: "medium", timeStyle: "medium" }) + " UTC";
+  return tfFormatStamp(value) || String(value);
+}
+
+/* A live screen (a Windows window during recording and execution, or the browser
+   during a run). FIT shows the whole screen; the zoom buttons enlarge it in steps
+   so small text can be read, and ENLARGE covers the whole window. Clicks are
+   mapped from the picture itself, so the picture is the element that takes them. */
+const SCREEN_ZOOM_STEPS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3];
+const SCREEN_ZOOM_FROM_SETTING = { "100": 1, "150": 1.5, "200": 2 };
+
+function ScreenViewer({ src, alt, title, onClick, imageClass, emptyText }) {
+  const settingsNow = React.useSyncExternalStore(tfSubscribeSettings, tfSettings, tfSettings);
+  const startZoom = settingsNow.screen_zoom;
+  const [fit, setFit] = useState(startZoom === "fit");
+  const [zoom, setZoom] = useState(SCREEN_ZOOM_FROM_SETTING[startZoom] || 1);
+  const [enlarged, setEnlarged] = useState(false);
+  // A default changed in Master setup applies to the screens that are open.
+  useEffect(() => {
+    setFit(startZoom === "fit");
+    if (SCREEN_ZOOM_FROM_SETTING[startZoom]) setZoom(SCREEN_ZOOM_FROM_SETTING[startZoom]);
+  }, [startZoom]);
+  useEffect(() => {
+    if (!enlarged) return undefined;
+    const onKey = (evt) => { if (evt.key === "Escape") setEnlarged(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [enlarged]);
+  const stepZoom = (dir) => {
+    const current = fit ? 1 : zoom;
+    const index = SCREEN_ZOOM_STEPS.findIndex(level => level >= current);
+    const base = index < 0 ? SCREEN_ZOOM_STEPS.length - 1 : index;
+    const next = SCREEN_ZOOM_STEPS[Math.min(SCREEN_ZOOM_STEPS.length - 1, Math.max(0, base + dir))];
+    setFit(false); setZoom(next);
+  };
+  const height = enlarged ? "calc(100vh - 96px)" : "70vh";
+  const bar = e("div", { className: "flex flex-wrap items-center gap-1" },
+    e("button", { type: "button", onClick: () => setFit(true), className: "key-btn " + (fit ? "bg-indigo-600" : ""),
+      "aria-pressed": fit, title: tfT("Fit the whole screen") }, tfT("Fit")),
+    e("button", { type: "button", onClick: () => stepZoom(-1), className: "key-btn", title: "Zoom out", "aria-label": "Zoom out" }, "−"),
+    e("span", { className: "text-xs w-12 text-center", "aria-live": "polite" }, fit ? tfT("Fit") : Math.round(zoom * 100) + "%"),
+    e("button", { type: "button", onClick: () => stepZoom(1), className: "key-btn", title: "Zoom in", "aria-label": "Zoom in" }, "+"),
+    e("button", { type: "button", onClick: () => { setFit(false); setZoom(1); }, className: "key-btn", title: "Show at 100% size" }, "100%"),
+    e("button", { type: "button", onClick: () => setEnlarged(value => !value), className: "key-btn ml-auto",
+      "aria-pressed": enlarged, title: enlarged ? "Close the enlarged screen (Esc)" : "Show the screen across the whole window" },
+      enlarged ? "✕ " + tfT("Close") : "⤢ " + tfT("Enlarge")));
+  const picture = src
+    ? e("img", { src, alt, title, draggable: false, onClick, className: imageClass || "",
+        style: fit
+          ? { display: "block", margin: "0 auto", width: "auto", height: "auto", maxWidth: "100%", maxHeight: height }
+          : { display: "block", width: (zoom * 100) + "%", maxWidth: "none", height: "auto" } })
+    : e("div", { className: "browser-wait" }, emptyText || "");
+  const viewport = e("div", { className: "browser-viewport",
+    style: { height, overflow: fit ? "hidden" : "auto" } }, picture);
+  return e("div", { className: enlarged ? "fixed inset-0 z-[120] bg-slate-950 p-3 flex flex-col gap-2" : "space-y-2",
+    role: enlarged ? "dialog" : undefined, "aria-label": enlarged ? (alt || "Enlarged screen") : undefined },
+    bar, viewport);
 }
 
 function DesktopRecorder({ project }) {
   const [apps, setApps] = useState([]);
   const [mode, setMode] = useState("simulator");
   const [appId, setAppId] = useState("calculator");
-  const [windowsVersion, setWindowsVersion] = useState("windows_11");
+  const [windowsVersion, setWindowsVersion] = useState(() => tfSettings().default_windows_version || "windows_11");
   const [name, setName] = useState("");
   const [purpose, setPurpose] = useState("");
   const [recordingId, setRecordingId] = useState(null);
@@ -916,6 +933,8 @@ function DesktopRecorder({ project }) {
   const [registerOpen, setRegisterOpen] = useState(false);
   const [appDraft, setAppDraft] = useState({ name: "", window_title: "", process_name: "", framework: "dotnet", kind: "custom" });
   const pollTimer = useRef(null);
+  // After STOP the typed values are offered as variables, exactly like the browser recording.
+  const review = useVariableReview({ onApplied: (id) => { loadRecording(id).catch(() => {}); } });
 
   const loadRecording = async (rid) => {
     const recording = await API.get("/api/recordings/" + rid);
@@ -1041,6 +1060,8 @@ function DesktopRecorder({ project }) {
         (result.publish_message || (result.published ? "Published." : "Saved locally.")) +
         (result.window_close_note ? ` App close note: ${result.window_close_note}` : ""));
       setSession(null); setRecordingId(null); setFrame(null);
+      // The recording is saved; ask about the values that were typed into it.
+      review.open(id);
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
@@ -1125,14 +1146,18 @@ function DesktopRecorder({ project }) {
           e("button", { type: "submit", disabled: busy, className: "md:col-span-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 rounded-lg px-3 py-2 text-xs font-bold" }, "REGISTER & SELECT APPLICATION"))),
       note && e("p", { role: "status", className: "text-xs text-emerald-200 bg-emerald-950/30 border border-emerald-900/40 rounded-xl p-3" }, note),
       error && e("p", { role: "alert", className: "text-xs text-red-300 bg-red-950/30 border border-red-900/40 rounded-xl p-3" }, error),
+      review.busy && e("p", { role: "status", className: "text-xs text-indigo-300" }, "Checking recorded values…"),
+      review.note && e("p", { role: "status", className: "text-xs px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-slate-300" }, review.note),
+      review.review && e(VariableReviewPanel, { review: review.review, busy: review.busy, onEdit: review.edit,
+        onApply: review.apply, onKeep: review.keep }),
       e("div", { className: "grid grid-cols-1 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)] gap-4" },
         e("section", { className: "rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden" },
           e("div", { className: "flex flex-wrap justify-between items-center gap-2 p-3 bg-slate-900 border-b border-slate-800" },
             e("span", { className: "text-xs font-bold text-indigo-300" }, "LIVE WINDOWS SCREEN"),
             e("span", { className: "text-[10px] text-slate-500" }, active ? `SESSION · ${session.step_count || 0} STEPS` : "START A SESSION TO OPEN THE APP")),
           frame
-            ? e("div", { className: "bg-black p-2" }, e("img", { src: frame, alt: "Live Windows desktop screen",
-                onClick: recordAt, className: "block w-full h-auto max-h-[70vh] object-contain mx-auto " + (active && !busy ? "cursor-crosshair" : "cursor-default"),
+            ? e("div", { className: "bg-black p-2" }, e(ScreenViewer, { src: frame, alt: "Live Windows desktop screen",
+                onClick: recordAt, imageClass: active && !busy ? "cursor-crosshair" : "cursor-default",
                 title: active ? "Select a control target to perform and capture the current action" : "Desktop screen" }))
             : e("div", { className: "browser-wait" }, loading ? "Checking for an active desktop recording…" : "Start a desktop recording to show the Windows application here."),
           active && e("div", { className: "p-3 border-t border-slate-800 space-y-2" },
@@ -1156,6 +1181,8 @@ function DesktopRecorder({ project }) {
                 e("div", { className: "text-[10px] text-emerald-300 mt-1" }, "Finished · " + desktopTimestamp(step.finished_at))),
               e("span", { className: "fast-badge whitespace-nowrap" }, step.action.replace(/^ui_/, "").toUpperCase())),
             e("div", { className: "text-[10px] text-slate-400 break-all" }, "Target · " + ((step.selector && (step.selector.name || step.selector.automation_id || step.selector.field_name)) || "screen coordinate")),
+            ["ui_type", "ui_select"].includes(step.action) && step.value && e("div", { className: "text-[10px] text-slate-400 break-all" },
+              /\{\{[^}]+\}\}/.test(String(step.value)) ? "Value · " + step.value : "Value · typed text (not a variable yet)"),
             step.screenshot && e("img", { src: step.screenshot, alt: `Windows screen after step ${step.order}`, className: "w-full rounded-lg border border-slate-800" })))
       ))
     )))
@@ -1420,8 +1447,8 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
               e("div", { className: "progress-bar", style: { width: percent + "%" } })
             ),
             runError && e("p", { className: "text-xs text-red-300" }, runError),
-            e("div", { className: "grid grid-cols-1 md:grid-cols-2 gap-3" },
-              e("div", { className: "browser-shell" },
+            e("div", { className: "grid grid-cols-1 xl:grid-cols-[minmax(0,2fr)_minmax(260px,1fr)] gap-3" },
+              e("div", { className: "browser-shell min-w-0" },
                 e("div", { className: "browser-bar" },
                   e("span", { className: "dot red" }), e("span", { className: "dot yellow" }), e("span", { className: "dot green" }),
                   e("div", { className: "browser-url" }, frameStep
@@ -1439,13 +1466,10 @@ function Runs({ runId, setRunId, liveWindow, setLiveWindow }) {
                       )
                     )
                   : frame
-                    ? e("div", { className: "browser-viewport run-preview-viewport" },
-                        e("img", { src: frame,
-                          alt: frameStep
-                            ? `${executionTarget === "windows_desktop" ? "Windows desktop" : "Browser"} at step ${frameStep.step_index || frameStep.order}`
-                            : (executionTarget === "windows_desktop" ? "Execution Windows desktop" : "Execution browser"),
-                          className: "run-preview-image" })
-                      )
+                    ? e(ScreenViewer, { src: frame,
+                        alt: frameStep
+                          ? `${executionTarget === "windows_desktop" ? "Windows desktop" : "Browser"} at step ${frameStep.step_index || frameStep.order}`
+                          : (executionTarget === "windows_desktop" ? "Execution Windows desktop" : "Execution browser") })
                     : e("div", { className: "browser-wait" },
                         runStatus === "queued"
                           ? (executionTarget === "windows_desktop" ? "⏳ Queued · Windows application launching…" : "⏳ Queued · browser launching…")
@@ -1609,7 +1633,7 @@ function BatchPanel({ onOpenRun, liveWindow }) {
     try {
       const created = await API.post("/api/runs/batch", {
         recording_ids: selected.map(r => r.id), ...tagOptions(),
-        name: "Batch " + new Date().toLocaleTimeString(),
+        name: "Batch " + tfFormatTime(new Date()),
         display_window: !!liveWindow,
         screenshots: screenshots,
         share_session: share,

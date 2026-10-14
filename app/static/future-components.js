@@ -349,7 +349,7 @@ function SupportMatrixPanel() {
         e('button', { type: 'button', onClick: runPilot, disabled: busy, className: 'bg-indigo-600 px-3 py-1.5 rounded-lg font-bold text-xs text-white disabled:opacity-50' }, busy ? 'RUNNING PILOTS…' : '▶ RUN PILOT SUITE'))),
     error && e('p', { role: 'alert', className: 'text-xs font-bold text-red-300' }, error),
     matrix && matrix.receipt && e('p', { className: 'text-[11px] text-slate-400' },
-      'Pilot receipt: ' + (matrix.receipt.suite || '') + ' · generated ' + (matrix.receipt.generated_at || '') + ' · expires ' + (matrix.receipt.expires_at || '')),
+      'Pilot receipt: ' + (matrix.receipt.suite || '') + ' · generated ' + (matrix.receipt.generated_at ? tfFormatDateTime(matrix.receipt.generated_at) : '') + ' · expires ' + (matrix.receipt.expires_at ? tfFormatDateTime(matrix.receipt.expires_at) : '')),
     matrix && e('div', { className: 'overflow-x-auto' },
       e('table', { className: 'w-full text-left text-xs' },
         e('thead', null, e('tr', null, ['Target', 'Pack / adapter', 'Simulator', 'Live bridge', 'Pilot', 'Badge', 'Note'].map(h => e('th', { key: h, className: 'border-b border-slate-800 px-2 py-1 text-slate-400' }, h)))),

@@ -1940,7 +1940,7 @@ class PreviewCostTests(unittest.TestCase):
         self.assertLess(runs.index('id: "runs-live"'), runs.index('id: "runs-queue"'))
         self.assertIn("/window`, {display_window: next}", runs)
         self.assertIn("step_index: message.step_index", runs)
-        self.assertIn("run-preview-image", runs)
+        self.assertIn("e(ScreenViewer", runs)
 
 
 class LibraryDiagnosticsTests(unittest.TestCase):
@@ -3559,7 +3559,8 @@ class FrontendBootTests(unittest.TestCase):
     """
 
     STATIC = ROOT / "app" / "static"
-    COMPONENT_FILES = ("import-components.js", "scenario-components.js", "demo-components.js", "future-components.js")
+    COMPONENT_FILES = ("tf-settings.js", "variable-review.js", "settings-components.js", "import-components.js",
+                       "scenario-components.js", "demo-components.js", "future-components.js")
     # Allocations that are never Object.is-stable, so returning one from a
     # getSnapshot guarantees an infinite render loop.
     FRESH_RETURN = re.compile(r"return\s+(?:new\b|[{[])")

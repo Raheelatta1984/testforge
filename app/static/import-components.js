@@ -342,7 +342,7 @@ function ImportScripts({ project, onSaved, onRun }) {
           steps: restoredPlan.steps || [], execution_plan: restoredPlan, restored: true });
         setPlanOptions(JSON.stringify(restoredPlan, null, 2));
         if (full.name) setName(full.name);
-        setNotice(`Recovered a passing test from ${new Date((full.created_at || 0) * 1000).toLocaleString()} ` +
+        setNotice(`Recovered a passing test from ${tfFormatDateTime((full.created_at || 0) * 1000)} ` +
           `(${Math.round((full.expires_in_seconds || 0) / 60)} min of receipt life left). ` +
           'You can save it to the library now without testing again.');
       }
@@ -834,7 +834,7 @@ function RecordingTreeRow({ node, depth, onResume, onRun, busyId, onOpen }) {
         e('div', { className: 'text-[9px] text-slate-500 truncate' },
           `${node.step_count || 0} step(s)` +
           (node.tags ? ` · ${node.tags}` : '') +
-          (node.created_at ? ` · ${String(node.created_at).slice(0, 16).replace('T', ' ')}` : '')),
+          (node.created_at ? ` · ${tfFormatDateTime(node.created_at)}` : '')),
         node.unreadable ? e('div', { className: 'text-[9px] text-amber-400' }, 'folder has no readable recording.json') : null),
       e('div', { className: 'flex gap-1 shrink-0' },
         onOpen && e('button', { type: 'button', className: 'key-btn', onClick: () => onOpen(node) }, 'OPEN'),

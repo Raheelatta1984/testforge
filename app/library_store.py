@@ -1971,6 +1971,28 @@ def create_variables(project_id: str, items: list[dict]) -> dict:
             raise
 
 
+def _plan_with_values(plan: dict, changes: list[dict]) -> dict:
+    """Return ``plan`` with each changed step's literal replaced by its new value.
+
+    Plan steps and step rows are written in the same order, so the row's order
+    is tried first. A step is only rewritten when it still holds the literal that
+    was replaced, so an edit made elsewhere in the plan is never overwritten.
+    """
+    steps = [dict(step) if isinstance(step, dict) else step for step in (plan.get("steps") or [])]
+    used: set[int] = set()
+    for change in changes:
+        preferred = int(change.get("order") or 0) - 1
+        order_of_try = [preferred] + [index for index in range(len(steps)) if index != preferred]
+        for index in order_of_try:
+            if index in used or not 0 <= index < len(steps) or not isinstance(steps[index], dict):
+                continue
+            if steps[index].get("value") == change["before"]:
+                steps[index]["value"] = change["after"]
+                used.add(index)
+                break
+    return {**plan, "steps": steps}
+
+
 def apply_variables_to_recording(recording_id: str, assignments: list[dict], *, publish=True) -> dict:
     """Replace literals in a saved recording with `{{variables}}` and create them.
 
@@ -2010,6 +2032,10 @@ def apply_variables_to_recording(recording_id: str, assignments: list[dict], *, 
                 continue
             changes.append({"step_id": row.id, "order": row.order, "before": row.value, "after": step["value"]})
             row.value = step["value"]
+        # A Windows recording also keeps its steps inside the execution plan, and
+        # the replay reads the plan. Keep that copy in step with the rows.
+        if changes and isinstance(recording.execution_plan, dict):
+            recording.execution_plan = _plan_with_values(recording.execution_plan, changes)
         db.commit()
     payload = export_recording(recording_id, publish=publish) or {}
     payload.update({
