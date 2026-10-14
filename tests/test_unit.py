@@ -1044,6 +1044,541 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(missing, "IDs missing from tests/SCENARIOS.md: " + ", ".join(missing))
 
 
+class QAAgentHubTests(unittest.TestCase):
+    """The QA agent hub: nine agents, the rules engine, the optional AI layer and the routes.
+
+    The agents are deterministic functions of their input. The AI layer is optional and
+    is replaced by a stub here so no test reaches the network.
+    """
+
+    AGENT_IDS = ("requirements", "test-cases", "api-contract", "code-review", "failure-triage",
+                 "flaky", "defect-drafting", "regression", "release-summary")
+
+    @classmethod
+    def setUpClass(cls):
+        from fastapi.testclient import TestClient
+        from app.main import app
+        cls.client = TestClient(app)
+
+    def test_UT_AGT_01_catalogue_lists_the_nine_agents_and_routes(self):
+        from app.main import app
+        from app.qa_agents import registry
+
+        self.assertEqual([a["id"] for a in registry.catalogue()["agents"]], list(self.AGENT_IDS))
+        paths = {getattr(route, "path", "") for route in app.routes}
+        for path in ("/api/agents", "/api/agents/{agent_id}/sample",
+                     "/api/agents/{agent_id}/run", "/api/agents/{agent_id}/from-source"):
+            self.assertIn(path, paths)
+
+    def test_UT_AGT_02_every_sample_runs_on_rules_with_the_common_envelope(self):
+        from app.qa_agents import registry
+
+        envelope_keys = {"agent", "title", "summary", "verdict", "score", "findings",
+                         "severity_counts", "artifacts", "warnings", "engine", "ai", "ai_insights", "generated_at"}
+        for agent_id in self.AGENT_IDS:
+            with self.subTest(agent=agent_id):
+                result = registry.run(agent_id, registry.sample(agent_id), "rules")
+                self.assertTrue(envelope_keys <= set(result), set(result))
+                self.assertEqual(result["engine"], "rules")
+                self.assertEqual(result["ai_insights"], [])
+                self.assertFalse(result["ai"]["used"])
+
+    def test_UT_AGT_03_requirement_review_flags_vague_and_sensitive_wording(self):
+        from app.qa_agents import registry
+
+        result = registry.run("requirements", {"text": "The checkout must be fast and user-friendly.\n"
+                                                        "Users pay by card; TBD: what happens when it is declined?"}, "rules")
+        ids = {f["id"] for f in result["findings"]}
+        self.assertTrue({"REQ-02", "REQ-04", "REQ-03"} <= ids, ids)
+        with self.assertRaises(ValueError):
+            registry.run("requirements", {"text": "   "}, "rules")
+
+    def test_UT_AGT_04_test_cases_use_boundaries_and_do_not_leak_required_fields(self):
+        from app.qa_agents import case_design
+
+        out = case_design.generate("Username must be between 3 and 20 characters.\n"
+                                   "Email is required.")
+        cases = out["artifacts"]["cases"]
+        lengths = {len(c["test_data"]["username"]) for c in cases if "username" in c["test_data"]
+                   and c["technique"] == "boundary value analysis"}
+        self.assertEqual(lengths, {2, 3, 20, 21})
+        titles = [c["title"] for c in cases]
+        self.assertFalse(any(t.startswith("username: empty value") for t in titles), titles)
+        self.assertTrue(any(t.startswith("email: empty value") for t in titles), titles)
+        self.assertEqual(set(out["artifacts"]["counts"]), {"positive", "negative", "boundary"})
+        self.assertIsNone(out["score"])
+
+    def test_UT_AGT_05_api_contract_numbers_tests_once_and_reads_swagger_and_yaml(self):
+        from app.qa_agents import api_contract
+
+        spec = {"openapi": "3.0.3", "info": {"title": "T", "version": "1"},
+                "servers": [{"url": "https://api.example.test"}], "security": [],
+                "paths": {"/a/{id}": {"get": {"operationId": "getA", "parameters": [
+                              {"name": "id", "in": "path", "required": True, "schema": {"type": "string"}}],
+                          "responses": {"200": {"description": "ok"}, "400": {"description": "bad"}}}},
+                          "/b": {"get": {"operationId": "getB", "responses": {"200": {"description": "ok"}}}}}}
+        import json
+        out = api_contract.review(json.dumps(spec), "T")
+        ids = [t["id"] for t in out["artifacts"]["contract_tests"]]
+        self.assertEqual(len(ids), len(set(ids)), ids)
+        self.assertTrue(all(i.startswith("AC-API-") for i in ids))
+        swagger = {"swagger": "2.0", "info": {"title": "S", "version": "1"}, "host": "x.test",
+                   "schemes": ["https"], "paths": {"/c": {"get": {"responses": {"200": {"description": "ok"}}}}}}
+        self.assertEqual(api_contract.review(json.dumps(swagger))["summary"].split()[0:2], ["Reviewed", "1"])
+        try:
+            import yaml  # noqa: F401
+        except ImportError:
+            return
+        yaml_spec = "openapi: 3.0.3\ninfo: {title: Y, version: '1'}\npaths: {}\n"
+        self.assertIn("Reviewed", api_contract.review(yaml_spec)["summary"])
+
+    def test_UT_AGT_06_code_review_catches_credentials_and_waits_but_not_env_references(self):
+        from app.qa_agents import code_review
+
+        bad = ("def test_login(page):\n"
+               "    page.fill('input[name=password]', 'Sup3rSecret!')\n"
+               "    time.sleep(5)\n"
+               "    assert page.title()\n")
+        ids = {f["id"] for f in code_review.review(bad, "test_login.py")["findings"]}
+        self.assertIn("CR-06", ids)
+        self.assertIn("CR-05", ids)
+        clean = ("def test_login(page):\n"
+                 "    page.fill('input[name=password]', os.environ['TF_PASSWORD'])\n"
+                 "    assert page.title()\n")
+        self.assertNotIn("CR-06", {f["id"] for f in code_review.review(clean, "test_login.py")["findings"]})
+
+    def test_UT_AGT_07_triage_classifies_and_reports_executor_disagreement_honestly(self):
+        from app.qa_agents import triage
+
+        self.assertEqual(triage.classify("TimeoutError: waiting for locator('#submit') exceeded 5000ms")["category"],
+                         "automation")
+        self.assertEqual(triage.classify("AssertionError: expected 'Order placed' but received 'Something went wrong' "
+                                         "(HTTP 500)")["category"], "product")
+        out = triage.triage(errors=["AssertionError: expected 1 but got 2 (HTTP 500)"])
+        row = out["artifacts"]["classifications"][0]
+        self.assertIsNone(row["executor_agrees"])  # the executor said "other": no opinion, so no agreement claim
+        for item in out["artifacts"]["classifications"]:
+            self.assertGreaterEqual(item["confidence"], 0.2)
+            self.assertLessEqual(item["confidence"], 0.95)
+
+    def test_UT_AGT_08_flaky_timeouts_are_timing_not_locator_faults(self):
+        from app.qa_agents import flaky
+
+        runs = []
+        for i in range(6):
+            failed = i % 2 == 1
+            runs.append({"id": f"r{i}", "status": "failed" if failed else "passed",
+                         "started_at": f"2026-10-0{i + 1}T10:00:00+00:00",
+                         "duration_ms": 9900 if failed else 4100,
+                         "error": "TimeoutError: waiting for locator('#btn') exceeded 5000ms" if failed else ""})
+        out = flaky.analyse(runs, "Login")
+        causes = [h["cause"] for h in out["artifacts"]["hypotheses"]]
+        self.assertIn("Timing / race condition", causes)
+        self.assertNotIn("Unstable locator or DOM churn", causes)
+        short = flaky.analyse(runs[:2], "Login")
+        self.assertEqual(short["verdict"], "insufficient history")
+
+    def test_UT_AGT_09_defect_draft_scores_severity_scrubs_and_titles_cleanly(self):
+        from app.qa_agents import defects
+
+        out = defects.draft({"actual": "The page shows 'Something went wrong' (HTTP 500)",
+                             "steps": ["Open basket", "Click PLACE ORDER"], "expected": "Order placed",
+                             "logs": "POST /api/orders token=abc123secret user jane.doe@corp.com"})
+        draft = out["artifacts"]["draft"]
+        self.assertEqual(draft["severity"], "critical")
+        self.assertNotIn("when", draft["summary"].split("]")[-1])
+        self.assertNotIn("abc123secret", draft["markdown"])
+        self.assertNotIn("jane.doe", draft["markdown"])
+        self.assertIsNone(out["score"])
+        # A reporter's explicit choice is kept; the hub's "low" maps to Jira's "minor".
+        given = defects.draft({"actual": "Label is misaligned", "severity": "low"})
+        self.assertEqual(given["artifacts"]["draft"]["severity"], "minor")
+        self.assertEqual(defects.draft({"actual": "x", "severity": "critical"})["artifacts"]["draft"]["severity"],
+                         "critical")
+
+    def test_UT_AGT_10_regression_selects_the_changed_area_and_smoke_tests(self):
+        from app.qa_agents import regression
+
+        tests = [{"id": "t1", "name": "Checkout pays with card", "tags": ["smoke"], "start_url": "https://s.test/checkout"},
+                 {"id": "t2", "name": "Cart keeps quantity", "tags": [], "start_url": "https://s.test/cart"},
+                 {"id": "t3", "name": "Search finds products", "tags": [], "start_url": "https://s.test/search"}]
+        out = regression.select(tests, changed_files=["app/static/checkout-components.js"], max_tests=10)
+        selected = [t["id"] for t in out["artifacts"]["selected"]]
+        self.assertIn("t1", selected)
+        self.assertNotIn("t3", selected)
+        self.assertEqual(out["artifacts"]["batch_payload"],
+                         {"recording_ids": selected, "name": "Regression selection", "screenshots": "failure"})
+
+    def test_UT_AGT_11_release_decision_follows_the_documented_policy(self):
+        from app.qa_agents import release
+
+        def run(rid, status, critical=False, error=""):
+            return {"id": rid, "recording_id": rid, "recording_name": rid, "status": status,
+                    "created_at": "2026-10-05T10:00:00+00:00", "tags": ["smoke"] if critical else [],
+                    "critical": critical, "error": error}
+
+        self.assertEqual(release.report([])["artifacts"]["decision"], "INSUFFICIENT EVIDENCE")
+        self.assertEqual(release.report([run("a", "passed", True), run("b", "failed", True,
+                                                                       "AssertionError: HTTP 500")])
+                         ["artifacts"]["decision"], "NO-GO")
+        all_green = [run(f"r{i}", "passed") for i in range(20)]
+        self.assertEqual(release.report(all_green)["artifacts"]["decision"], "GO")
+        ninety = [run(f"s{i}", "passed") for i in range(9)] + [run("s9", "failed", False, "Timeout")]
+        self.assertEqual(release.report(ninety)["artifacts"]["decision"], "CONDITIONAL GO")
+
+    def test_UT_AGT_12_ai_layer_never_changes_findings_and_never_sends_secrets(self):
+        import json
+        from unittest import mock
+        from app.qa_agents import ai, registry
+
+        text = "Login with password=Hunter2 and mail jane.doe@corp.com. The app shows a total."
+        saved = _env_set(ANTHROPIC_API_KEY="sk-test-0123456789abcdefABCD", TF_AGENT_AI=None)
+        try:
+            rules = registry.run("requirements", {"text": text}, "rules")
+            with mock.patch.object(ai, "_post", side_effect=AssertionError("network used")):
+                self.assertEqual(registry.run("requirements", {"text": text}, "rules")["engine"], "rules")
+            reply = {"content": [{"type": "text", "text": json.dumps({"insights": ["Check refunds."]})}]}
+            sent = {}
+
+            def capture(payload):
+                sent["body"] = json.dumps(payload)
+                return reply
+
+            with mock.patch.object(ai, "_post", side_effect=capture):
+                added = registry.run("requirements", {"text": text}, "auto")
+            self.assertEqual(added["engine"], "rules+ai")
+            self.assertEqual(added["ai_insights"], ["Check refunds."])
+            self.assertEqual(added["findings"], rules["findings"])
+            self.assertNotIn("Hunter2", sent["body"])
+            self.assertNotIn("jane.doe", sent["body"])
+            with mock.patch.object(ai, "_post", return_value={"content": [{"type": "text", "text": "no json"}]}):
+                bad = registry.run("requirements", {"text": text}, "auto")
+            self.assertEqual(bad["engine"], "rules")
+            self.assertIn("JSON", bad["ai"]["error"])
+            with mock.patch.object(ai, "_post", side_effect=RuntimeError("boom")):
+                failed = registry.run("requirements", {"text": text}, "auto")
+            self.assertEqual(failed["engine"], "rules")
+            self.assertEqual(failed["findings"], rules["findings"])
+            self.assertIn("RuntimeError", failed["ai"]["error"])
+        finally:
+            _env_restore(saved)
+
+    def test_UT_AGT_13_routes_return_400_404_and_413_by_error_type(self):
+        big = {"input": {"text": "x" * 200_001}}
+        self.assertEqual(self.client.post("/api/agents/requirements/run", json=big).status_code, 413)
+        self.assertEqual(self.client.post("/api/agents/requirements/run",
+                                          json={"input": {"text": ""}}).status_code, 400)
+        self.assertEqual(self.client.post("/api/agents/unknown/run", json={"input": {}}).status_code, 404)
+        self.assertEqual(self.client.post("/api/agents/requirements/run",
+                                          json={"input": {"text": "x"}, "mode": "magic"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/agents/requirements/run", data="[1,2]",
+                                          headers={"content-type": "application/json"}).status_code, 400)
+        self.assertEqual(self.client.post("/api/agents/requirements/from-source",
+                                          json={"source": {"type": "run", "run_id": "x"}}).status_code, 400)
+        self.assertEqual(self.client.get("/api/agents/release-summary/sample").status_code, 200)
+
+    def test_UT_AGT_14_from_source_reads_stored_runs_recordings_and_projects(self):
+        from datetime import datetime, timedelta
+        from app import library_store
+        from app.db import Recording, Run
+
+        project = library_store.create_project("QA hub unit project", "https://shop.example.test",
+                                               entity_name="QA hub unit company")
+        recording = library_store.create_recording(project["id"], "Checkout pays with card",
+                                                   "https://shop.example.test/checkout", tags="smoke",
+                                                   publish=False)
+        now = datetime.utcnow()
+        with SessionLocal() as db:
+            rows = []
+            for i, status in enumerate(["passed", "failed", "passed", "failed"]):
+                run = Run(recording_id=recording["id"], status=status,
+                          created_at=now - timedelta(minutes=10 - i),
+                          execution_log=[{"action": "click", "label": "PLACE ORDER", "status": status,
+                                          "error": "AssertionError: expected 'Order placed' (HTTP 500)"
+                                          if status == "failed" else ""}])
+                db.add(run)
+                rows.append(run)
+            db.commit()
+            latest_failed = rows[-1].id
+            run_ids = [r.id for r in rows]
+        triage = self.client.post("/api/agents/failure-triage/from-source",
+                                  json={"source": {"type": "run", "run_id": latest_failed}})
+        self.assertEqual(triage.status_code, 200, triage.text)
+        self.assertEqual(triage.json()["artifacts"]["classifications"][0]["category"], "product")
+        flaky = self.client.post("/api/agents/flaky/from-source",
+                                 json={"source": {"type": "recording", "recording_id": recording["id"]}})
+        self.assertEqual(flaky.status_code, 200, flaky.text)
+        self.assertEqual(flaky.json()["artifacts"]["stats"]["runs"], 4)
+        release = self.client.post("/api/agents/release-summary/from-source",
+                                   json={"source": {"type": "project", "project_id": project["id"]}})
+        self.assertEqual(release.status_code, 200, release.text)
+        self.assertEqual(release.json()["artifacts"]["decision"], "NO-GO")
+        regression = self.client.post("/api/agents/regression/from-source",
+                                      json={"source": {"type": "project", "project_id": project["id"]},
+                                            "input": {"changed_files": ["app/routes/checkout.py"]}})
+        self.assertEqual(regression.status_code, 200, regression.text)
+        self.assertEqual(self.client.post("/api/agents/failure-triage/from-source",
+                                          json={"source": {"type": "project", "project_id": project["id"]}}).status_code,
+                         400)
+        self.assertEqual(self.client.post("/api/agents/release-summary/from-source",
+                                          json={"source": {"type": "project", "project_id": "no-such"}}).status_code,
+                         404)
+        self.assertEqual(len(run_ids), 4)
+
+    def test_UT_AGT_15_scrubbing_long_input_stays_linear(self):
+        import time
+        from app.qa_agents.common import scrub
+
+        started = time.monotonic()
+        scrub("x" * 200_000)
+        self.assertLess(time.monotonic() - started, 2.0, "scrub() became super-linear on long words")
+
+    def test_UT_AGT_16_dashboard_adds_the_tab_without_removing_any(self):
+        index = (ROOT / "app" / "static" / "index.html").read_text()
+        self.assertIn('<script src="/qa-agents-components.js"></script>', index)
+        self.assertIn('[\"qa-agents\", \"🧰\", \"QA Agents\"]', index)
+        self.assertIn('tab === \"qa-agents\" && e(QAAgentsTab', index)
+        for key in ("demo", "projects", "variables", "record", "desktop-record", "plan", "library", "runs",
+                    "comparison", "artifacts", "logs", "github", "azure", "devdeploy", "settings", "future"):
+            self.assertIn('["%s", ' % key, index, "existing tab %r must remain" % key)
+
+    def test_UT_AGT_17_component_classes_are_in_the_committed_stylesheet(self):
+        """A class missing from vendor/tailwind.css renders as nothing: check every literal one.
+
+        Classes reach the DOM through helper functions as well as className props, so every
+        string literal in the component is scanned for tokens shaped like utility classes.
+        """
+        css = (ROOT / "app" / "static" / "vendor" / "tailwind.css").read_text()
+        html = (ROOT / "app" / "static" / "index.html").read_text()
+        source = (ROOT / "app" / "static" / "qa-agents-components.js").read_text()
+        utility = re.compile(r"^(?:md:|hover:|disabled:)?(?:bg|border|text|p[xytblr]?|m[xytblr]?|gap|space-[xy]|"
+                             r"flex|grid|rounded|font|items|justify|w|h|min-[wh]|max-[wh]|shadow|opacity|leading|"
+                             r"tracking|overflow|z|top|left|right|bottom|inset|col-span|self|shrink|cursor|"
+                             r"transition|whitespace|break|list|columns|ring|scale|sticky|fixed|absolute|relative)(?:-|$)")
+        class_token = re.compile(r"[a-z][a-z0-9:/\[\].%-]*")
+        literal = set()
+        for string in re.findall(r"\"([^\"\n]*)\"|`([^`\n]*)`", source):
+            for text in string:
+                tokens = re.sub(r"\$\{[^}]*\}", " ", text).split()
+                # Only class lists: every token class-shaped and at least one a utility. Filenames,
+                # MIME types, element ids and copy are skipped.
+                if tokens and all(class_token.fullmatch(t) for t in tokens) and any(utility.match(t) for t in tokens):
+                    literal.update(tokens)
+        missing = []
+        for token in sorted(literal):
+            escaped = re.sub(r"([\\/.:\[\]%])", r"\\\1", token)
+            if not re.search(r"\." + re.escape(escaped) + r"(?![A-Za-z0-9_\-\\])", css) and token not in html:
+                missing.append(token)
+        self.assertFalse(missing, "classes with no rule in tailwind.css: " + ", ".join(missing))
+
+
+    def test_UT_AGT_18_test_cases_emit_valid_gherkin_without_outlines(self):
+        from app.qa_agents import case_design
+        from app.qa_agents.registry import SAMPLES
+
+        result = case_design.generate(SAMPLES["test-cases"]["text"] + "\nPassword must not be shown\nin logs.",
+                                      "Registration\nwith breaks")
+        gherkin = result["artifacts"]["gherkin"]
+        lines = gherkin.splitlines()
+        self.assertTrue(lines[0].startswith("Feature: Registration with breaks"), lines[0])
+        self.assertNotIn("Scenario Outline", gherkin)
+        self.assertNotIn("Examples:", gherkin)
+        self.assertNotIn("|", gherkin, "no data tables: each scenario reads on its own")
+        scenarios = [line for line in lines if line.lstrip().startswith("Scenario:")]
+        self.assertEqual(len(scenarios), len(result["artifacts"]["cases"]))
+        for case in result["artifacts"]["cases"]:
+            self.assertTrue(any(line.strip().startswith("Scenario: " + case["id"] + " ") for line in lines))
+        keywords = [line.strip().split(" ", 1)[0] for line in lines if line.strip()]
+        for index, word in enumerate(keywords):
+            if word == "Scenario:":
+                self.assertEqual(keywords[index + 1], "Given", "every scenario starts with Given")
+        self.assertEqual(gherkin.count("Then "), len(scenarios))
+        self.assertTrue(all(line.strip() for line in gherkin.split("\n") if line.startswith("    ")),
+                        "step lines are single-line and non-empty")
+        self.assertEqual(case_design.to_gherkin([], "Empty"), "")
+        self.assertIn("gherkin", result["artifacts"])
+
+    def _fake_ollama(self, reply):
+        """A local HTTP server that records the request and answers with `reply` (JSON)."""
+        import http.server
+        import json
+        import threading
+
+        seen = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("content-length") or 0)
+                seen["path"] = self.path
+                seen["body"] = json.loads(self.rfile.read(length).decode("utf-8"))
+                data = json.dumps(reply).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1], seen
+
+    def test_UT_AGT_19_ollama_provider_runs_locally_and_never_sends_secrets(self):
+        import json
+        from unittest import mock
+        from app.qa_agents import ai, registry
+
+        text = "Login with password=Hunter2 and mail jane.doe@corp.com. The app shows a total."
+        port, seen = self._fake_ollama({"message": {"role": "assistant", "content": json.dumps(
+            {"insights": ["Check refunds.", "   "]})}})
+        local = "127.0.0.1,localhost"
+        saved = _env_set(TF_AGENT_AI="1", TF_AGENT_AI_PROVIDER="ollama", ANTHROPIC_API_KEY="sk-test-0123456789abcdefABCD",
+                         NO_PROXY=local, no_proxy=local)
+        try:
+            with mock.patch.object(ai, "OLLAMA_URL", f"http://127.0.0.1:{port}"), \
+                    mock.patch.object(ai, "OLLAMA_MODEL", "test-model"):
+                self.assertEqual(ai.provider(), "ollama", "an explicit provider wins over the cloud key")
+                status = ai.status()
+                self.assertEqual((status["available"], status["provider"], status["model"]),
+                                 (True, "ollama", "test-model"))
+                with mock.patch.object(ai, "_post", side_effect=AssertionError("cloud used")):
+                    result = registry.run("requirements", {"text": text}, "auto")
+                rules = registry.run("requirements", {"text": text}, "rules")
+        finally:
+            _env_restore(saved)
+        self.assertEqual(result["engine"], "rules+ai")
+        self.assertEqual(result["ai_insights"], ["Check refunds."])
+        self.assertEqual(result["findings"], rules["findings"])
+        self.assertEqual((result["ai"]["provider"], result["ai"]["model"], result["ai"]["used"]),
+                         ("ollama", "test-model", True))
+        self.assertEqual(seen["path"], "/api/chat")
+        self.assertEqual(seen["body"]["model"], "test-model")
+        self.assertIs(seen["body"]["stream"], False)
+        self.assertEqual(seen["body"]["format"], "json")
+        sent = json.dumps(seen["body"])
+        for secret in ("Hunter2", "jane.doe", "sk-test-0123456789"):
+            self.assertNotIn(secret, sent)
+
+    def test_UT_AGT_20_local_model_failures_keep_rules_and_provider_switches_work(self):
+        import socket
+        from unittest import mock
+        from app.qa_agents import ai, registry
+
+        text = "The checkout must be fast. TBD: declined cards?"
+        local = "127.0.0.1,localhost"
+        with socket.socket() as probe:  # a port nothing listens on
+            probe.bind(("127.0.0.1", 0))
+            closed = probe.getsockname()[1]
+        rules = registry.run("requirements", {"text": text}, "rules")
+        saved = _env_set(TF_AGENT_AI="1", TF_AGENT_AI_PROVIDER="ollama", ANTHROPIC_API_KEY=None,
+                         NO_PROXY=local, no_proxy=local)
+        try:
+            with mock.patch.object(ai, "OLLAMA_URL", f"http://127.0.0.1:{closed}"):
+                unreachable = registry.run("requirements", {"text": text}, "auto")
+            port, _ = self._fake_ollama({"message": {"content": "no json here"}})
+            with mock.patch.object(ai, "OLLAMA_URL", f"http://127.0.0.1:{port}"):
+                malformed = registry.run("requirements", {"text": text}, "auto")
+            for failed in (unreachable, malformed):
+                self.assertEqual(failed["engine"], "rules")
+                self.assertEqual(failed["ai_insights"], [])
+                self.assertEqual(failed["findings"], rules["findings"])
+            self.assertIn("unreachable", unreachable["ai"]["error"])
+            self.assertIn("JSON", malformed["ai"]["error"])
+            os.environ["TF_AGENT_AI"] = "0"
+            self.assertIsNone(ai.provider())
+            self.assertFalse(ai.status()["available"])
+            os.environ["TF_AGENT_AI"] = "1"
+            os.environ["TF_AGENT_AI_PROVIDER"] = "bogus"
+            self.assertIsNone(ai.provider())
+            self.assertIn("must be", ai.status()["reason"])
+            os.environ.pop("TF_AGENT_AI_PROVIDER")
+            os.environ["ANTHROPIC_API_KEY"] = "sk-test-0123456789abcdefABCD"
+            self.assertEqual(ai.provider(), "anthropic")
+            self.assertEqual(ai.status()["provider"], "anthropic")
+        finally:
+            _env_restore(saved)
+
+    def test_UT_AGT_21_mcp_server_speaks_json_rpc_and_reports_tool_errors(self):
+        import json
+        from app.qa_agents import mcp_server
+
+        init = mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                  "params": {"protocolVersion": "2025-06-18"}})
+        self.assertEqual(init["result"]["protocolVersion"], "2025-06-18")
+        self.assertIn("tools", init["result"]["capabilities"])
+        self.assertIsNone(mcp_server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        tools = mcp_server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+        self.assertEqual([t["name"] for t in tools],
+                         ["qa_list_agents", "qa_get_sample", "qa_run_agent", "qa_run_from_source"])
+        self.assertTrue(all(t["annotations"]["readOnlyHint"] for t in tools), "every tool is read-only")
+        self.assertEqual(tuple(tools[2]["inputSchema"]["properties"]["agent"]["enum"]), self.AGENT_IDS)
+
+        def call(name, arguments):
+            reply = mcp_server.handle({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                                       "params": {"name": name, "arguments": arguments}})
+            return reply["result"]["isError"], reply["result"]["content"][0]["text"]
+
+        error, text = call("qa_list_agents", {})
+        self.assertFalse(error)
+        self.assertEqual(len(json.loads(text)["agents"]), 9)
+        error, text = call("qa_run_agent", {"agent": "requirements", "input": {"text": "The checkout must be fast."},
+                                            "mode": "rules"})
+        self.assertFalse(error)
+        self.assertEqual(json.loads(text)["engine"], "rules")
+        self.assertTrue(call("qa_run_agent", {"agent": "nope", "input": {}})[0])
+        self.assertTrue(call("qa_run_agent", {"agent": "requirements", "input": {"text": "x"}, "mode": "magic"})[0])
+        self.assertTrue(call("qa_run_from_source", {"agent": "release-summary",
+                                                    "source": {"type": "run", "run_id": "x"}})[0])
+        self.assertTrue(call("qa_run_from_source", {"agent": "requirements", "source": {"type": "run"}})[0])
+        self.assertTrue(call("qa_run_agent", {"agent": "requirements", "input": "not an object"})[0])
+        self.assertEqual(mcp_server.handle({"jsonrpc": "2.0", "id": 3, "method": "bogus"})["error"]["code"], -32601)
+        self.assertEqual(mcp_server.handle(5)["error"]["code"], -32600)
+        self.assertEqual(mcp_server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                                            "params": {}})["error"]["code"], -32602)
+        batch = mcp_server.handle([{"jsonrpc": "2.0", "id": 5, "method": "ping"},
+                                   {"jsonrpc": "2.0", "method": "notifications/initialized"}])
+        self.assertEqual([r["id"] for r in batch], [5])
+
+    def test_UT_AGT_22_stdio_server_writes_only_protocol_lines_to_stdout(self):
+        import json
+        import subprocess
+        import sys
+        import tempfile
+
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+                "name": "qa_run_agent", "arguments": {"agent": "requirements", "mode": "rules",
+                                                      "input": {"text": "The checkout must be fast."}}}},
+            "not json",
+            {"jsonrpc": "2.0", "id": 4, "method": "ping"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, DATABASE_URL="sqlite:///" + os.path.join(tmp, "mcp.db"),
+                       TF_ARTIFACTS=os.path.join(tmp, "artifacts"), TF_LIBRARY_DIR=os.path.join(tmp, "library"))
+            os.makedirs(env["TF_ARTIFACTS"], exist_ok=True)
+            os.makedirs(env["TF_LIBRARY_DIR"], exist_ok=True)
+            payload = "\n".join(m if isinstance(m, str) else json.dumps(m) for m in messages) + "\n"
+            proc = subprocess.run([sys.executable, "-m", "app.qa_agents.mcp_server"], input=payload,
+                                  capture_output=True, text=True, cwd=str(ROOT), env=env, timeout=180)
+            self.assertEqual(proc.returncode, 0, proc.stderr[-800:])
+            replies = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+            self.assertEqual(len(replies), 5, "one reply per request; the notification gets none")
+            self.assertEqual(replies[0]["result"]["serverInfo"]["name"], "testforge-qa-agents")
+            self.assertEqual(replies[2]["result"]["content"][0]["type"], "text")
+            self.assertEqual(replies[3]["error"]["code"], -32700)
+            self.assertEqual(replies[4]["id"], 4)
+            probe = subprocess.run([sys.executable, "-c",
+                                    "import sys, app.qa_agents; print('app.config' in sys.modules)"],
+                                   capture_output=True, text=True, cwd=str(ROOT), env=env, timeout=120)
+            self.assertEqual(probe.stdout.strip(), "False", "importing the package must not import the app")
+
 class DockerfileTests(unittest.TestCase):
     """The build context must contain every path the Dockerfile copies."""
 
@@ -1248,12 +1783,16 @@ class WorkflowRegressionTests(unittest.TestCase):
             db.commit()
         library_store.export_recording(rec["id"])
         folder = Path(os.environ["TF_LIBRARY_DIR"]) / "projects" / project["id"] / "recordings" / rec["id"] / "resources"
-        for name in ("Jenkinsfile", "playwright_test.py", "playwright_test.js", "recording.feature", "azure-devops.csv", "azure-devops.xlsx", "jira.csv", "jira.xlsx", "testcomplete.csv", "testcomplete.xlsx"):
+        for name in ("Jenkinsfile", "playwright_test.py", "test_recording.py", "playwright_test.js", "recording.feature", "azure-devops.csv", "azure-devops.xlsx", "jira.csv", "jira.xlsx", "testcomplete.csv", "testcomplete.xlsx"):
             self.assertTrue((folder / name).is_file(), name)
         sheet = load_workbook(folder / "azure-devops.xlsx").active
         self.assertEqual(sheet["D2"].value, "'=1+2")
         import py_compile
         py_compile.compile(str(folder / "playwright_test.py"), doraise=True)
+        # pytest entry point: collected by pytest, calls the same replay, pinned in requirements.
+        self.assertIn("def test_recording_replays", (folder / "test_recording.py").read_text())
+        self.assertIn("from playwright_test import main", (folder / "test_recording.py").read_text())
+        self.assertIn("pytest==", (folder / "requirements.txt").read_text())
 
     def test_UT_FLOW_04_variable_capture_and_replay_value(self):
         from app import library_store
@@ -3561,7 +4100,7 @@ class FrontendBootTests(unittest.TestCase):
     STATIC = ROOT / "app" / "static"
     COMPONENT_FILES = ("tf-settings.js", "variable-review.js", "settings-components.js", "import-components.js",
                        "scenario-components.js", "demo-components.js", "future-components.js",
-                       "desktop-install-components.js", "devdeploy-components.js")
+                       "desktop-install-components.js", "devdeploy-components.js", "qa-agents-components.js")
     # Allocations that are never Object.is-stable, so returning one from a
     # getSnapshot guarantees an infinite render loop.
     FRESH_RETURN = re.compile(r"return\s+(?:new\b|[{[])")

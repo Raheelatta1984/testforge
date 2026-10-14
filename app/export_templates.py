@@ -251,6 +251,24 @@ return 0;
 '''
 
 
+# pytest entry point for the exported recording. It calls the same replay as
+# `python playwright_test.py`, so steps, plans and variables behave identically; a failed step
+# raises inside main() and fails the test.
+PYTEST_WRAPPER = '''"""pytest entry point for this recording.
+
+Install and run: pip install -r requirements.txt && python -m playwright install chromium && pytest -q
+Supply TF_VAR_<name> environment variables for recorded variables.
+"""
+import asyncio
+
+from playwright_test import main
+
+
+def test_recording_replays():
+    asyncio.run(main())
+'''
+
+
 def _flatten_plan_steps(plan):
     try:
         from app.plan_runtime import normalize_plan
@@ -325,8 +343,9 @@ def write_runners(folder, title, plan=None):
         plan_steps, matrix = _flatten_plan_steps(plan)
         write_desktop_bundle(folder, plan_steps, matrix)
         write_mobile_bundle(folder, plan_steps, matrix)
-    (folder / "requirements.txt").write_text("playwright==1.49.1\n", encoding="utf-8")
+    (folder / "requirements.txt").write_text("playwright==1.49.1\npytest==8.3.3\n", encoding="utf-8")
     (folder / "playwright_test.py").write_text(PYTHON, encoding="utf-8")
+    (folder / "test_recording.py").write_text(PYTEST_WRAPPER, encoding="utf-8")
     (folder / "playwright_test.js").write_text(JAVASCRIPT, encoding="utf-8")
     (folder / 'recorded_page.py').write_text(
         '"""Reusable locator facade; steps.json is the single source of truth.\n'

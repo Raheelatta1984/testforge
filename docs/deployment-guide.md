@@ -922,6 +922,9 @@ Documented so you don't waste hours, and because a deployment guide that hides t
    `mcp`, which were deliberately removed and fail on import
    (`cannot import name 'Scenario' from app.db`). Consequence: **`DEMO_MODE` has no runtime effect**,
    and AI-driven scenarios in the UI are not what the README's `TF_AGENT_*` vars suggest.
+   The QA agent hub adds its own stdio MCP server (`app/qa_agents/mcp_server.py`, see
+   `docs/qa-agent-hub.md`). It is hand-written and does not use the removed `mcp` package, so it does not
+   reintroduce that debt. `TF_MCP_ARGS` stays inert.
 3. **`start.sh` is not in the image** (§7.3), so it is host-run only; the Docker CMD independently
    honors the same runtime `PORT` setting.
 4. **`logs/` and `library/` are baked into the image** (`Dockerfile`), which makes the image
