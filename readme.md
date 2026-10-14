@@ -266,6 +266,16 @@ A save ends in one of four ways, and the message in the record tab says which:
 
 Then redeploy with the new value of `TF_GITHUB_TOKEN` and use **CHECK TOKEN PERMISSIONS** to confirm it before recording again.
 
+## Master setup (region, time zone, dates, language)
+The **Settings** tab (⚙️) holds the instance-wide defaults. They are stored once on the server (`GET`/`PUT /api/settings`), not per project, so every browser and project shows the same dates. Choose a **region** to fill the time zone, date format, time format and language in one step; each field can then be changed on its own. Options: date formats `YYYY-MM-DD`, `DD/MM/YYYY`, `MM/DD/YYYY`, `DD.MM.YYYY`, `DD-MM-YYYY`, `YYYY/MM/DD`, `D MMM YYYY`; time 24-hour or 12-hour; languages English, Deutsch, Français and Español. A live preview shows the result before you save. The Settings tab also holds the default Windows version for new desktop recordings and the default screen zoom for the Windows screens.
+
+Dates and times across the dashboard are shown through one formatter (`app/static/tf-settings.js`). Stored values stay UTC, and the formatter converts them to the chosen zone when displayed. Only the navigation and the Master setup screen are translated so far; everything else stays in English. PDF report times stay in UTC and are labelled `(UTC)`.
+
+## Windows desktop: screen size and variables
+The live Windows screen during recording and the screen in **Runs** share one viewer. **Fit** shows the whole screen, **−/+** steps through 50%–300%, **100%** shows real size, and **Enlarge** (or Esc to close) fills the window. Scroll inside the viewer to move around a zoomed screen.
+
+When you press STOP on a Windows recording, TestForge reviews the values you typed into fields (text entry and list selections). It proposes a variable for each one, for example `customer_name`, with the typed value shown. Untick a value to leave it as a literal, rename it, mark it secret or choose its category, then press **APPLY TO RECORDING**. **KEEP LITERALS** saves the steps unchanged. Applying rewrites those steps to `{{customer_name}}` and the saved execution plan, so the next desktop run uses the variable. Checkboxes and clicks are not turned into variables. This is the same review the browser AI recording shows.
+
 ## Database migrations
 `app/db.py` runs an idempotent schema check at startup. It creates missing tables, adds columns that the models declare but an older table lacks (backfilling existing rows), and relaxes `NOT NULL` on legacy columns the models no longer write. `create_all()` alone only creates missing tables, so a database created by an older revision keeps its original columns and every write to it fails until this migration runs.
 

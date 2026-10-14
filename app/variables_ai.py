@@ -22,6 +22,9 @@ import re
 # `press` value is a key, a `switch_page` value is an alias: none of them is data.
 DATA_ACTIONS = {
     "type": "value", "fill": "value", "select_option": "value", "upload_file": None,
+    # Windows desktop recordings: text typed into a control and the option picked
+    # from a list are data exactly like their browser counterparts.
+    "ui_type": "value", "ui_select": "value",
     "navigate": "url", "new_page": "url", "api_request": "url",
     "assert_text": "expected", "assert_contains": "expected", "assert_value": "expected",
     "assert_url": "url", "assert_title": "expected", "assert_count": "count",
@@ -61,7 +64,10 @@ def _hint_from_selector(selector):
     """Guess a name from the field the value went into."""
     if not isinstance(selector, dict):
         return ""
-    for key in ("label", "placeholder", "aria-label", "name", "data-testid", "id", "primary", "text"):
+    # Desktop controls carry their UIA name and automation id instead of HTML
+    # attributes; the field reference is what the recorder falls back to.
+    for key in ("label", "placeholder", "aria-label", "name", "field_name", "data-testid", "id",
+                "automation_id", "primary", "text"):
         value = selector.get(key)
         if isinstance(value, str) and value.strip():
             return value

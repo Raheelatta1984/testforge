@@ -549,3 +549,40 @@ class ScenarioTests(unittest.TestCase):
         _, batch_meta = pdf_reports.generate('batch', bid)
         self.assertEqual(batch_meta['execution_speeds'], [3.0])
         self.assertEqual(batch_meta['recordings'][0]['execution_speed'], 3.0)
+
+    def test_UT_SCENE_20_master_setup_tab_and_shared_review_and_viewer_are_wired(self):
+        """Master setup, the Windows variable review and the screen viewers must all be wired in.
+
+        The Settings tab is the only place the instance's region, date, time and
+        language can change, so a stale script tag would leave every date on the
+        dashboard in the defaults. The review panel and the viewer are shared by
+        the browser and Windows flows, so a missing wire-up breaks both.
+        """
+        static = Path(library_store.__file__).resolve().parent / 'static'
+        dashboard = (static / 'index.html').read_text()
+        scripts = [dashboard.index(f'/{name}') for name in
+                   ('tf-settings.js', 'variable-review.js', 'settings-components.js', 'import-components.js')]
+        self.assertEqual(scripts, sorted(scripts), 'settings and review scripts must load before the dashboard components')
+        self.assertIn('["settings", "⚙️", "Settings"]', dashboard)
+        self.assertIn('tab === "settings" && e(SettingsTab', dashboard)
+        self.assertIn('React.useSyncExternalStore(tfSubscribeSettings, tfSettings, tfSettings)', dashboard)
+        self.assertIn('function ScreenViewer(', dashboard)
+        self.assertEqual(dashboard.count('e(ScreenViewer'), 2, 'live Windows screen and run preview')
+        self.assertIn('useVariableReview(', dashboard)
+        self.assertIn('e(VariableReviewPanel', dashboard)
+        self.assertIn('review.open(', dashboard)
+        self.assertIn('function SettingsTab', (static / 'settings-components.js').read_text())
+        self.assertIn('function VariableReviewPanel', (static / 'variable-review.js').read_text())
+        for name in ('tf-settings.js', 'variable-review.js', 'settings-components.js'):
+            self.assertIn(f'/{name}', dashboard)
+        # Dates and times go through the shared formatters, never a raw ISO slice.
+        for name in ('index.html', 'import-components.js', 'future-components.js', 'settings-components.js'):
+            source = (static / name).read_text()
+            self.assertNotIn(".slice(0, 16).replace('T'", source, name)
+            self.assertNotIn('.slice(0, 16).replace("T"', source, name)
+        with TestClient(app) as client:
+            for path in ('/tf-settings.js', '/variable-review.js', '/settings-components.js'):
+                self.assertEqual(client.get(path).status_code, 200, path)
+            settings = client.get('/api/settings').json()
+            self.assertIn('settings', settings)
+            self.assertIn('options', settings)

@@ -205,6 +205,21 @@ class ManagedKey(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 
+class AppSetting(Base):
+    """Instance-wide master setup (region, time zone, date/time format, language).
+
+    One row per key; the master settings live under ``master``. Kept in the
+    database rather than the library tree on purpose: how this deployment shows
+    its dates and language is not test content, so it is never published to
+    GitHub and every user of the instance sees the same values.
+    """
+
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(60), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+
 # Result of the most recent schema check. Exposed by /api/diagnostics so a bad
 # deployment can be diagnosed from the dashboard instead of the server logs.
 SCHEMA_STATUS = {
