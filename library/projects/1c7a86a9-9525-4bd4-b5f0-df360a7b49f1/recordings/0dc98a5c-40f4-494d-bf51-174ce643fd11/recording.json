@@ -1,0 +1,307 @@
+{
+  "created_at": "2026-10-14T01:12:44Z",
+  "execution_plan": {
+    "dataset": [
+      {}
+    ],
+    "execution_speed": 1.0,
+    "matrix": [
+      {
+        "auth_profile": "",
+        "browser": "chromium",
+        "desktop_app": "oracle_desktop",
+        "device": "desktop",
+        "execution_speed": 1.0,
+        "framework": "cpp",
+        "runner": "windows_desktop",
+        "windows_version": "windows_10"
+      }
+    ],
+    "retries": 0,
+    "setup": [
+      {
+        "action": "window_launch",
+        "label": "Launch Oracle Forms - Order Entry",
+        "order": 1,
+        "repeat_count": 1,
+        "selector": {
+          "app_id": "oracle_desktop",
+          "class_name": "OraForms",
+          "process_name": "ifrun60.exe",
+          "schema_version": 1,
+          "strict": true,
+          "window_title": "Oracle Forms - Order Entry"
+        },
+        "value": ""
+      }
+    ],
+    "steps": [
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Order Number",
+        "order": 1,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "txtOrderNumber",
+          "control_type": "Edit",
+          "name": "Order Number",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.35582595393871413,
+          "y": 0.24631267102839957
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Order Number",
+        "order": 2,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "txtOrderNumber",
+          "control_type": "Edit",
+          "name": "Order Number",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.3442109102137333,
+          "y": 0.25870205100171245
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Order Number",
+        "order": 3,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "txtOrderNumber",
+          "control_type": "Edit",
+          "name": "Order Number",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.5013309739391256,
+          "y": 0.2460181387372214
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_type",
+        "label": "Type \u00b7 Order Status",
+        "order": 4,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "lblOrderStatus",
+          "control_type": "Text",
+          "name": "Order Status",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.3964063869500012,
+          "y": 0.41744669716806754
+        },
+        "value": "38362629"
+      },
+      {
+        "action": "ui_type",
+        "label": "Type \u00b7 Order Status",
+        "order": 5,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "lblOrderStatus",
+          "control_type": "Text",
+          "name": "Order Status",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.48225377361226524,
+          "y": 0.42738458461333395
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_type",
+        "label": "Type \u00b7 Query",
+        "order": 6,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "btnQuery",
+          "control_type": "Button",
+          "name": "Query",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.7930346186857046,
+          "y": 0.3453970131898858
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_type",
+        "label": "Type \u00b7 Order number",
+        "order": 7,
+        "repeat_count": 1,
+        "selector": {
+          "coordinate_fallback": true,
+          "field_name": "Order number",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.9271754969965168,
+          "y": 0.11002949132195795
+        },
+        "value": ""
+      }
+    ],
+    "teardown": [
+      {
+        "action": "window_close",
+        "label": "Close Oracle Forms - Order Entry",
+        "order": 1,
+        "repeat_count": 1,
+        "selector": {
+          "app_id": "oracle_desktop",
+          "schema_version": 1,
+          "strict": true
+        },
+        "value": ""
+      }
+    ],
+    "variables": {},
+    "version": 1
+  },
+  "exports_pending": false,
+  "id": "0dc98a5c-40f4-494d-bf51-174ce643fd11",
+  "input_defaults": {},
+  "name": "Oracle window 10",
+  "parent_id": null,
+  "project_id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
+  "purpose": "Testing order form with zoo.",
+  "start_url": "",
+  "status": "active",
+  "steps": [
+    {
+      "action": "ui_click",
+      "duration_ms": 149.4,
+      "finished_at": "2026-10-14T01:13:17Z",
+      "id": "97253527-3482-47a4-af75-c4f058bc3735",
+      "label": "Click \u00b7 Order Number",
+      "order": 1,
+      "screenshot": "step-001.png",
+      "selector": {
+        "automation_id": "txtOrderNumber",
+        "control_type": "Edit",
+        "name": "Order Number",
+        "x": 0.35582595393871413,
+        "y": 0.24631267102839957
+      },
+      "started_at": "2026-10-14T01:13:17Z",
+      "value": ""
+    },
+    {
+      "action": "ui_click",
+      "duration_ms": 95.6,
+      "finished_at": "2026-10-14T01:13:22Z",
+      "id": "ee6de928-4106-47ab-a047-16444ac652d2",
+      "label": "Click \u00b7 Order Number",
+      "order": 2,
+      "screenshot": "step-002.png",
+      "selector": {
+        "automation_id": "txtOrderNumber",
+        "control_type": "Edit",
+        "name": "Order Number",
+        "x": 0.3442109102137333,
+        "y": 0.25870205100171245
+      },
+      "started_at": "2026-10-14T01:13:22Z",
+      "value": ""
+    },
+    {
+      "action": "ui_click",
+      "duration_ms": 154.2,
+      "finished_at": "2026-10-14T01:13:28Z",
+      "id": "d05b1f46-ebaa-4faa-9b0f-758c20538000",
+      "label": "Click \u00b7 Order Number",
+      "order": 3,
+      "screenshot": "step-003.png",
+      "selector": {
+        "automation_id": "txtOrderNumber",
+        "control_type": "Edit",
+        "name": "Order Number",
+        "x": 0.5013309739391256,
+        "y": 0.2460181387372214
+      },
+      "started_at": "2026-10-14T01:13:28Z",
+      "value": ""
+    },
+    {
+      "action": "ui_type",
+      "duration_ms": 61.9,
+      "finished_at": "2026-10-14T01:13:57Z",
+      "id": "e0110a69-f647-4de4-926d-c68d80d1e76b",
+      "label": "Type \u00b7 Order Status",
+      "order": 4,
+      "screenshot": "step-004.png",
+      "selector": {
+        "automation_id": "lblOrderStatus",
+        "control_type": "Text",
+        "name": "Order Status",
+        "x": 0.3964063869500012,
+        "y": 0.41744669716806754
+      },
+      "started_at": "2026-10-14T01:13:57Z",
+      "value": "38362629"
+    },
+    {
+      "action": "ui_type",
+      "duration_ms": 195.3,
+      "finished_at": "2026-10-14T01:14:02Z",
+      "id": "7787cc89-558e-46e7-89df-48af267e5fa2",
+      "label": "Type \u00b7 Order Status",
+      "order": 5,
+      "screenshot": "step-005.png",
+      "selector": {
+        "automation_id": "lblOrderStatus",
+        "control_type": "Text",
+        "name": "Order Status",
+        "x": 0.48225377361226524,
+        "y": 0.42738458461333395
+      },
+      "started_at": "2026-10-14T01:14:01Z",
+      "value": ""
+    },
+    {
+      "action": "ui_type",
+      "duration_ms": 132.8,
+      "finished_at": "2026-10-14T01:14:07Z",
+      "id": "48f55c7a-6a3e-40d3-9866-341484a4ded8",
+      "label": "Type \u00b7 Query",
+      "order": 6,
+      "screenshot": "step-006.png",
+      "selector": {
+        "automation_id": "btnQuery",
+        "control_type": "Button",
+        "name": "Query",
+        "x": 0.7930346186857046,
+        "y": 0.3453970131898858
+      },
+      "started_at": "2026-10-14T01:14:06Z",
+      "value": ""
+    },
+    {
+      "action": "ui_type",
+      "duration_ms": 108.2,
+      "finished_at": "2026-10-14T01:14:27Z",
+      "id": "2203ad62-8f3d-46b8-8ac4-16e6a1933844",
+      "label": "Type \u00b7 Order number",
+      "order": 7,
+      "screenshot": "step-007.png",
+      "selector": {
+        "coordinate_fallback": true,
+        "field_name": "Order number",
+        "schema_version": 1,
+        "strict": true,
+        "x": 0.9271754969965168,
+        "y": 0.11002949132195795
+      },
+      "started_at": "2026-10-14T01:14:27Z",
+      "value": ""
+    }
+  ],
+  "tags": "windows_desktop"
+}

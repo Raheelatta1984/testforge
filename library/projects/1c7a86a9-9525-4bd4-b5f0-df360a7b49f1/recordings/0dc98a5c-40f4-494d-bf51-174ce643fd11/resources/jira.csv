@@ -1,0 +1,8 @@
+﻿Summary,Step,Action,Description,Selector,Input,Screenshot
+Oracle window 10,1,ui_click,Click · Order Number,"{""automation_id"": ""txtOrderNumber"", ""name"": ""Order Number"", ""control_type"": ""Edit"", ""x"": 0.35582595393871413, ""y"": 0.24631267102839957}",,step-001.png
+Oracle window 10,2,ui_click,Click · Order Number,"{""automation_id"": ""txtOrderNumber"", ""name"": ""Order Number"", ""control_type"": ""Edit"", ""x"": 0.3442109102137333, ""y"": 0.25870205100171245}",,step-002.png
+Oracle window 10,3,ui_click,Click · Order Number,"{""automation_id"": ""txtOrderNumber"", ""name"": ""Order Number"", ""control_type"": ""Edit"", ""x"": 0.5013309739391256, ""y"": 0.2460181387372214}",,step-003.png
+Oracle window 10,4,ui_type,Type · Order Status,"{""automation_id"": ""lblOrderStatus"", ""name"": ""Order Status"", ""control_type"": ""Text"", ""x"": 0.3964063869500012, ""y"": 0.41744669716806754}",38362629,step-004.png
+Oracle window 10,5,ui_type,Type · Order Status,"{""automation_id"": ""lblOrderStatus"", ""name"": ""Order Status"", ""control_type"": ""Text"", ""x"": 0.48225377361226524, ""y"": 0.42738458461333395}",,step-005.png
+Oracle window 10,6,ui_type,Type · Query,"{""automation_id"": ""btnQuery"", ""name"": ""Query"", ""control_type"": ""Button"", ""x"": 0.7930346186857046, ""y"": 0.3453970131898858}",,step-006.png
+Oracle window 10,7,ui_type,Type · Order number,"{""field_name"": ""Order number"", ""x"": 0.9271754969965168, ""y"": 0.11002949132195795, ""coordinate_fallback"": true, ""schema_version"": 1, ""strict"": true}",,step-007.png

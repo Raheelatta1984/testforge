@@ -1,0 +1,131 @@
+{
+  "steps": [
+    {
+      "id": "97253527-3482-47a4-af75-c4f058bc3735",
+      "order": 1,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Order Number",
+      "selector": {
+        "automation_id": "txtOrderNumber",
+        "name": "Order Number",
+        "control_type": "Edit",
+        "x": 0.35582595393871413,
+        "y": 0.24631267102839957
+      },
+      "started_at": "2026-10-14T01:13:17Z",
+      "finished_at": "2026-10-14T01:13:17Z",
+      "duration_ms": 149.4,
+      "screenshot": "step-001.png"
+    },
+    {
+      "id": "ee6de928-4106-47ab-a047-16444ac652d2",
+      "order": 2,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Order Number",
+      "selector": {
+        "automation_id": "txtOrderNumber",
+        "name": "Order Number",
+        "control_type": "Edit",
+        "x": 0.3442109102137333,
+        "y": 0.25870205100171245
+      },
+      "started_at": "2026-10-14T01:13:22Z",
+      "finished_at": "2026-10-14T01:13:22Z",
+      "duration_ms": 95.6,
+      "screenshot": "step-002.png"
+    },
+    {
+      "id": "d05b1f46-ebaa-4faa-9b0f-758c20538000",
+      "order": 3,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Order Number",
+      "selector": {
+        "automation_id": "txtOrderNumber",
+        "name": "Order Number",
+        "control_type": "Edit",
+        "x": 0.5013309739391256,
+        "y": 0.2460181387372214
+      },
+      "started_at": "2026-10-14T01:13:28Z",
+      "finished_at": "2026-10-14T01:13:28Z",
+      "duration_ms": 154.2,
+      "screenshot": "step-003.png"
+    },
+    {
+      "id": "e0110a69-f647-4de4-926d-c68d80d1e76b",
+      "order": 4,
+      "action": "ui_type",
+      "value": "38362629",
+      "label": "Type \u00b7 Order Status",
+      "selector": {
+        "automation_id": "lblOrderStatus",
+        "name": "Order Status",
+        "control_type": "Text",
+        "x": 0.3964063869500012,
+        "y": 0.41744669716806754
+      },
+      "started_at": "2026-10-14T01:13:57Z",
+      "finished_at": "2026-10-14T01:13:57Z",
+      "duration_ms": 61.9,
+      "screenshot": "step-004.png"
+    },
+    {
+      "id": "7787cc89-558e-46e7-89df-48af267e5fa2",
+      "order": 5,
+      "action": "ui_type",
+      "value": "",
+      "label": "Type \u00b7 Order Status",
+      "selector": {
+        "automation_id": "lblOrderStatus",
+        "name": "Order Status",
+        "control_type": "Text",
+        "x": 0.48225377361226524,
+        "y": 0.42738458461333395
+      },
+      "started_at": "2026-10-14T01:14:01Z",
+      "finished_at": "2026-10-14T01:14:02Z",
+      "duration_ms": 195.3,
+      "screenshot": "step-005.png"
+    },
+    {
+      "id": "48f55c7a-6a3e-40d3-9866-341484a4ded8",
+      "order": 6,
+      "action": "ui_type",
+      "value": "",
+      "label": "Type \u00b7 Query",
+      "selector": {
+        "automation_id": "btnQuery",
+        "name": "Query",
+        "control_type": "Button",
+        "x": 0.7930346186857046,
+        "y": 0.3453970131898858
+      },
+      "started_at": "2026-10-14T01:14:06Z",
+      "finished_at": "2026-10-14T01:14:07Z",
+      "duration_ms": 132.8,
+      "screenshot": "step-006.png"
+    },
+    {
+      "id": "2203ad62-8f3d-46b8-8ac4-16e6a1933844",
+      "order": 7,
+      "action": "ui_type",
+      "value": "",
+      "label": "Type \u00b7 Order number",
+      "selector": {
+        "field_name": "Order number",
+        "x": 0.9271754969965168,
+        "y": 0.11002949132195795,
+        "coordinate_fallback": true,
+        "schema_version": 1,
+        "strict": true
+      },
+      "started_at": "2026-10-14T01:14:27Z",
+      "finished_at": "2026-10-14T01:14:27Z",
+      "duration_ms": 108.2,
+      "screenshot": "step-007.png"
+    }
+  ]
+}
