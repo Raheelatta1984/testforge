@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "setup": [
+    {
+      "order": 1,
+      "action": "window_launch",
+      "value": "",
+      "selector": {
+        "app_id": "winforms_legacy",
+        "window_title": "Legacy WinForms Application",
+        "process_name": "LegacyApp.exe",
+        "class_name": "WindowsForms10.Window.8.app.0",
+        "schema_version": 1,
+        "strict": true
+      },
+      "label": "Launch Legacy WinForms Application",
+      "repeat_count": 1
+    }
+  ],
+  "steps": [
+    {
+      "order": 1,
+      "action": "ui_click",
+      "value": "",
+      "selector": {
+        "field_name": "Screen target 53% x 28%",
+        "x": 0.5319432086826111,
+        "y": 0.28476029600456315,
+        "coordinate_fallback": true,
+        "schema_version": 1,
+        "strict": true
+      },
+      "label": "Click \u00b7 Screen target 53% x 28%",
+      "repeat_count": 1
+    },
+    {
+      "order": 2,
+      "action": "ui_type",
+      "value": "Testing",
+      "selector": {
+        "automation_id": "txtCustomer",
+        "name": "Customer",
+        "control_type": "Edit",
+        "x": 0.4729369975024869,
+        "y": 0.25991557739139703,
+        "schema_version": 1,
+        "strict": true
+      },
+      "label": "Type \u00b7 Customer",
+      "repeat_count": 1
+    },
+    {
+      "order": 3,
+      "action": "ui_type",
+      "value": "Ali hgjg if oxides offices",
+      "selector": {
+        "field_name": "Customer",
+        "x": 0.5723158794900646,
+        "y": 0.20454744482213788,
+        "coordinate_fallback": true,
+        "schema_version": 1,
+        "strict": true
+      },
+      "label": "Type \u00b7 Customer",
+      "repeat_count": 1
+    },
+    {
+      "order": 4,
+      "action": "ui_type",
+      "value": "",
+      "selector": {
+        "automation_id": "btnSubmit",
+        "name": "Submit",
+        "control_type": "Button",
+        "x": 0.8207630844590086,
+        "y": 0.49274618073486476,
+        "schema_version": 1,
+        "strict": true
+      },
+      "label": "Type \u00b7 Submit",
+      "repeat_count": 1
+    }
+  ],
+  "teardown": [
+    {
+      "order": 1,
+      "action": "window_close",
+      "value": "",
+      "selector": {
+        "app_id": "winforms_legacy",
+        "schema_version": 1,
+        "strict": true
+      },
+      "label": "Close Legacy WinForms Application",
+      "repeat_count": 1
+    }
+  ],
+  "variables": {},
+  "dataset": [
+    {}
+  ],
+  "matrix": [
+    {
+      "browser": "chromium",
+      "device": "desktop",
+      "auth_profile": "",
+      "runner": "windows_desktop",
+      "execution_speed": 1.0,
+      "framework": "winforms",
+      "windows_version": "windows_11",
+      "desktop_app": "winforms_legacy"
+    }
+  ],
+  "retries": 0,
+  "execution_speed": 1.0
+}

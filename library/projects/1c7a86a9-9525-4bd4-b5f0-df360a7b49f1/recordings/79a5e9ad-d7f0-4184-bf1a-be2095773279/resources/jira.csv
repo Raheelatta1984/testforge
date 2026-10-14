@@ -1,0 +1,5 @@
+﻿Summary,Step,Action,Description,Selector,Input,Screenshot
+Winform legacy,1,ui_click,Click · Screen target 53% x 28%,"{""field_name"": ""Screen target 53% x 28%"", ""x"": 0.5319432086826111, ""y"": 0.28476029600456315, ""coordinate_fallback"": true, ""schema_version"": 1, ""strict"": true}",,step-001.png
+Winform legacy,2,ui_type,Type · Customer,"{""automation_id"": ""txtCustomer"", ""name"": ""Customer"", ""control_type"": ""Edit"", ""x"": 0.4729369975024869, ""y"": 0.25991557739139703}",Testing,step-002.png
+Winform legacy,3,ui_type,Type · Customer,"{""field_name"": ""Customer"", ""x"": 0.5723158794900646, ""y"": 0.20454744482213788, ""coordinate_fallback"": true, ""schema_version"": 1, ""strict"": true}",Ali hgjg if oxides offices,step-003.png
+Winform legacy,4,ui_type,Type · Submit,"{""automation_id"": ""btnSubmit"", ""name"": ""Submit"", ""control_type"": ""Button"", ""x"": 0.8207630844590086, ""y"": 0.49274618073486476}",,step-004.png

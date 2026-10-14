@@ -1,0 +1,78 @@
+{
+  "steps": [
+    {
+      "id": "a837cf6a-2ec9-4487-930e-0fe2e3f43441",
+      "order": 1,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Screen target 53% x 28%",
+      "selector": {
+        "field_name": "Screen target 53% x 28%",
+        "x": 0.5319432086826111,
+        "y": 0.28476029600456315,
+        "coordinate_fallback": true,
+        "schema_version": 1,
+        "strict": true
+      },
+      "started_at": "2026-10-14T00:17:46Z",
+      "finished_at": "2026-10-14T00:17:47Z",
+      "duration_ms": 293.2,
+      "screenshot": "step-001.png"
+    },
+    {
+      "id": "c5e0945f-e9c3-462d-98c5-35a973927612",
+      "order": 2,
+      "action": "ui_type",
+      "value": "Testing",
+      "label": "Type \u00b7 Customer",
+      "selector": {
+        "automation_id": "txtCustomer",
+        "name": "Customer",
+        "control_type": "Edit",
+        "x": 0.4729369975024869,
+        "y": 0.25991557739139703
+      },
+      "started_at": "2026-10-14T00:18:31Z",
+      "finished_at": "2026-10-14T00:18:32Z",
+      "duration_ms": 200.0,
+      "screenshot": "step-002.png"
+    },
+    {
+      "id": "b9d5d2d0-27ee-4365-af3e-c9356092fa55",
+      "order": 3,
+      "action": "ui_type",
+      "value": "Ali hgjg if oxides offices",
+      "label": "Type \u00b7 Customer",
+      "selector": {
+        "field_name": "Customer",
+        "x": 0.5723158794900646,
+        "y": 0.20454744482213788,
+        "coordinate_fallback": true,
+        "schema_version": 1,
+        "strict": true
+      },
+      "started_at": "2026-10-14T00:19:05Z",
+      "finished_at": "2026-10-14T00:19:06Z",
+      "duration_ms": 215.9,
+      "screenshot": "step-003.png"
+    },
+    {
+      "id": "4d0c9c15-d43b-4b2e-bb13-c449c63d2ea4",
+      "order": 4,
+      "action": "ui_type",
+      "value": "",
+      "label": "Type \u00b7 Submit",
+      "selector": {
+        "automation_id": "btnSubmit",
+        "name": "Submit",
+        "control_type": "Button",
+        "x": 0.8207630844590086,
+        "y": 0.49274618073486476
+      },
+      "started_at": "2026-10-14T00:19:15Z",
+      "finished_at": "2026-10-14T00:19:15Z",
+      "duration_ms": 257.4,
+      "screenshot": "step-004.png"
+    }
+  ]
+}
