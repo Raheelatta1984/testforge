@@ -126,12 +126,14 @@ The existing AI browser agent, `app/agent.py`, cannot be imported (it imports a
 comparison. The existing AI helpers (`ai_onboarding.py`, `variables_ai.py`) are
 used for import and variable tasks, not for QA analysis.
 
-Overall: the hub is the better option on AI-driven capability for seven of nine
-agents, and it is the only option for four of them (requirements, test cases,
-regression, and the API spec). The existing functions remain better at enforcement
-and at bulk export (flaky publication gate, Jira CSV, per-run PDF reports, and the
-import validator's syntax check). Nothing existing was removed or changed in
-behaviour.
+Overall: on AI-driven capability the hub is better than, or the only option for,
+all nine agents. The existing AI features (`ai_onboarding.py`, `variables_ai.py`)
+serve import and variable tasks, not QA analysis. On modernization and scalability
+the hub is better or equal in each row, but the existing functions stay better at
+three things, which is why they are kept: enforcement (the flaky publication gate
+in the run pipeline), bulk export (per-step Jira CSV, streamed per-run PDF/HTML/JSON
+reports), and strict syntax validation (the import validator). Nothing existing was
+removed or changed in behaviour.
 
 ## Known limits
 
