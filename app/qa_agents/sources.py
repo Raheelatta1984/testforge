@@ -9,8 +9,10 @@ import re
 from datetime import datetime, timezone
 
 from app import library_store
-from app.db import Recording, Run
+from app.db import Recording, Run, SessionLocal
 from app.errors import redact
+
+from .common import InputError
 
 MAX_RUNS = 500
 MAX_RECORDINGS = 300
@@ -182,3 +184,46 @@ def _parse_day(text: str, end: bool = False) -> datetime:
     if end and len(str(text)) <= 10:
         stamp = stamp.replace(hour=23, minute=59, second=59)
     return stamp
+
+
+# Which stored sources each agent accepts. Routes and the MCP server both build inputs here.
+SOURCE_RULES = {
+    "failure-triage": ("run",),
+    "defect-drafting": ("run",),
+    "flaky": ("recording",),
+    "regression": ("project",),
+    "release-summary": ("project",),
+}
+
+
+def build_payload(agent_id: str, source: dict, name: str | None = None) -> dict:
+    """Read the stored data a source names and return the agent's input.
+
+    Raises InputError for a source the agent does not accept or a missing id (400),
+    and SourceNotFound for an id that does not exist (404).
+    """
+    kind = str(source.get("type") or "")
+    allowed = SOURCE_RULES.get(agent_id, ())
+    if kind not in allowed:
+        raise InputError(f"{name or agent_id} accepts a stored source of type: "
+                         + (", ".join(allowed) or "none (paste its input instead)") + ".")
+    with SessionLocal() as db:
+        if kind == "run":
+            run_id = str(source.get("run_id") or "").strip()
+            if not run_id:
+                raise InputError("run_id is required.")
+            if agent_id == "defect-drafting":
+                return defect_payload(db, run_id)
+            return triage_payload(db, run_id)
+        if kind == "recording":
+            recording_id = str(source.get("recording_id") or "").strip()
+            if not recording_id:
+                raise InputError("recording_id is required.")
+            return flaky_payload(db, recording_id, source.get("limit") or 100)
+        project_id = str(source.get("project_id") or "").strip()
+        if not project_id:
+            raise InputError("project_id is required.")
+        if agent_id == "regression":
+            return regression_payload(project_id)
+        return release_payload(db, project_id, source.get("since"), source.get("until"), source.get("batch_id"))
+

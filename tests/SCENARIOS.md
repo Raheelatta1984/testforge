@@ -211,6 +211,11 @@ The QA agent hub (`app/qa_agents/`, dashboard tab "QA Agents") runs nine determi
 | UT-AGT-15 | Scrubbing stays linear | Scrubbing a 200,000-character word finishes in under two seconds (guards against a quadratic e-mail pattern). |
 | UT-AGT-16 | Dashboard wiring | `index.html` loads the component, adds the "QA Agents" tab and keeps all sixteen existing tab keys. |
 | UT-AGT-17 | Component classes exist in the stylesheet | Every Tailwind-style class in `qa-agents-components.js` has a rule in the committed `vendor/tailwind.css` (or is a known custom class), so no control renders unstyled. |
+| UT-AGT-18 | Gherkin from test cases | Test case generation also returns a valid feature: one `Scenario` per case with `TC-nnn` IDs, `Given` first, `Then` last, no Scenario Outline, Examples or data tables, and single-line steps. |
+| UT-AGT-19 | Local model (Ollama) | With `TF_AGENT_AI_PROVIDER=ollama` the agent calls `/api/chat` on the configured local URL (non-streaming, JSON format) even when a cloud key is set; the rules findings are unchanged; scrubbed input never carries a password, e-mail address or key. |
+| UT-AGT-20 | Local model failures and switches | An unreachable or malformed local model leaves the rules result complete and records why; `TF_AGENT_AI=0` turns AI off; an unknown provider is reported; with only a cloud key the provider is Anthropic. |
+| UT-AGT-21 | MCP protocol and tools | The MCP handler answers initialize, ping, tools/list and tools/call; tools are read-only; notifications get no reply; batches work; unknown methods, bad arguments and wrong sources come back as JSON-RPC or tool errors. |
+| UT-AGT-22 | MCP stdio transport | The stdio server writes only protocol lines to stdout (the app's boot banner goes to stderr) and answers a non-JSON line with a parse error; importing the agent package does not import the app. |
 
 ## Dev & Deploy kit and desktop application installation
 

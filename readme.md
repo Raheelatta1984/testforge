@@ -152,7 +152,7 @@ The dashboard also stops polling while its tab is hidden.
 
 ## QA agent hub
 
-The **QA Agents** tab runs nine QA agents: Requirement Review, Test Case Generation, API Contract, Automation Code Review, Failure Triage, Flaky Test Analysis, Defect Drafting, Regression Selection and Release Summary. Paste an input (LOAD SAMPLE fills one in) or run on data already stored here: a run, a recording, or a project. The rules engine always answers and needs no network. With `ANTHROPIC_API_KEY` set, one bounded call per run adds short AI insights; it never changes a rule finding. Endpoints: `GET /api/agents`, `GET /api/agents/{id}/sample`, `POST /api/agents/{id}/run`, `POST /api/agents/{id}/from-source`. Full behaviour, limits, the decision rules, and the comparison with existing functionality are in [`docs/qa-agent-hub.md`](docs/qa-agent-hub.md). Test IDs are `UT-AGT-01` to `UT-AGT-17`.
+The **QA Agents** tab runs nine QA agents: Requirement Review, Test Case Generation, API Contract, Automation Code Review, Failure Triage, Flaky Test Analysis, Defect Drafting, Regression Selection and Release Summary. Paste an input (LOAD SAMPLE fills one in) or run on data already stored here: a run, a recording, or a project. The rules engine always answers and needs no network. With `ANTHROPIC_API_KEY` set, or with `TF_AGENT_AI_PROVIDER=ollama` for a local model that keeps the artifact on your network, one bounded call per run adds short AI insights; it never changes a rule finding. Test Case Generation also returns a Gherkin feature. The agents are available to Claude Code CLI and other MCP clients through `python -m app.qa_agents.mcp_server` (stdio, read-only tools). Endpoints: `GET /api/agents`, `GET /api/agents/{id}/sample`, `POST /api/agents/{id}/run`, `POST /api/agents/{id}/from-source`. Full behaviour, limits, the decision rules, and the comparison with existing functionality are in [`docs/qa-agent-hub.md`](docs/qa-agent-hub.md). Test IDs are `UT-AGT-01` to `UT-AGT-22`.
 
 ## Environment variables
 | Variable | Default | Effect |
@@ -200,6 +200,9 @@ The **QA Agents** tab runs nine QA agents: Requirement Review, Test Case Generat
 | `TF_AGENT_AI_MODEL` | `claude-sonnet-4-5` | Model used for QA agent insights. |
 | `TF_AGENT_AI_URL` | Anthropic Messages API | Endpoint for QA agent insights (proxy or test double). |
 | `TF_AGENT_AI_TIMEOUT` | `30` | Seconds before a QA agent AI call is abandoned. |
+| `TF_AGENT_AI_PROVIDER` | unset | `ollama` uses a local model for QA agent insights; `anthropic` uses the cloud model. |
+| `TF_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server used when the provider is `ollama`. |
+| `TF_OLLAMA_MODEL` | `llama3.1` | Ollama model used for QA agent insights. |
 
 ## Testing
 The harness runs the unit suite and the library scenarios. Library scenarios are the recordings and projects in `library/`, executed through the same recorder and runner the dashboard uses. From the repository root:

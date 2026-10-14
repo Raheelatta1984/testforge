@@ -15,7 +15,6 @@ import json
 
 from fastapi import APIRouter, HTTPException, Request
 
-from app.db import SessionLocal
 from app.errors import redact
 
 from . import registry, sources
@@ -23,16 +22,6 @@ from .common import InputError, InputLimitError
 
 router = APIRouter()
 MAX_BODY_BYTES = 2_500_000
-
-# Which stored sources each agent accepts, and the builder for each.
-SOURCE_RULES = {
-    "failure-triage": ("run",),
-    "defect-drafting": ("run",),
-    "flaky": ("recording",),
-    "regression": ("project",),
-    "release-summary": ("project",),
-}
-
 
 async def _body(request: Request) -> dict:
     raw = await request.body()
@@ -95,36 +84,12 @@ async def run_agent(agent_id: str, request: Request):
 
 
 def _source_payload(agent_id: str, source: dict) -> dict:
-    kind = str(source.get("type") or "")
-    allowed = SOURCE_RULES.get(agent_id, ())
-    if kind not in allowed:
-        raise HTTPException(400, f"{registry.BY_ID[agent_id]['name']} accepts a stored source of type: "
-                                 + (", ".join(allowed) or "none (paste its input instead)") + ".")
-    with SessionLocal() as db:
-        try:
-            if kind == "run":
-                run_id = str(source.get("run_id") or "").strip()
-                if not run_id:
-                    raise HTTPException(400, "run_id is required.")
-                if agent_id == "defect-drafting":
-                    return sources.defect_payload(db, run_id)
-                return sources.triage_payload(db, run_id)
-            if kind == "recording":
-                recording_id = str(source.get("recording_id") or "").strip()
-                if not recording_id:
-                    raise HTTPException(400, "recording_id is required.")
-                return sources.flaky_payload(db, recording_id, source.get("limit") or 100)
-            project_id = str(source.get("project_id") or "").strip()
-            if not project_id:
-                raise HTTPException(400, "project_id is required.")
-            if agent_id == "regression":
-                return sources.regression_payload(project_id)
-            return sources.release_payload(db, project_id, source.get("since"), source.get("until"),
-                                           source.get("batch_id"))
-        except sources.SourceNotFound as exc:
-            raise HTTPException(404, str(exc)) from None
-        except ValueError as exc:
-            raise HTTPException(400, redact(str(exc))) from None
+    try:
+        return sources.build_payload(agent_id, source, registry.BY_ID[agent_id]["name"])
+    except sources.SourceNotFound as exc:
+        raise HTTPException(404, str(exc)) from None
+    except ValueError as exc:  # InputError is a ValueError: a bad or unsupported source
+        raise HTTPException(400, redact(str(exc))) from None
 
 
 @router.post("/api/agents/{agent_id}/from-source")
@@ -135,7 +100,7 @@ async def run_agent_from_source(agent_id: str, request: Request):
     source = body.get("source")
     if not isinstance(source, dict):
         raise HTTPException(400, "Provide a \"source\" object, for example {\"type\": \"run\", \"run_id\": \"...\"}.")
-    if agent_id not in SOURCE_RULES:
+    if agent_id not in sources.SOURCE_RULES:
         raise HTTPException(400, f"{registry.BY_ID[agent_id]['name']} takes pasted input; use /run.")
     built = _source_payload(agent_id, source)
     overrides = body.get("input") if isinstance(body.get("input"), dict) else {}

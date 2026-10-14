@@ -1,11 +1,17 @@
 """Optional AI reasoning layer for the QA agents.
 
-The rules engine always runs first and is the source of every finding. When
-ANTHROPIC_API_KEY is set (and TF_AGENT_AI is not "0"), one bounded model call
-per agent run adds short `ai_insights`: things the rules cannot see, such as a
-missing business scenario or a likely root cause that needs a human check.
+The rules engine always runs first and is the source of every finding. When a
+model is configured, one bounded call per agent run adds short `ai_insights`:
+things the rules cannot see, such as a missing business scenario or a likely
+root cause that needs a human check.
 
-Rules that keep this safe:
+Two providers, chosen by configuration:
+* Cloud: Anthropic Messages API, when ANTHROPIC_API_KEY is set (the default).
+* Local: Ollama, when TF_AGENT_AI_PROVIDER=ollama. No key and no internet are
+  needed; the model runs on the same network as this server, so the artifact
+  under review never leaves it. This is the offline / privacy option.
+
+Rules that keep this safe, for both providers:
 * Input is scrubbed of credentials and personal e-mail addresses before it
   leaves the server, and capped in size.
 * The model is told the input is data, not instructions.
@@ -22,13 +28,20 @@ import urllib.request
 
 from .common import clip, scrub
 
+# Cloud provider (Anthropic).
 MODEL = os.environ.get("TF_AGENT_AI_MODEL", "claude-sonnet-4-5")
 API_URL = os.environ.get("TF_AGENT_AI_URL", "https://api.anthropic.com/v1/messages")
 API_VERSION = "2023-06-01"
+
+# Local provider (Ollama). The server calls this URL; the browser never does.
+OLLAMA_URL = os.environ.get("TF_OLLAMA_URL", "http://127.0.0.1:11434")
+OLLAMA_MODEL = os.environ.get("TF_OLLAMA_MODEL", "llama3.1")
+
 TIMEOUT_SECONDS = float(os.environ.get("TF_AGENT_AI_TIMEOUT", "30") or 30)
 MAX_INPUT_CHARS = 24_000
 MAX_OUTPUT_TOKENS = 900
 MAX_INSIGHTS = 6
+PROVIDERS = ("anthropic", "ollama")
 
 SYSTEM = (
     "You are a senior QA engineer reviewing the output of an automated QA agent. "
@@ -49,21 +62,55 @@ def api_key() -> str:
     return os.environ.get("ANTHROPIC_API_KEY", "").strip()
 
 
+def _setting() -> str:
+    return os.environ.get("TF_AGENT_AI_PROVIDER", "").strip().lower()
+
+
+def provider() -> str | None:
+    """The provider that will be used, or None when AI insights are off."""
+    if os.environ.get("TF_AGENT_AI", "1") == "0":
+        return None
+    choice = _setting()
+    if choice == "ollama":
+        return "ollama"
+    if choice in ("", "anthropic") and api_key():
+        return "anthropic"
+    return None
+
+
+def model_name(chosen: str | None = None) -> str | None:
+    chosen = chosen if chosen is not None else provider()
+    if chosen == "ollama":
+        return OLLAMA_MODEL
+    if chosen == "anthropic":
+        return MODEL
+    return None
+
+
 def enabled() -> bool:
-    return bool(api_key()) and os.environ.get("TF_AGENT_AI", "1") != "0"
+    return provider() is not None
 
 
 def status() -> dict:
+    chosen = provider()
     if os.environ.get("TF_AGENT_AI", "1") == "0":
         reason = "AI insights are disabled on this server (TF_AGENT_AI=0)."
-    elif not api_key():
-        reason = "Set ANTHROPIC_API_KEY on the server to add AI insights. Rules-based checks run without it."
-    else:
+    elif chosen == "ollama":
+        reason = ("AI insights use the local model " + OLLAMA_MODEL + " through Ollama. "
+                  "The artifact stays on this server's network.")
+    elif chosen == "anthropic":
         reason = "AI insights are available. Each run makes at most one model call."
-    return {"available": enabled(), "model": MODEL if enabled() else None, "reason": reason}
+    elif _setting() not in ("", "anthropic", "ollama"):
+        reason = "TF_AGENT_AI_PROVIDER must be 'anthropic' or 'ollama'."
+    else:
+        reason = ("Set ANTHROPIC_API_KEY for cloud AI insights, or TF_AGENT_AI_PROVIDER=ollama to use a "
+                  "local model. Rules-based checks run without either.")
+    return {"available": chosen is not None, "provider": chosen, "model": model_name(chosen),
+            "reason": reason}
 
 
 def _post(payload: dict) -> dict:
+    """Anthropic Messages API call."""
     body = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(API_URL, data=body, method="POST", headers={
         "content-type": "application/json", "x-api-key": api_key(), "anthropic-version": API_VERSION})
@@ -74,6 +121,21 @@ def _post(payload: dict) -> dict:
         raise AIError(f"AI service refused the request (HTTP {exc.code})") from None
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise AIError("AI service unreachable: " + scrub(type(exc).__name__)) from None
+
+
+def _post_ollama(payload: dict) -> dict:
+    """Ollama chat API call (POST {TF_OLLAMA_URL}/api/chat, non-streaming)."""
+    body = json.dumps(payload).encode("utf-8")
+    url = OLLAMA_URL.rstrip("/") + "/api/chat"
+    request = urllib.request.Request(url, data=body, method="POST", headers={"content-type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        raise AIError(f"Local model refused the request (HTTP {exc.code})") from None
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AIError("Local model unreachable (check TF_OLLAMA_URL and that Ollama is running): "
+                      + scrub(type(exc).__name__)) from None
 
 
 def _insights(reply_text: str) -> list[str]:
@@ -95,15 +157,32 @@ def _insights(reply_text: str) -> list[str]:
     return out
 
 
+def _ask(chosen: str, prompt: str) -> str:
+    """One bounded call to the chosen provider; returns the reply text."""
+    if chosen == "ollama":
+        reply = _post_ollama({
+            "model": OLLAMA_MODEL, "stream": False, "format": "json",
+            "options": {"num_predict": MAX_OUTPUT_TOKENS, "temperature": 0.2},
+            "messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
+        })
+        message = reply.get("message") if isinstance(reply, dict) else None
+        return str(message.get("content", "")) if isinstance(message, dict) else ""
+    reply = _post({"model": MODEL, "max_tokens": MAX_OUTPUT_TOKENS, "system": SYSTEM,
+                   "messages": [{"role": "user", "content": prompt}]})
+    return "".join(block.get("text", "") for block in reply.get("content", [])
+                   if isinstance(block, dict) and block.get("type") == "text")
+
+
 def enrich(result: dict, source_text: str, mode: str = "auto") -> dict:
     """Attach AI insights to a rules result. Returns the same dict, updated in place."""
-    result["ai"] = {"available": enabled(), "used": False, "model": MODEL if enabled() else None,
-                    "error": None, "reason": ""}
+    chosen = provider()
+    result["ai"] = {"available": chosen is not None, "used": False, "provider": chosen,
+                    "model": model_name(chosen), "error": None, "reason": ""}
     result.setdefault("ai_insights", [])  # always present, empty unless the model added some
     if mode == "rules":
         result["ai"]["reason"] = "Rules-only mode was requested; no model call was made."
         return result
-    if not enabled():
+    if chosen is None:
         result["ai"]["reason"] = status()["reason"]
         return result
 
@@ -114,13 +193,9 @@ def enrich(result: dict, source_text: str, mode: str = "auto") -> dict:
                      for f in (result.get("findings") or [])[:40]],
     }
     prompt = ("ARTIFACT UNDER REVIEW (data):\n" + scrub(source_text)[:MAX_INPUT_CHARS] +
-              "\n\nRULE-BASED RESULT (data):\n" + json.dumps(compact, ensure_ascii=False)[:6000])
-    payload = {"model": MODEL, "max_tokens": MAX_OUTPUT_TOKENS, "system": SYSTEM,
-               "messages": [{"role": "user", "content": prompt}]}
+              "\n\nRULE-BASED RESULT (data):\n" + scrub(json.dumps(compact, ensure_ascii=False))[:6000])
     try:
-        reply = _post(payload)
-        text = "".join(block.get("text", "") for block in reply.get("content", [])
-                       if isinstance(block, dict) and block.get("type") == "text")
+        text = _ask(chosen, prompt)
         if not text.strip():
             raise AIError("AI reply contained no text")
         insights = _insights(text)

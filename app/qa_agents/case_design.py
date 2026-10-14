@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 
-from .common import MAX_ITEMS, as_text, csv_text, envelope, finding, scrub
+from .common import MAX_ITEMS, as_text, clip, csv_text, envelope, finding, scrub
 from .requirements import EDGE_RULES, _statements
 
 NUM = r"(\d+(?:\.\d+)?)"
@@ -174,8 +174,42 @@ def generate(text: str, feature: str | None = None) -> dict:
     csv = csv_text(["ID", "Title", "Type", "Priority", "Technique", "Preconditions", "Steps", "Test data", "Expected"], rows)
     summary = (f"Generated {len(cases)} case(s) from {len(criteria)} criterion/criteria: "
                f"{counts['positive']} positive, {counts['negative']} negative, {counts['boundary']} boundary.")
+    gherkin = to_gherkin(cases, feature_name)
     return envelope("test-cases", "Test Case Generation", summary,
                     "generated" if cases else "nothing generated", findings,
-                    artifacts={"cases": cases, "counts": counts, "csv": csv,
+                    artifacts={"cases": cases, "counts": counts, "csv": csv, "gherkin": gherkin,
                                "criteria": criteria[:MAX_ITEMS]},
                     scored=False)
+
+
+def _line(text: str, limit: int = 300) -> str:
+    """One Gherkin line: whitespace collapsed, so no value can break the file structure."""
+    return clip(" ".join(str(text or "").split()), limit)
+
+
+def _sentence(text: str) -> str:
+    return _line(text).rstrip(".")
+
+
+def to_gherkin(cases: list[dict], feature: str) -> str:
+    """Render cases as a Gherkin feature: one plain Scenario per case, tagged by type and priority.
+
+    Scenario Outlines and Examples tables are not used, so each case reads on its own. The steps
+    are plain English; a BDD runner needs step definitions bound to the application's locators.
+    """
+    if not cases:
+        return ""
+    out = [f"Feature: {_line(feature, 120)}",
+           "  # Generated from the acceptance criteria by TestForge QA agents. Review before use.", ""]
+    for case in cases:
+        out.append(f"  @{case['type']} @{case['priority'].lower()}")
+        out.append(f"  Scenario: {case['id']} {_line(case['title'], 200)}")
+        precondition = case.get("preconditions") or ""
+        if precondition in ("", "Application reachable"):
+            precondition = "the application is reachable"
+        out.append(f"    Given {_sentence(precondition)}")
+        for index, step in enumerate(case.get("steps") or []):
+            out.append(f"    {'When' if index == 0 else 'And'} {_sentence(step)}")
+        out.append(f"    Then {_sentence(case.get('expected') or 'the outcome matches the requirement')}")
+        out.append("")
+    return "\n".join(out).rstrip() + "\n"

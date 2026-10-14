@@ -1372,6 +1372,213 @@ class QAAgentHubTests(unittest.TestCase):
         self.assertFalse(missing, "classes with no rule in tailwind.css: " + ", ".join(missing))
 
 
+    def test_UT_AGT_18_test_cases_emit_valid_gherkin_without_outlines(self):
+        from app.qa_agents import case_design
+        from app.qa_agents.registry import SAMPLES
+
+        result = case_design.generate(SAMPLES["test-cases"]["text"] + "\nPassword must not be shown\nin logs.",
+                                      "Registration\nwith breaks")
+        gherkin = result["artifacts"]["gherkin"]
+        lines = gherkin.splitlines()
+        self.assertTrue(lines[0].startswith("Feature: Registration with breaks"), lines[0])
+        self.assertNotIn("Scenario Outline", gherkin)
+        self.assertNotIn("Examples:", gherkin)
+        self.assertNotIn("|", gherkin, "no data tables: each scenario reads on its own")
+        scenarios = [line for line in lines if line.lstrip().startswith("Scenario:")]
+        self.assertEqual(len(scenarios), len(result["artifacts"]["cases"]))
+        for case in result["artifacts"]["cases"]:
+            self.assertTrue(any(line.strip().startswith("Scenario: " + case["id"] + " ") for line in lines))
+        keywords = [line.strip().split(" ", 1)[0] for line in lines if line.strip()]
+        for index, word in enumerate(keywords):
+            if word == "Scenario:":
+                self.assertEqual(keywords[index + 1], "Given", "every scenario starts with Given")
+        self.assertEqual(gherkin.count("Then "), len(scenarios))
+        self.assertTrue(all(line.strip() for line in gherkin.split("\n") if line.startswith("    ")),
+                        "step lines are single-line and non-empty")
+        self.assertEqual(case_design.to_gherkin([], "Empty"), "")
+        self.assertIn("gherkin", result["artifacts"])
+
+    def _fake_ollama(self, reply):
+        """A local HTTP server that records the request and answers with `reply` (JSON)."""
+        import http.server
+        import json
+        import threading
+
+        seen = {}
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                length = int(self.headers.get("content-length") or 0)
+                seen["path"] = self.path
+                seen["body"] = json.loads(self.rfile.read(length).decode("utf-8"))
+                data = json.dumps(reply).encode("utf-8")
+                self.send_response(200)
+                self.send_header("content-type", "application/json")
+                self.send_header("content-length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1], seen
+
+    def test_UT_AGT_19_ollama_provider_runs_locally_and_never_sends_secrets(self):
+        import json
+        from unittest import mock
+        from app.qa_agents import ai, registry
+
+        text = "Login with password=Hunter2 and mail jane.doe@corp.com. The app shows a total."
+        port, seen = self._fake_ollama({"message": {"role": "assistant", "content": json.dumps(
+            {"insights": ["Check refunds.", "   "]})}})
+        local = "127.0.0.1,localhost"
+        saved = _env_set(TF_AGENT_AI="1", TF_AGENT_AI_PROVIDER="ollama", ANTHROPIC_API_KEY="sk-test-0123456789abcdefABCD",
+                         NO_PROXY=local, no_proxy=local)
+        try:
+            with mock.patch.object(ai, "OLLAMA_URL", f"http://127.0.0.1:{port}"), \
+                    mock.patch.object(ai, "OLLAMA_MODEL", "test-model"):
+                self.assertEqual(ai.provider(), "ollama", "an explicit provider wins over the cloud key")
+                status = ai.status()
+                self.assertEqual((status["available"], status["provider"], status["model"]),
+                                 (True, "ollama", "test-model"))
+                with mock.patch.object(ai, "_post", side_effect=AssertionError("cloud used")):
+                    result = registry.run("requirements", {"text": text}, "auto")
+                rules = registry.run("requirements", {"text": text}, "rules")
+        finally:
+            _env_restore(saved)
+        self.assertEqual(result["engine"], "rules+ai")
+        self.assertEqual(result["ai_insights"], ["Check refunds."])
+        self.assertEqual(result["findings"], rules["findings"])
+        self.assertEqual((result["ai"]["provider"], result["ai"]["model"], result["ai"]["used"]),
+                         ("ollama", "test-model", True))
+        self.assertEqual(seen["path"], "/api/chat")
+        self.assertEqual(seen["body"]["model"], "test-model")
+        self.assertIs(seen["body"]["stream"], False)
+        self.assertEqual(seen["body"]["format"], "json")
+        sent = json.dumps(seen["body"])
+        for secret in ("Hunter2", "jane.doe", "sk-test-0123456789"):
+            self.assertNotIn(secret, sent)
+
+    def test_UT_AGT_20_local_model_failures_keep_rules_and_provider_switches_work(self):
+        import socket
+        from unittest import mock
+        from app.qa_agents import ai, registry
+
+        text = "The checkout must be fast. TBD: declined cards?"
+        local = "127.0.0.1,localhost"
+        with socket.socket() as probe:  # a port nothing listens on
+            probe.bind(("127.0.0.1", 0))
+            closed = probe.getsockname()[1]
+        rules = registry.run("requirements", {"text": text}, "rules")
+        saved = _env_set(TF_AGENT_AI="1", TF_AGENT_AI_PROVIDER="ollama", ANTHROPIC_API_KEY=None,
+                         NO_PROXY=local, no_proxy=local)
+        try:
+            with mock.patch.object(ai, "OLLAMA_URL", f"http://127.0.0.1:{closed}"):
+                unreachable = registry.run("requirements", {"text": text}, "auto")
+            port, _ = self._fake_ollama({"message": {"content": "no json here"}})
+            with mock.patch.object(ai, "OLLAMA_URL", f"http://127.0.0.1:{port}"):
+                malformed = registry.run("requirements", {"text": text}, "auto")
+            for failed in (unreachable, malformed):
+                self.assertEqual(failed["engine"], "rules")
+                self.assertEqual(failed["ai_insights"], [])
+                self.assertEqual(failed["findings"], rules["findings"])
+            self.assertIn("unreachable", unreachable["ai"]["error"])
+            self.assertIn("JSON", malformed["ai"]["error"])
+            os.environ["TF_AGENT_AI"] = "0"
+            self.assertIsNone(ai.provider())
+            self.assertFalse(ai.status()["available"])
+            os.environ["TF_AGENT_AI"] = "1"
+            os.environ["TF_AGENT_AI_PROVIDER"] = "bogus"
+            self.assertIsNone(ai.provider())
+            self.assertIn("must be", ai.status()["reason"])
+            os.environ.pop("TF_AGENT_AI_PROVIDER")
+            os.environ["ANTHROPIC_API_KEY"] = "sk-test-0123456789abcdefABCD"
+            self.assertEqual(ai.provider(), "anthropic")
+            self.assertEqual(ai.status()["provider"], "anthropic")
+        finally:
+            _env_restore(saved)
+
+    def test_UT_AGT_21_mcp_server_speaks_json_rpc_and_reports_tool_errors(self):
+        import json
+        from app.qa_agents import mcp_server
+
+        init = mcp_server.handle({"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                                  "params": {"protocolVersion": "2025-06-18"}})
+        self.assertEqual(init["result"]["protocolVersion"], "2025-06-18")
+        self.assertIn("tools", init["result"]["capabilities"])
+        self.assertIsNone(mcp_server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        tools = mcp_server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+        self.assertEqual([t["name"] for t in tools],
+                         ["qa_list_agents", "qa_get_sample", "qa_run_agent", "qa_run_from_source"])
+        self.assertTrue(all(t["annotations"]["readOnlyHint"] for t in tools), "every tool is read-only")
+        self.assertEqual(tuple(tools[2]["inputSchema"]["properties"]["agent"]["enum"]), self.AGENT_IDS)
+
+        def call(name, arguments):
+            reply = mcp_server.handle({"jsonrpc": "2.0", "id": 9, "method": "tools/call",
+                                       "params": {"name": name, "arguments": arguments}})
+            return reply["result"]["isError"], reply["result"]["content"][0]["text"]
+
+        error, text = call("qa_list_agents", {})
+        self.assertFalse(error)
+        self.assertEqual(len(json.loads(text)["agents"]), 9)
+        error, text = call("qa_run_agent", {"agent": "requirements", "input": {"text": "The checkout must be fast."},
+                                            "mode": "rules"})
+        self.assertFalse(error)
+        self.assertEqual(json.loads(text)["engine"], "rules")
+        self.assertTrue(call("qa_run_agent", {"agent": "nope", "input": {}})[0])
+        self.assertTrue(call("qa_run_agent", {"agent": "requirements", "input": {"text": "x"}, "mode": "magic"})[0])
+        self.assertTrue(call("qa_run_from_source", {"agent": "release-summary",
+                                                    "source": {"type": "run", "run_id": "x"}})[0])
+        self.assertTrue(call("qa_run_from_source", {"agent": "requirements", "source": {"type": "run"}})[0])
+        self.assertTrue(call("qa_run_agent", {"agent": "requirements", "input": "not an object"})[0])
+        self.assertEqual(mcp_server.handle({"jsonrpc": "2.0", "id": 3, "method": "bogus"})["error"]["code"], -32601)
+        self.assertEqual(mcp_server.handle(5)["error"]["code"], -32600)
+        self.assertEqual(mcp_server.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                                            "params": {}})["error"]["code"], -32602)
+        batch = mcp_server.handle([{"jsonrpc": "2.0", "id": 5, "method": "ping"},
+                                   {"jsonrpc": "2.0", "method": "notifications/initialized"}])
+        self.assertEqual([r["id"] for r in batch], [5])
+
+    def test_UT_AGT_22_stdio_server_writes_only_protocol_lines_to_stdout(self):
+        import json
+        import subprocess
+        import sys
+        import tempfile
+
+        messages = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}},
+            {"jsonrpc": "2.0", "method": "notifications/initialized"},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {
+                "name": "qa_run_agent", "arguments": {"agent": "requirements", "mode": "rules",
+                                                      "input": {"text": "The checkout must be fast."}}}},
+            "not json",
+            {"jsonrpc": "2.0", "id": 4, "method": "ping"},
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            env = dict(os.environ, DATABASE_URL="sqlite:///" + os.path.join(tmp, "mcp.db"),
+                       TF_ARTIFACTS=os.path.join(tmp, "artifacts"), TF_LIBRARY_DIR=os.path.join(tmp, "library"))
+            os.makedirs(env["TF_ARTIFACTS"], exist_ok=True)
+            os.makedirs(env["TF_LIBRARY_DIR"], exist_ok=True)
+            payload = "\n".join(m if isinstance(m, str) else json.dumps(m) for m in messages) + "\n"
+            proc = subprocess.run([sys.executable, "-m", "app.qa_agents.mcp_server"], input=payload,
+                                  capture_output=True, text=True, cwd=str(ROOT), env=env, timeout=180)
+            self.assertEqual(proc.returncode, 0, proc.stderr[-800:])
+            replies = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+            self.assertEqual(len(replies), 5, "one reply per request; the notification gets none")
+            self.assertEqual(replies[0]["result"]["serverInfo"]["name"], "testforge-qa-agents")
+            self.assertEqual(replies[2]["result"]["content"][0]["type"], "text")
+            self.assertEqual(replies[3]["error"]["code"], -32700)
+            self.assertEqual(replies[4]["id"], 4)
+            probe = subprocess.run([sys.executable, "-c",
+                                    "import sys, app.qa_agents; print('app.config' in sys.modules)"],
+                                   capture_output=True, text=True, cwd=str(ROOT), env=env, timeout=120)
+            self.assertEqual(probe.stdout.strip(), "False", "importing the package must not import the app")
+
 class DockerfileTests(unittest.TestCase):
     """The build context must contain every path the Dockerfile copies."""
 
@@ -1576,12 +1783,16 @@ class WorkflowRegressionTests(unittest.TestCase):
             db.commit()
         library_store.export_recording(rec["id"])
         folder = Path(os.environ["TF_LIBRARY_DIR"]) / "projects" / project["id"] / "recordings" / rec["id"] / "resources"
-        for name in ("Jenkinsfile", "playwright_test.py", "playwright_test.js", "recording.feature", "azure-devops.csv", "azure-devops.xlsx", "jira.csv", "jira.xlsx", "testcomplete.csv", "testcomplete.xlsx"):
+        for name in ("Jenkinsfile", "playwright_test.py", "test_recording.py", "playwright_test.js", "recording.feature", "azure-devops.csv", "azure-devops.xlsx", "jira.csv", "jira.xlsx", "testcomplete.csv", "testcomplete.xlsx"):
             self.assertTrue((folder / name).is_file(), name)
         sheet = load_workbook(folder / "azure-devops.xlsx").active
         self.assertEqual(sheet["D2"].value, "'=1+2")
         import py_compile
         py_compile.compile(str(folder / "playwright_test.py"), doraise=True)
+        # pytest entry point: collected by pytest, calls the same replay, pinned in requirements.
+        self.assertIn("def test_recording_replays", (folder / "test_recording.py").read_text())
+        self.assertIn("from playwright_test import main", (folder / "test_recording.py").read_text())
+        self.assertIn("pytest==", (folder / "requirements.txt").read_text())
 
     def test_UT_FLOW_04_variable_capture_and_replay_value(self):
         from app import library_store

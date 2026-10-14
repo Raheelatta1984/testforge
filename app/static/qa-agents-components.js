@@ -13,7 +13,7 @@ const QA_AGENT_INFO = {
     existing: "No equivalent existed before this hub.",
   },
   "test-cases": {
-    blurb: "Turns acceptance criteria into positive, negative and boundary test cases, with boundary values and a CSV export.",
+    blurb: "Turns acceptance criteria into positive, negative and boundary test cases, with boundary values, a CSV export and a Gherkin feature file.",
     existing: "No equivalent existed. Recordings capture browser steps; nothing derived cases from requirements.",
   },
   "api-contract": {
@@ -162,7 +162,8 @@ function QAArtifacts({ data }) {
         headers: ["ID", "Type", "Priority", "Technique", "Title", "Expected"],
         rows: a.cases.map(c => [c.id, c.type, c.priority, c.technique, c.title, c.expected]),
       }),
-      a.csv && e(QACodeBlock, { title: "CSV export", text: a.csv, filename: "test-cases.csv", mime: "text/csv" })));
+      a.csv && e(QACodeBlock, { title: "CSV export", text: a.csv, filename: "test-cases.csv", mime: "text/csv" }),
+      a.gherkin && e(QACodeBlock, { title: "Gherkin feature", text: a.gherkin, filename: "test-cases.feature", mime: "text/plain" })));
   }
   if (Array.isArray(a.operations) && a.operations.length) {
     blocks.push(e("div", { key: "ops", className: "space-y-1" },
