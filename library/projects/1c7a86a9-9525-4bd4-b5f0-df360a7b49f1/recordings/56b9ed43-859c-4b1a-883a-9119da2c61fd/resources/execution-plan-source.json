@@ -1,0 +1,187 @@
+{
+  "name": "Testing Calculator win11",
+  "execution_plan": {
+    "version": 1,
+    "setup": [
+      {
+        "order": 1,
+        "action": "window_launch",
+        "value": "",
+        "selector": {
+          "app_id": "calculator",
+          "window_title": "Calculator",
+          "process_name": "CalculatorApp.exe",
+          "class_name": "Windows.UI.Core.CoreWindow",
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Launch Calculator",
+        "repeat_count": 1
+      }
+    ],
+    "steps": [
+      {
+        "order": 1,
+        "action": "ui_click",
+        "value": "",
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "name": "Display is 0",
+          "control_type": "Text",
+          "class_name": "TextBlock",
+          "x": 0.4853593577509341,
+          "y": 0.25352697878804814,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Click \u00b7 Display is 0",
+        "repeat_count": 1
+      },
+      {
+        "order": 2,
+        "action": "ui_click",
+        "value": "",
+        "selector": {
+          "automation_id": "plusButton",
+          "name": "Plus",
+          "control_type": "Button",
+          "x": 0.8518189850801267,
+          "y": 0.4771294463065431,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Click \u00b7 Plus",
+        "repeat_count": 1
+      },
+      {
+        "order": 3,
+        "action": "ui_click",
+        "value": "",
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "name": "Display is 0",
+          "control_type": "Text",
+          "class_name": "TextBlock",
+          "x": 0.5070984881857167,
+          "y": 0.2584959225106813,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Click \u00b7 Display is 0",
+        "repeat_count": 1
+      },
+      {
+        "order": 4,
+        "action": "ui_click",
+        "value": "",
+        "selector": {
+          "automation_id": "clearButton",
+          "name": "Clear",
+          "control_type": "Button",
+          "x": 0.8238686745211204,
+          "y": 0.6517523040390637,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Click \u00b7 Clear",
+        "repeat_count": 1
+      },
+      {
+        "order": 5,
+        "action": "ui_click",
+        "value": "",
+        "selector": {
+          "field_name": "Screen target 49% x 23%",
+          "x": 0.4946761279372695,
+          "y": 0.22655270203374434,
+          "coordinate_fallback": true,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Click \u00b7 Screen target 49% x 23%",
+        "repeat_count": 1
+      },
+      {
+        "order": 6,
+        "action": "ui_type",
+        "value": "5",
+        "selector": {
+          "field_name": "Screen target 56% x 19%",
+          "x": 0.5567879291795055,
+          "y": 0.1896405378341741,
+          "coordinate_fallback": true,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Type \u00b7 Screen target 56% x 19%",
+        "repeat_count": 1
+      },
+      {
+        "order": 7,
+        "action": "ui_type",
+        "value": "",
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "name": "Display is 0",
+          "control_type": "Text",
+          "class_name": "TextBlock",
+          "x": 0.6251109105459651,
+          "y": 0.27269292623822317,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Type \u00b7 Display is 0",
+        "repeat_count": 1
+      },
+      {
+        "order": 8,
+        "action": "ui_type",
+        "value": "",
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "name": "Display is ",
+          "control_type": "Text",
+          "class_name": "TextBlock",
+          "x": 0.5381543888068347,
+          "y": 0.26204521135259884,
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Type \u00b7 Display is",
+        "repeat_count": 1
+      }
+    ],
+    "teardown": [
+      {
+        "order": 1,
+        "action": "window_close",
+        "value": "",
+        "selector": {
+          "app_id": "calculator",
+          "schema_version": 1,
+          "strict": true
+        },
+        "label": "Close Calculator",
+        "repeat_count": 1
+      }
+    ],
+    "variables": {},
+    "dataset": [
+      {}
+    ],
+    "matrix": [
+      {
+        "browser": "chromium",
+        "device": "desktop",
+        "auth_profile": "",
+        "runner": "windows_desktop",
+        "execution_speed": 1.0,
+        "framework": "dotnet",
+        "windows_version": "windows_11",
+        "desktop_app": "calculator"
+      }
+    ],
+    "retries": 0,
+    "execution_speed": 1.0
+  }
+}

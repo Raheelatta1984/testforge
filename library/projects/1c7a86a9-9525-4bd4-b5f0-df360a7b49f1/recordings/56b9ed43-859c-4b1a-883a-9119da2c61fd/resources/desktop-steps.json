@@ -1,0 +1,154 @@
+{
+  "steps": [
+    {
+      "id": "ea65c582-60f3-4985-b006-6b88365606c7",
+      "order": 1,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Display is 0",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "name": "Display is 0",
+        "control_type": "Text",
+        "class_name": "TextBlock",
+        "x": 0.4853593577509341,
+        "y": 0.25352697878804814
+      },
+      "started_at": "2026-10-14T00:09:31Z",
+      "finished_at": "2026-10-14T00:09:31Z",
+      "duration_ms": 45.5,
+      "screenshot": "step-001.png"
+    },
+    {
+      "id": "77e7fdd4-54eb-4174-8916-e08cef47d7ff",
+      "order": 2,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Plus",
+      "selector": {
+        "automation_id": "plusButton",
+        "name": "Plus",
+        "control_type": "Button",
+        "x": 0.8518189850801267,
+        "y": 0.4771294463065431
+      },
+      "started_at": "2026-10-14T00:09:34Z",
+      "finished_at": "2026-10-14T00:09:34Z",
+      "duration_ms": 116.3,
+      "screenshot": "step-002.png"
+    },
+    {
+      "id": "0e9940b9-e525-45f6-a378-7db18ff21317",
+      "order": 3,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Display is 0",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "name": "Display is 0",
+        "control_type": "Text",
+        "class_name": "TextBlock",
+        "x": 0.5070984881857167,
+        "y": 0.2584959225106813
+      },
+      "started_at": "2026-10-14T00:09:40Z",
+      "finished_at": "2026-10-14T00:09:40Z",
+      "duration_ms": 133.5,
+      "screenshot": "step-003.png"
+    },
+    {
+      "id": "1a57b6a9-9bd0-42d3-820f-4478dc9db413",
+      "order": 4,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Clear",
+      "selector": {
+        "automation_id": "clearButton",
+        "name": "Clear",
+        "control_type": "Button",
+        "x": 0.8238686745211204,
+        "y": 0.6517523040390637
+      },
+      "started_at": "2026-10-14T00:10:19Z",
+      "finished_at": "2026-10-14T00:10:19Z",
+      "duration_ms": 178.1,
+      "screenshot": "step-004.png"
+    },
+    {
+      "id": "ada59f2c-9d4e-4f4a-baec-7361c2cd4363",
+      "order": 5,
+      "action": "ui_click",
+      "value": "",
+      "label": "Click \u00b7 Screen target 49% x 23%",
+      "selector": {
+        "field_name": "Screen target 49% x 23%",
+        "x": 0.4946761279372695,
+        "y": 0.22655270203374434,
+        "coordinate_fallback": true,
+        "schema_version": 1,
+        "strict": true
+      },
+      "started_at": "2026-10-14T00:10:24Z",
+      "finished_at": "2026-10-14T00:10:24Z",
+      "duration_ms": 126.5,
+      "screenshot": "step-005.png"
+    },
+    {
+      "id": "b27e18a2-afaf-45e6-8b2b-c5d1c7348614",
+      "order": 6,
+      "action": "ui_type",
+      "value": "5",
+      "label": "Type \u00b7 Screen target 56% x 19%",
+      "selector": {
+        "field_name": "Screen target 56% x 19%",
+        "x": 0.5567879291795055,
+        "y": 0.1896405378341741,
+        "coordinate_fallback": true,
+        "schema_version": 1,
+        "strict": true
+      },
+      "started_at": "2026-10-14T00:10:46Z",
+      "finished_at": "2026-10-14T00:10:46Z",
+      "duration_ms": 120.8,
+      "screenshot": "step-006.png"
+    },
+    {
+      "id": "2bf1376e-4aaf-404b-96c9-24ffc0d399c8",
+      "order": 7,
+      "action": "ui_type",
+      "value": "",
+      "label": "Type \u00b7 Display is 0",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "name": "Display is 0",
+        "control_type": "Text",
+        "class_name": "TextBlock",
+        "x": 0.6251109105459651,
+        "y": 0.27269292623822317
+      },
+      "started_at": "2026-10-14T00:10:53Z",
+      "finished_at": "2026-10-14T00:10:53Z",
+      "duration_ms": 169.2,
+      "screenshot": "step-007.png"
+    },
+    {
+      "id": "9ac37e8e-078a-4296-8e39-75537c94e8de",
+      "order": 8,
+      "action": "ui_type",
+      "value": "",
+      "label": "Type \u00b7 Display is",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "name": "Display is ",
+        "control_type": "Text",
+        "class_name": "TextBlock",
+        "x": 0.5381543888068347,
+        "y": 0.26204521135259884
+      },
+      "started_at": "2026-10-14T00:11:00Z",
+      "finished_at": "2026-10-14T00:11:00Z",
+      "duration_ms": 155.0,
+      "screenshot": "step-008.png"
+    }
+  ]
+}

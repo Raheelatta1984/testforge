@@ -1,0 +1,349 @@
+{
+  "created_at": "2026-10-14T00:09:18Z",
+  "execution_plan": {
+    "dataset": [
+      {}
+    ],
+    "execution_speed": 1.0,
+    "matrix": [
+      {
+        "auth_profile": "",
+        "browser": "chromium",
+        "desktop_app": "calculator",
+        "device": "desktop",
+        "execution_speed": 1.0,
+        "framework": "dotnet",
+        "runner": "windows_desktop",
+        "windows_version": "windows_11"
+      }
+    ],
+    "retries": 0,
+    "setup": [
+      {
+        "action": "window_launch",
+        "label": "Launch Calculator",
+        "order": 1,
+        "repeat_count": 1,
+        "selector": {
+          "app_id": "calculator",
+          "class_name": "Windows.UI.Core.CoreWindow",
+          "process_name": "CalculatorApp.exe",
+          "schema_version": 1,
+          "strict": true,
+          "window_title": "Calculator"
+        },
+        "value": ""
+      }
+    ],
+    "steps": [
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Display is 0",
+        "order": 1,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "class_name": "TextBlock",
+          "control_type": "Text",
+          "name": "Display is 0",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.4853593577509341,
+          "y": 0.25352697878804814
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Plus",
+        "order": 2,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "plusButton",
+          "control_type": "Button",
+          "name": "Plus",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.8518189850801267,
+          "y": 0.4771294463065431
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Display is 0",
+        "order": 3,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "class_name": "TextBlock",
+          "control_type": "Text",
+          "name": "Display is 0",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.5070984881857167,
+          "y": 0.2584959225106813
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Clear",
+        "order": 4,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "clearButton",
+          "control_type": "Button",
+          "name": "Clear",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.8238686745211204,
+          "y": 0.6517523040390637
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_click",
+        "label": "Click \u00b7 Screen target 49% x 23%",
+        "order": 5,
+        "repeat_count": 1,
+        "selector": {
+          "coordinate_fallback": true,
+          "field_name": "Screen target 49% x 23%",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.4946761279372695,
+          "y": 0.22655270203374434
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_type",
+        "label": "Type \u00b7 Screen target 56% x 19%",
+        "order": 6,
+        "repeat_count": 1,
+        "selector": {
+          "coordinate_fallback": true,
+          "field_name": "Screen target 56% x 19%",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.5567879291795055,
+          "y": 0.1896405378341741
+        },
+        "value": "5"
+      },
+      {
+        "action": "ui_type",
+        "label": "Type \u00b7 Display is 0",
+        "order": 7,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "class_name": "TextBlock",
+          "control_type": "Text",
+          "name": "Display is 0",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.6251109105459651,
+          "y": 0.27269292623822317
+        },
+        "value": ""
+      },
+      {
+        "action": "ui_type",
+        "label": "Type \u00b7 Display is",
+        "order": 8,
+        "repeat_count": 1,
+        "selector": {
+          "automation_id": "CalculatorResults",
+          "class_name": "TextBlock",
+          "control_type": "Text",
+          "name": "Display is ",
+          "schema_version": 1,
+          "strict": true,
+          "x": 0.5381543888068347,
+          "y": 0.26204521135259884
+        },
+        "value": ""
+      }
+    ],
+    "teardown": [
+      {
+        "action": "window_close",
+        "label": "Close Calculator",
+        "order": 1,
+        "repeat_count": 1,
+        "selector": {
+          "app_id": "calculator",
+          "schema_version": 1,
+          "strict": true
+        },
+        "value": ""
+      }
+    ],
+    "variables": {},
+    "version": 1
+  },
+  "exports_pending": false,
+  "id": "56b9ed43-859c-4b1a-883a-9119da2c61fd",
+  "input_defaults": {},
+  "name": "Testing Calculator win11",
+  "parent_id": null,
+  "project_id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",
+  "purpose": "Testing",
+  "start_url": "",
+  "status": "active",
+  "steps": [
+    {
+      "action": "ui_click",
+      "duration_ms": 45.5,
+      "finished_at": "2026-10-14T00:09:31Z",
+      "id": "ea65c582-60f3-4985-b006-6b88365606c7",
+      "label": "Click \u00b7 Display is 0",
+      "order": 1,
+      "screenshot": "step-001.png",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "class_name": "TextBlock",
+        "control_type": "Text",
+        "name": "Display is 0",
+        "x": 0.4853593577509341,
+        "y": 0.25352697878804814
+      },
+      "started_at": "2026-10-14T00:09:31Z",
+      "value": ""
+    },
+    {
+      "action": "ui_click",
+      "duration_ms": 116.3,
+      "finished_at": "2026-10-14T00:09:34Z",
+      "id": "77e7fdd4-54eb-4174-8916-e08cef47d7ff",
+      "label": "Click \u00b7 Plus",
+      "order": 2,
+      "screenshot": "step-002.png",
+      "selector": {
+        "automation_id": "plusButton",
+        "control_type": "Button",
+        "name": "Plus",
+        "x": 0.8518189850801267,
+        "y": 0.4771294463065431
+      },
+      "started_at": "2026-10-14T00:09:34Z",
+      "value": ""
+    },
+    {
+      "action": "ui_click",
+      "duration_ms": 133.5,
+      "finished_at": "2026-10-14T00:09:40Z",
+      "id": "0e9940b9-e525-45f6-a378-7db18ff21317",
+      "label": "Click \u00b7 Display is 0",
+      "order": 3,
+      "screenshot": "step-003.png",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "class_name": "TextBlock",
+        "control_type": "Text",
+        "name": "Display is 0",
+        "x": 0.5070984881857167,
+        "y": 0.2584959225106813
+      },
+      "started_at": "2026-10-14T00:09:40Z",
+      "value": ""
+    },
+    {
+      "action": "ui_click",
+      "duration_ms": 178.1,
+      "finished_at": "2026-10-14T00:10:19Z",
+      "id": "1a57b6a9-9bd0-42d3-820f-4478dc9db413",
+      "label": "Click \u00b7 Clear",
+      "order": 4,
+      "screenshot": "step-004.png",
+      "selector": {
+        "automation_id": "clearButton",
+        "control_type": "Button",
+        "name": "Clear",
+        "x": 0.8238686745211204,
+        "y": 0.6517523040390637
+      },
+      "started_at": "2026-10-14T00:10:19Z",
+      "value": ""
+    },
+    {
+      "action": "ui_click",
+      "duration_ms": 126.5,
+      "finished_at": "2026-10-14T00:10:24Z",
+      "id": "ada59f2c-9d4e-4f4a-baec-7361c2cd4363",
+      "label": "Click \u00b7 Screen target 49% x 23%",
+      "order": 5,
+      "screenshot": "step-005.png",
+      "selector": {
+        "coordinate_fallback": true,
+        "field_name": "Screen target 49% x 23%",
+        "schema_version": 1,
+        "strict": true,
+        "x": 0.4946761279372695,
+        "y": 0.22655270203374434
+      },
+      "started_at": "2026-10-14T00:10:24Z",
+      "value": ""
+    },
+    {
+      "action": "ui_type",
+      "duration_ms": 120.8,
+      "finished_at": "2026-10-14T00:10:46Z",
+      "id": "b27e18a2-afaf-45e6-8b2b-c5d1c7348614",
+      "label": "Type \u00b7 Screen target 56% x 19%",
+      "order": 6,
+      "screenshot": "step-006.png",
+      "selector": {
+        "coordinate_fallback": true,
+        "field_name": "Screen target 56% x 19%",
+        "schema_version": 1,
+        "strict": true,
+        "x": 0.5567879291795055,
+        "y": 0.1896405378341741
+      },
+      "started_at": "2026-10-14T00:10:46Z",
+      "value": "5"
+    },
+    {
+      "action": "ui_type",
+      "duration_ms": 169.2,
+      "finished_at": "2026-10-14T00:10:53Z",
+      "id": "2bf1376e-4aaf-404b-96c9-24ffc0d399c8",
+      "label": "Type \u00b7 Display is 0",
+      "order": 7,
+      "screenshot": "step-007.png",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "class_name": "TextBlock",
+        "control_type": "Text",
+        "name": "Display is 0",
+        "x": 0.6251109105459651,
+        "y": 0.27269292623822317
+      },
+      "started_at": "2026-10-14T00:10:53Z",
+      "value": ""
+    },
+    {
+      "action": "ui_type",
+      "duration_ms": 155.0,
+      "finished_at": "2026-10-14T00:11:00Z",
+      "id": "9ac37e8e-078a-4296-8e39-75537c94e8de",
+      "label": "Type \u00b7 Display is",
+      "order": 8,
+      "screenshot": "step-008.png",
+      "selector": {
+        "automation_id": "CalculatorResults",
+        "class_name": "TextBlock",
+        "control_type": "Text",
+        "name": "Display is ",
+        "x": 0.5381543888068347,
+        "y": 0.26204521135259884
+      },
+      "started_at": "2026-10-14T00:11:00Z",
+      "value": ""
+    }
+  ],
+  "tags": "windows_desktop"
+}

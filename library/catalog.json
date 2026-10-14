@@ -11,6 +11,7 @@
           "name": "Korger Leaning",
           "parent_id": null,
           "path": "library/projects/qa-sample-app/recordings/266bf0f6-2629-4be0-9f9b-135724912ad3/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -44,6 +45,7 @@
           "name": "Amazon learning",
           "parent_id": null,
           "path": "library/projects/qa-sample-app/recordings/c5056382-69db-48cd-942e-6e184d2599c8/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -79,6 +81,7 @@
           "name": "Instacart",
           "parent_id": null,
           "path": "library/projects/qa-sample-app/recordings/2a84c45b-1550-40de-92ab-8e237d462c1f/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -131,6 +134,7 @@
           "name": "Testing HM",
           "parent_id": null,
           "path": "library/projects/qa-sample-app/recordings/e0d149a6-6fd3-4f26-92a6-f468107f57f1/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -164,6 +168,7 @@
           "name": "Hello variable",
           "parent_id": null,
           "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile"
           ],
@@ -177,6 +182,7 @@
           "name": "Hello literal",
           "parent_id": null,
           "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile"
           ],
@@ -200,6 +206,7 @@
           "name": "Session 12/10/2026, 8:22:44 am",
           "parent_id": null,
           "path": "library/projects/a8107955-5370-4125-bfc0-813060e10786/recordings/057e5aa5-fcd1-4642-8673-a96b499e0887/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -249,6 +256,7 @@
           "name": "D365_UAT_Login",
           "parent_id": null,
           "path": "library/projects/a8107955-5370-4125-bfc0-813060e10786/recordings/43b323d8-03c2-460d-bced-90a3b7967cd0/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -296,11 +304,67 @@
       "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/project.json",
       "recordings": [
         {
+          "created_at": "2026-10-14T00:09:18Z",
+          "id": "56b9ed43-859c-4b1a-883a-9119da2c61fd",
+          "name": "Testing Calculator win11",
+          "parent_id": null,
+          "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/56b9ed43-859c-4b1a-883a-9119da2c61fd/recording.json",
+          "purpose": "Testing",
+          "resources": [
+            "DESKTOP.md",
+            "DesktopRunner.cs",
+            "Jenkinsfile",
+            "LICENSE",
+            "README.md",
+            "azure-devops.csv",
+            "azure-devops.xlsx",
+            "desktop-steps.json",
+            "desktop_test.py",
+            "execution-plan-source.json",
+            "execution-plan.json",
+            "jira.csv",
+            "jira.xlsx",
+            "package.json",
+            "playwright.config.ts",
+            "playwright_test.js",
+            "playwright_test.py",
+            "recorded_page.js",
+            "recorded_page.py",
+            "recording.feature",
+            "recording.spec.ts",
+            "requirements.txt",
+            "step-001.png",
+            "step-002.png",
+            "step-003.png",
+            "step-004.png",
+            "step-005.png",
+            "step-006.png",
+            "step-007.png",
+            "step-008.png",
+            "steps.json",
+            "testcomplete.csv",
+            "testcomplete.xlsx",
+            "testforge_desktop.js",
+            "testforge_desktop.py",
+            "testforge_mobile.js",
+            "testforge_mobile.py",
+            "testforge_plan.js",
+            "testforge_plan.py",
+            "testforge_runtime.js",
+            "testforge_runtime.py",
+            "testforge_speed.py"
+          ],
+          "start_url": "",
+          "step_count": 8,
+          "tags": "windows_desktop"
+        },
+        {
           "created_at": "2026-10-13T14:46:10Z",
           "id": "24723b38-b0b6-4d75-a9b0-c425ca37fb0d",
           "name": "Session 14/10/2026, 01:45:44",
           "parent_id": null,
           "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/24723b38-b0b6-4d75-a9b0-c425ca37fb0d/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -363,6 +427,7 @@
           "name": "HarrisFarm Shopify Website",
           "parent_id": null,
           "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/30f83798-dedc-4859-85a0-8acb47d1c582/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -396,6 +461,7 @@
           "name": "Session 13/10/2026, 08:03:59",
           "parent_id": null,
           "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/65172bf1-fd13-4458-a189-401a8bbd20dd/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -445,6 +511,7 @@
           "name": "Session 12/10/2026, 01:28:15",
           "parent_id": null,
           "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/59188e01-2be0-460a-b044-f78738d1f6ef/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "LICENSE",
@@ -504,6 +571,7 @@
           "name": "Session 11/10/2026, 16:18:15",
           "parent_id": null,
           "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/84337431-35b8-42c1-8141-ab01fde2591e/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "README.md",
@@ -528,6 +596,7 @@
           "name": "Session 11/10/2026, 14:42:14",
           "parent_id": null,
           "path": "library/projects/1c7a86a9-9525-4bd4-b5f0-df360a7b49f1/recordings/5c86e5ce-1c83-4894-8aa4-b77e1d2b737b/recording.json",
+          "purpose": "",
           "resources": [
             "Jenkinsfile",
             "README.md",

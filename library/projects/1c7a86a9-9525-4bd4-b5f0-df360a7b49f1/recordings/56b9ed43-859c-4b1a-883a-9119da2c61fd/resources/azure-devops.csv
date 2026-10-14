@@ -1,0 +1,9 @@
+﻿Test Case,Step,Action,Input,Selector,Screenshot
+Testing Calculator win11,1,Click · Display is 0,,"{""automation_id"": ""CalculatorResults"", ""name"": ""Display is 0"", ""control_type"": ""Text"", ""class_name"": ""TextBlock"", ""x"": 0.4853593577509341, ""y"": 0.25352697878804814}",step-001.png
+Testing Calculator win11,2,Click · Plus,,"{""automation_id"": ""plusButton"", ""name"": ""Plus"", ""control_type"": ""Button"", ""x"": 0.8518189850801267, ""y"": 0.4771294463065431}",step-002.png
+Testing Calculator win11,3,Click · Display is 0,,"{""automation_id"": ""CalculatorResults"", ""name"": ""Display is 0"", ""control_type"": ""Text"", ""class_name"": ""TextBlock"", ""x"": 0.5070984881857167, ""y"": 0.2584959225106813}",step-003.png
+Testing Calculator win11,4,Click · Clear,,"{""automation_id"": ""clearButton"", ""name"": ""Clear"", ""control_type"": ""Button"", ""x"": 0.8238686745211204, ""y"": 0.6517523040390637}",step-004.png
+Testing Calculator win11,5,Click · Screen target 49% x 23%,,"{""field_name"": ""Screen target 49% x 23%"", ""x"": 0.4946761279372695, ""y"": 0.22655270203374434, ""coordinate_fallback"": true, ""schema_version"": 1, ""strict"": true}",step-005.png
+Testing Calculator win11,6,Type · Screen target 56% x 19%,5,"{""field_name"": ""Screen target 56% x 19%"", ""x"": 0.5567879291795055, ""y"": 0.1896405378341741, ""coordinate_fallback"": true, ""schema_version"": 1, ""strict"": true}",step-006.png
+Testing Calculator win11,7,Type · Display is 0,,"{""automation_id"": ""CalculatorResults"", ""name"": ""Display is 0"", ""control_type"": ""Text"", ""class_name"": ""TextBlock"", ""x"": 0.6251109105459651, ""y"": 0.27269292623822317}",step-007.png
+Testing Calculator win11,8,Type · Display is,,"{""automation_id"": ""CalculatorResults"", ""name"": ""Display is "", ""control_type"": ""Text"", ""class_name"": ""TextBlock"", ""x"": 0.5381543888068347, ""y"": 0.26204521135259884}",step-008.png
