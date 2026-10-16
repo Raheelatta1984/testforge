@@ -195,7 +195,20 @@ class ImportTests(unittest.TestCase):
         with patch.dict(os.environ, {'TF_ACCESS_TOKEN':'short'}), TestClient(app) as client:
             self.assertEqual(client.get('/api/projects').status_code, 401)
 
-    def test_UT_IMP_14_portable_reports_escape_target_content(self):
+    def test_UT_IMP_14_login_attempts_are_rate_limited(self):
+        from app import access_control
+        access_control._LOGIN_ATTEMPTS.clear()
+        try:
+            with patch.dict(os.environ, {'TF_ACCESS_TOKEN':'b'*40}), TestClient(app) as client:
+                for _ in range(access_control.LOGIN_MAX_ATTEMPTS):
+                    self.assertEqual(client.post('/api/auth/login', json={'token':'wrong'}).status_code, 401)
+                limited = client.post('/api/auth/login', json={'token':'wrong'})
+                self.assertEqual(limited.status_code, 429)
+                self.assertGreater(int(limited.headers['retry-after']), 0)
+        finally:
+            access_control._LOGIN_ATTEMPTS.clear()
+
+    def test_UT_IMP_15_portable_reports_escape_target_content(self):
         with SessionLocal() as db:
             row = Run(recording_id='report-only',status='failed',execution_log=[{'order':1,'action':'assert_text','label':'<script>alert(1)</script>','status':'failed','error':'<img onerror=evil>'}])
             db.add(row); db.commit(); rid = row.id

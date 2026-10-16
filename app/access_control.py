@@ -1,9 +1,12 @@
 """Optional single-operator access gate, using only the standard library.
 
 Set TF_ACCESS_TOKEN (at least 32 characters) at deployment. No accounts, external
-identity service, billing integration or server-side session worker. This is NOT
-multi-tenant RBAC. Unconfigured deployments retain legacy behavior and explicitly
-report that they are unprotected; put them behind an authenticated private gateway.
+identity service, billing integration or server-side session worker. Login token
+attempts are limited in memory per direct peer address. This is NOT multi-tenant
+RBAC or a signup system, and the limiter is per worker; production deployments
+should add gateway-level controls. Unconfigured deployments retain legacy
+behavior and explicitly report that they are unprotected; put them behind an
+authenticated private gateway.
 """
 import hashlib
 import hmac
@@ -12,6 +15,7 @@ import os
 from http.cookies import SimpleCookie, CookieError
 import secrets
 import time
+from collections import defaultdict, deque
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -19,6 +23,34 @@ from fastapi.responses import JSONResponse
 router = APIRouter()
 COOKIE = "tf_session"
 TTL = 12 * 60 * 60
+LOGIN_WINDOW_SECONDS = 15 * 60
+LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_ATTEMPTS = defaultdict(deque)
+_LOGIN_BUCKETS_MAX = 10_000
+
+
+def _check_login_rate(request: Request) -> None:
+    """Limit token-guessing attempts per direct peer address.
+
+    Do not trust X-Forwarded-For here: unless the deployment has an explicitly
+    configured trusted-proxy layer, clients can forge it to evade this control.
+    This in-memory limit is per worker; deployments with multiple workers should
+    also enforce rate limits at their reverse proxy/API gateway.
+    """
+    peer = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    attempts = _LOGIN_ATTEMPTS[peer]
+    while attempts and now - attempts[0] >= LOGIN_WINDOW_SECONDS:
+        attempts.popleft()
+    if len(attempts) >= LOGIN_MAX_ATTEMPTS:
+        retry_after = max(1, int(LOGIN_WINDOW_SECONDS - (now - attempts[0])))
+        raise HTTPException(429, "Too many login attempts; try again later",
+                            headers={"Retry-After": str(retry_after)})
+    attempts.append(now)
+    if len(_LOGIN_ATTEMPTS) > _LOGIN_BUCKETS_MAX:
+        # Bound attacker-controlled address cardinality, even if every bucket
+        # is still active. Ordered dict eviction is intentionally conservative.
+        _LOGIN_ATTEMPTS.pop(next(iter(_LOGIN_ATTEMPTS)))
 
 
 def token():
@@ -87,6 +119,7 @@ def status(request: Request):
 
 @router.post("/api/auth/login")
 async def login(request: Request):
+    _check_login_rate(request)
     from app.import_routes import bounded_body
     try:
         body = json.loads(await bounded_body(request, 4096))
