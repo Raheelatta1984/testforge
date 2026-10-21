@@ -4,9 +4,97 @@ from datetime import datetime
 from sqlalchemy import (create_engine, String, Text, Integer, Float, Boolean, DateTime, ForeignKey, JSON, func, Column)
 from sqlalchemy import inspect, text, types as sqltypes
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker, validates
-from sqlalchemy.pool import StaticPool, QueuePool
+from sqlalchemy.pool import StaticPool, QueuePool, NullPool
 from app.config import DATABASE_URL
 from app.errors import redact
+
+
+def _env_flag(name, default="0"):
+    import os
+    return os.environ.get(name, default).strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
+def _env_int(name, default):
+    import os
+    try:
+        return int(os.environ.get(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def is_pgbouncer_url(url):
+    """True when ``url`` points at PgBouncer rather than Postgres directly.
+
+    PgBouncer's conventional port is 6439; honour that plus an explicit
+    ``TF_PGBOUNCER=1`` / ``TF_PGBOUNCER_ENABLED=1`` flag so non-standard ports
+    (Neon's pooled endpoints) are also detected.
+    """
+    import os
+    if _env_flag("TF_PGBOUNCER", "0") or _env_flag("TF_PGBOUNCER_ENABLED", "0"):
+        return True
+    text_url = str(url or "")
+    return ":6439" in text_url or "pgbouncer" in text_url.lower()
+
+
+def pgbouncer_enabled(url=None):
+    """True when the primary (or ``url``) should use pooler-friendly settings."""
+    import os
+    explicit = os.environ.get("TF_PGBOUNCER_URL", "").strip()
+    if url is None and explicit:
+        return True
+    return is_pgbouncer_url(explicit or (DATABASE_URL if url is None else url))
+
+
+def effective_primary_url():
+    """``TF_PGBOUNCER_URL`` wins when set, else ``DATABASE_URL``."""
+    import os
+    return os.environ.get("TF_PGBOUNCER_URL", "").strip() or DATABASE_URL
+
+
+def create_postgres_engine(url, replica=False):
+    """Build a Postgres engine with pooler-aware settings.
+
+    Direct connections keep the historic QueuePool (20 + 10 overflow).
+    Connections via PgBouncer use NullPool -- the pooler owns the pooling, and
+    a client-side pool in front of it only hides connections from other
+    workers. Transaction pooling also forbids session state, so prepared
+    statements and server-side cursors stay off (psycopg2 uses neither by
+    default) and every checkout is pre-pinged.
+    """
+    if is_pgbouncer_url(url):
+        return create_engine(
+            url,
+            poolclass=NullPool,
+            pool_pre_ping=True,
+            # Short, self-contained transactions are all transaction pooling
+            # supports; never hold a checkout across user input or sleeps.
+            connect_args={
+                "connect_timeout": _env_int("TF_PG_CONNECT_TIMEOUT", 10),
+                "options": f"-c statement_timeout={_env_int('TF_STATEMENT_TIMEOUT_MS', 30000)}",
+            },
+        )
+    size = _env_int("TF_REPLICA_POOL_SIZE" if replica else "TF_POOL_SIZE", 10 if replica else 20)
+    overflow = _env_int("TF_REPLICA_MAX_OVERFLOW" if replica else "TF_MAX_OVERFLOW", 5 if replica else 10)
+    return create_engine(
+        url,
+        pool_pre_ping=True,
+        pool_size=size,
+        max_overflow=overflow,
+        pool_recycle=_env_int("TF_POOL_RECYCLE", 3600),
+        connect_args={"connect_timeout": _env_int("TF_PG_CONNECT_TIMEOUT", 10)},
+    )
+
+
+def pool_report():
+    """Diagnostics snapshot of the primary pool (no credentials)."""
+    pool = getattr(engine, "pool", None)
+    return {
+        "implementation": type(pool).__name__ if pool is not None else "?",
+        "pgbouncer": pgbouncer_enabled(),
+        "dialect": getattr(engine.dialect, "name", "?"),
+        "pool_size": getattr(pool, "_pool_size", None) if pool is not None else None,
+    }
 
 # StaticPool shares ONE transaction-bearing connection between unrelated
 # sessions. An autosave read/rollback can otherwise erase a recorder's flush.
@@ -23,13 +111,9 @@ if DATABASE_URL.startswith("sqlite"):
         **pool_options,
     )
 else:
-    engine = create_engine(
-        DATABASE_URL,
-        pool_pre_ping=True,
-        pool_size=20,
-        max_overflow=10,
-        pool_recycle=3600,
-    )
+    engine = create_postgres_engine(effective_primary_url())
+# The primary engine under its scaling-aware alias: writes always go here.
+write_engine = engine
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, autoflush=False)
 
 def generate_uuid(): return str(uuid.uuid4())

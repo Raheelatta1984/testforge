@@ -1,0 +1,5 @@
+; Copy to userlist.txt and fill in real md5 password hashes.
+; Format per line: "username" "md5<md5(password + username)>"
+; Generate with:  echo -n 'passwordusername' | md5sum
+"neondb" "md5xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+"pgbouncer_admin" "md5yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"

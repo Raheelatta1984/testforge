@@ -30,3 +30,6 @@ pypdf==5.1.0
 # Authenticated encryption and local PDF generation; no hosted services.
 cryptography==46.0.3
 reportlab==4.4.4
+# Shared read-through cache (app/cache.py). Pure-python client; only used when
+# TF_MEMCACHED_SERVERS is set, otherwise the in-memory fallback serves.
+pymemcache==4.0.0

@@ -125,3 +125,28 @@ projects:
       # How many committed reports to keep before the oldest are pruned.
       - key: TF_MAX_REPO_REPORTS
         value: "200"
+      # --- scaling: PgBouncer + read replicas + Memcached + shards + IDs ----
+      # Neon pooled endpoint (ends in -pooler....neon.tech). Leave unset to use
+      # DATABASE_URL directly; set TF_PGBOUNCER=1 either way when pooling.
+      - key: TF_PGBOUNCER_URL
+        sync: false
+      - key: TF_PGBOUNCER
+        value: "0"
+      # Comma-separated Neon read-replica URLs. Empty = reads use the primary.
+      - key: TF_READ_REPLICAS
+        sync: false
+      - key: TF_REPLICA_BALANCE
+        value: round_robin
+      # Comma-separated host:port Memcached servers. Empty = in-memory cache.
+      - key: TF_MEMCACHED_SERVERS
+        sync: false
+      - key: TF_MEMCACHED_TTL
+        value: "60"
+      # Image logical shards + machine map (empty map = single local machine).
+      - key: TF_IMAGE_SHARDS
+        value: "256"
+      - key: TF_IMAGE_SHARD_MAP
+        sync: false
+      # Unique per writer (0..8191) so next_id() never clashes across hosts.
+      - key: TF_SHARD_ID
+        value: "0"
