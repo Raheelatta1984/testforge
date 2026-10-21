@@ -550,6 +550,42 @@ def diagnostics():
     return report
 
 
+@app.get("/api/scaling")
+def scaling():
+    """Read-only scaling report: pooler, replicas, cache, shards, IDs.
+
+    Every section fails open to an explanatory string so one broken subsystem
+    never hides the state of the others. Carries no credentials.
+    """
+    report: dict = {"status": "ok"}
+    try:
+        from app.db import pool_report
+        report["pool"] = pool_report()
+    except Exception as exc:
+        report["pool"] = f"unavailable: {redact(exc)}"
+    try:
+        from app.db_replicas import status as replica_status
+        report["replicas"] = replica_status()
+    except Exception as exc:
+        report["replicas"] = f"unavailable: {redact(exc)}"
+    try:
+        from app.cache import status as cache_status
+        report["cache"] = cache_status()
+    except Exception as exc:
+        report["cache"] = f"unavailable: {redact(exc)}"
+    try:
+        from app.image_shards import status as shard_status
+        report["images"] = shard_status()
+    except Exception as exc:
+        report["images"] = f"unavailable: {redact(exc)}"
+    try:
+        from app.ids import status as id_status
+        report["ids"] = id_status()
+    except Exception as exc:
+        report["ids"] = f"unavailable: {redact(exc)}"
+    return report
+
+
 def _library_http(exc: Exception) -> HTTPException:
     if isinstance(exc, NotFound):
         return HTTPException(status_code=404, detail=str(exc))

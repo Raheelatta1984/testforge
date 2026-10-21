@@ -1,5 +1,21 @@
-"""Bound the size of persistent PNG artifacts without changing preview JPEGs."""
+"""Bound the size of persistent PNG artifacts without changing preview JPEGs.
+
+Screenshot *bytes* are compacted by :func:`compact_png`; screenshot
+*placement* (which logical shard, which machine) lives in
+:mod:`app.image_shards` and is re-exported here so existing imports keep
+working.
+"""
 import io
+
+from app.image_shards import (  # noqa: F401  (re-exported API)
+    ImageShardStore,
+    Machine,
+    MachineMap,
+    default_store,
+    safe_filename,
+    shard_count,
+    shard_for,
+)
 
 
 def compact_png(data: bytes) -> bytes:

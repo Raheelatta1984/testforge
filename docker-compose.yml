@@ -4,6 +4,10 @@ services:
     image: testforge:latest
     ports:
       - "8000:8000"
+    depends_on:
+      - postgres
+      - pgbouncer
+      - memcached
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # Optional single-operator access gate. Set a random 32+ character token
@@ -19,8 +23,64 @@ services:
       TF_GITHUB_REPO: ${TF_GITHUB_REPO:-}
       TF_GITHUB_TOKEN: ${TF_GITHUB_TOKEN:-}
       TF_GITHUB_BRANCH: ${TF_GITHUB_BRANCH:-main}
+      # --- scaling: PgBouncer + replicas + Memcached + shards + IDs --------
+      # Primary via the local pooler (transaction mode). For Neon, replace with
+      # your pooled endpoint and keep TF_PGBOUNCER=1.
+      DATABASE_URL: ${DATABASE_URL:-postgresql://testforge:testforge@postgres:5432/testforge}
+      TF_PGBOUNCER_URL: ${TF_PGBOUNCER_URL:-postgresql://testforge:testforge@pgbouncer:6439/testforge}
+      TF_PGBOUNCER: ${TF_PGBOUNCER:-1}
+      # Comma-separated Neon read-replica URLs (empty = reads use primary).
+      TF_READ_REPLICAS: ${TF_READ_REPLICAS:-}
+      TF_REPLICA_BALANCE: ${TF_REPLICA_BALANCE:-round_robin}
+      # Shared cache (empty = bounded in-memory cache).
+      TF_MEMCACHED_SERVERS: ${TF_MEMCACHED_SERVERS:-memcached:11211}
+      TF_MEMCACHED_TTL: ${TF_MEMCACHED_TTL:-60}
+      # Image shards + machine map (empty map = single local machine).
+      TF_IMAGE_SHARDS: ${TF_IMAGE_SHARDS:-256}
+      TF_IMAGE_SHARD_MAP: ${TF_IMAGE_SHARD_MAP:-}
+      # Unique per writer (0..8191) so next_id() never clashes.
+      TF_SHARD_ID: ${TF_SHARD_ID:-0}
     volumes:
       - testforge-data:/app/artifacts
     restart: unless-stopped
+
+  # Throwaway Postgres for local development (production uses Neon).
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: testforge
+      POSTGRES_PASSWORD: testforge
+      POSTGRES_DB: testforge
+    volumes:
+      - testforge-pg:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  # Transaction pooler in front of Postgres. Config lives in
+  # deploy/pgbouncer/pgbouncer.ini; adjust the [databases] host for Neon.
+  pgbouncer:
+    image: edoburu/pgbouncer:1.22.1
+    depends_on:
+      - postgres
+    ports:
+      - "6439:6439"
+    environment:
+      DATABASES_HOST: postgres
+      DATABASES_PORT: 5432
+      DATABASES_USER: testforge
+      DATABASES_PASSWORD: testforge
+      DATABASES_DBNAME: testforge
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 25
+    restart: unless-stopped
+
+  memcached:
+    image: memcached:1.6-alpine
+    ports:
+      - "11211:11211"
+    command: ["-m", "64", "-c", "1024"]
+    restart: unless-stopped
+
 volumes:
   testforge-data:
+  testforge-pg:
