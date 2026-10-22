@@ -1,6 +1,6 @@
 # TestForge Testing Tool
 - **Database:** Permanently stored in Neon PostgreSQL / SQLite (Configured in config.py).
-- **Architecture:** 17-tab persistent dashboard (optimized for Android 12) with visible, horizontally scrollable tab names and accessible labels.
+- **Architecture:** 19-tab persistent dashboard (optimized for Android 12) with visible, horizontally scrollable tab names and accessible labels.
 - **Demo tab:** guided walkthrough over the built-in sample app and five synthetic fixtures, plus optional public shopping/grocery/fashion learning URLs.
 - **Future release planning tab:** a clearly labeled, non-committal roadmap view for browser ERP/CRM packs, Windows desktop (.NET/C#/C++/WinForms) and Android/iOS/Zebra device automation; proposed items are not described as current support.
 - **Azure guide:** the **Azure tab** renders `docs/azure-devops-deployment-guide.md` inside the app (`GET /api/docs/azure-guide`) as checkable, follow-along steps for end users.
@@ -21,6 +21,8 @@
 - **Batch execution:** One browser at a time replays recordings, with learned timeouts and one reusable low-quality screenshot per step (`POST /api/runs/batch`).
 - **Queue hygiene:** Orphaned, stale and duplicate queue entries are reported and can be cleared; a restart no longer leaves runs pending forever.
 - **Publishing:** `library/` is committed to one branch, by `git push` from a checkout or through the GitHub REST API when the deployment has none.
+- **Market position:** a self-auditing comparison against 12 other tools (autonomous-QA MCPs, browser-driver MCPs, open-source runners and commercial platforms) across 42 capabilities. Every TestForge **Yes** is a claim with machine-checkable evidence (`file`, `symbol`, `route` or `test`) that the claim audit re-verifies; the gap list is published, not hidden. `GET /api/market/matrix`, `GET/POST /api/market/audit`, `GET /api/market/report.html`, `GET /api/market/report.md`. Zero-LLM gate: `python -m tools.market_audit` exits non-zero when a claim loses its evidence. See [`docs/market-position.md`](docs/market-position.md).
+- **QA intelligence:** reuse-first step resolution over the stored library (`GET /api/steps/catalog`, `GET /api/steps/search`, `POST /api/steps/resolve`), change-to-test impact analysis with reasons and a batch payload (`GET /api/impact/map`, `POST /api/impact/analyse`), a deterministic black-box explorer that verifies each finding and seals a receipt (`POST /api/explorer/scan`), and JUnit/JSON CI results (`GET /api/runs/{id}/junit.xml`, `GET /api/runs/batch/{id}/junit.xml`).
 - **Maintenance:** Check `/api/library` for the publish mode, live remote verification and retry status. Failed pushes remain local and are retried; do not reset a branch to fix sync issues.
 
 ## Script upload, assertions and lower-overhead execution
@@ -154,6 +156,17 @@ The dashboard also stops polling while its tab is hidden.
 
 The **QA Agents** tab runs nine QA agents: Requirement Review, Test Case Generation, API Contract, Automation Code Review, Failure Triage, Flaky Test Analysis, Defect Drafting, Regression Selection and Release Summary. Paste an input (LOAD SAMPLE fills one in) or run on data already stored here: a run, a recording, or a project. The rules engine always answers and needs no network. With `ANTHROPIC_API_KEY` set, or with `TF_AGENT_AI_PROVIDER=ollama` for a local model that keeps the artifact on your network, one bounded call per run adds short AI insights; it never changes a rule finding. Test Case Generation also returns a Gherkin feature. The agents are available to Claude Code CLI and other MCP clients through `python -m app.qa_agents.mcp_server` (stdio, read-only tools). Endpoints: `GET /api/agents`, `GET /api/agents/{id}/sample`, `POST /api/agents/{id}/run`, `POST /api/agents/{id}/from-source`. Full behaviour, limits, the decision rules, and the comparison with existing functionality are in [`docs/qa-agent-hub.md`](docs/qa-agent-hub.md). Test IDs are `UT-AGT-01` to `UT-AGT-22`.
 
+## Market position and the claim audit
+
+The **Market position** tab (and `GET /api/market/matrix`) compares TestForge with the tools proposed to the same buyers: Argus Testing, TestAtlas, Playwright MCP, Chrome DevTools MCP, browser-use, Playwright, Cypress, Selenium, Katalon, mabl, testRigor and Applitools. It is built to be checkable rather than persuasive:
+
+- **No unsourced competitor cell.** Each tool records the basis it was read from (the supplied GitHub MCP listing screenshots, vendor documentation, or an explicit `unknown`). "Not stated" is excluded from the score — it is neither a win nor a loss.
+- **No unsupported TestForge claim.** Every **Yes** carries machine-checkable evidence probes, and the audit re-verifies them. A claim that loses its evidence shows as **Unverified**, becomes a gap, and fails `python -m tools.market_audit` (exit 1) — so a stale claim cannot survive CI. `POST /api/market/audit` writes a 24-hour receipt with a SHA-256 over its own content.
+- **The gaps are published.** Seventeen capabilities show a competitor ahead (parallel execution, visual regression, self-healing, WCAG conformance, network mocking, multi-browser, RBAC and others), each with the leading tools and the roadmap disposition.
+- **Two artefacts, one source.** `GET /api/market/report.html` serves a self-contained, printable document (strict CSP, no scripts, no external assets) and `GET /api/market/report.md` serves the same matrix as Markdown.
+
+Gaps that could be closed without a model or a paid service were implemented in this repository: deterministic black-box discovery with independent verification and receipts (`app/explorer.py`), a reusable step catalogue with phrase resolution (`app/step_catalog.py`), a library dependency graph with impact analysis (`app/impact_map.py`), JUnit/JSON CI output (`app/ci_results.py`), and five extra read-only MCP tools. Full method, limits, API reference and the honesty rules are in [`docs/market-position.md`](docs/market-position.md). Tests: `tests/test_market.py`.
+
 ## Environment variables
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -203,6 +216,8 @@ The **QA Agents** tab runs nine QA agents: Requirement Review, Test Case Generat
 | `TF_AGENT_AI_PROVIDER` | unset | `ollama` uses a local model for QA agent insights; `anthropic` uses the cloud model. |
 | `TF_OLLAMA_URL` | `http://127.0.0.1:11434` | Ollama server used when the provider is `ollama`. |
 | `TF_OLLAMA_MODEL` | `llama3.1` | Ollama model used for QA agent insights. |
+| `TF_EXPLORER_BROWSER` | `0` | `1` runs the explorer in rendered-browser mode (console, page errors, failed requests). `0` is the standard-library HTTP mode. |
+| `TF_EXPLORER_ALLOW_PRIVATE` | `0` | `1` allows scanning loopback/private addresses. Keep `0` on any shared instance: otherwise the explorer is an SSRF path. |
 
 ## Testing
 The harness runs the unit suite and the library scenarios. Library scenarios are the recordings and projects in `library/`, executed through the same recorder and runner the dashboard uses. From the repository root:
@@ -210,6 +225,8 @@ The harness runs the unit suite and the library scenarios. Library scenarios are
 ```bash
 python -m tests.harness
 ```
+
+The market comparison is gated separately and needs no browser: `python -m tools.market_audit` exits non-zero when a TestForge claim loses its evidence, and CI runs it after the unit suite. `tests/test_market.py` covers the matrix, audit, reports, step catalogue, impact map, explorer, JUnit output, MCP tools, dashboard wiring and no-downgrade checks.
 
 Scenarios are documented in `tests/SCENARIOS.md`. Each run writes a timestamped report under `logs/`, and `logs/index.md` lists them. Chromium is required for the browser scenarios (`LB-REC-*`, `LB-RUN-*`, `LB-BAT-01`); unit tests run without it, and the batch executor is unit-tested against an in-memory browser double.
 

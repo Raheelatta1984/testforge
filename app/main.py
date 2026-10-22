@@ -2646,6 +2646,14 @@ app.include_router(desktop_install_router)
 # release summary. Stateless; reads run history, never starts a browser.
 from app.qa_agents import router as qa_agents_router
 app.include_router(qa_agents_router)
+# Market position: the self-auditing capability comparison, plus the artefacts
+# (HTML/Markdown) an audience can read without this server.
+from app.market_routes import router as market_router
+app.include_router(market_router)
+# Engineering intelligence: reuse-first step resolution, impact/blast radius,
+# zero-LLM black-box discovery and JUnit/JSON CI results.
+from app.intel_routes import router as intel_router
+app.include_router(intel_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

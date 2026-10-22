@@ -1512,8 +1512,12 @@ class QAAgentHubTests(unittest.TestCase):
         self.assertIn("tools", init["result"]["capabilities"])
         self.assertIsNone(mcp_server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
         tools = mcp_server.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
-        self.assertEqual([t["name"] for t in tools],
-                         ["qa_list_agents", "qa_get_sample", "qa_run_agent", "qa_run_from_source"])
+        names = [t["name"] for t in tools]
+        # The four agent tools stay exactly where they were; the market and
+        # library-intelligence tools are additive and read-only.
+        self.assertEqual(names[:4], ["qa_list_agents", "qa_get_sample", "qa_run_agent", "qa_run_from_source"])
+        self.assertEqual(names[4:], ["market_position", "market_gaps", "resolve_step", "step_search",
+                                     "impact_analysis"])
         self.assertTrue(all(t["annotations"]["readOnlyHint"] for t in tools), "every tool is read-only")
         self.assertEqual(tuple(tools[2]["inputSchema"]["properties"]["agent"]["enum"]), self.AGENT_IDS)
 
@@ -4100,7 +4104,8 @@ class FrontendBootTests(unittest.TestCase):
     STATIC = ROOT / "app" / "static"
     COMPONENT_FILES = ("tf-settings.js", "variable-review.js", "settings-components.js", "import-components.js",
                        "scenario-components.js", "demo-components.js", "future-components.js",
-                       "desktop-install-components.js", "devdeploy-components.js", "qa-agents-components.js")
+                       "desktop-install-components.js", "devdeploy-components.js", "qa-agents-components.js",
+                       "market-components.js")
     # Allocations that are never Object.is-stable, so returning one from a
     # getSnapshot guarantees an infinite render loop.
     FRESH_RETURN = re.compile(r"return\s+(?:new\b|[{[])")
