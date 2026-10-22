@@ -2420,10 +2420,11 @@ function Comparison() {
 function Artifacts() {
   const [runs, setRuns] = useState([]);
   const [expanded, setExpanded] = useState({});
+  const [reviewed, setReviewed] = useState({});
   // Screenshots are fetched per run by the browser, so the list itself stays
   // short and the service only ever serves the images you scroll to.
   useEffect(() => { API.get("/api/runs?limit=10&full=true").then(setRuns).catch(() => {}); }, []);
-  const withMedia = runs.filter(r => r.video_path || r.trace_path || (r.log || []).some(step => step.screenshot));
+  const withMedia = runs.filter(r => r.video_path || r.trace_path || (r.log || []).some(step => step.screenshot || step.healed || step.heal_failed));
   return e("div", { className: "space-y-4" },
     e(GuideSection, { id: "art-list", label: "Artifacts · screenshots, video and traces",
       action: "Run a recording and the per-step evidence collects here — this is what you attach to a defect." },
@@ -2439,7 +2440,26 @@ function Artifacts() {
         (r.log || []).map((step, i) => e("div", { key: step.step_index || step.order || i, className: "border-b border-slate-900 pb-2 last:border-0" },
           e("div", { className: "text-[10px] font-bold text-slate-200" }, `#${step.step_index || step.order || i + 1} · ${step.label || step.action || "Step"} · ${step.status || "recorded"}`),
           e("div", { className: "text-[9px] text-slate-500 mt-0.5" },
-            `${step.started_at ? desktopTimestamp(step.started_at) : "Start time unavailable"} · finished ${desktopTimestamp(step.finished_at)} · ${step.duration_ms != null ? Number(step.duration_ms).toFixed(1) + " ms" : "duration unavailable"}`)))),
+            `${step.started_at ? desktopTimestamp(step.started_at) : "Start time unavailable"} · finished ${desktopTimestamp(step.finished_at)} · ${step.duration_ms != null ? Number(step.duration_ms).toFixed(1) + " ms" : "duration unavailable"}`),
+          step.healed && e("div", { className: "mt-2 p-2 rounded bg-amber-950/40 border border-amber-700 text-[10px]" },
+            e("div", { className: "font-bold text-amber-200" }, "LOCATOR HEALED · review required · not a clean release pass"),
+            e("div", { className: "break-all text-slate-300 mt-1" }, `Original: ${JSON.stringify(step.original_locator)} → winner: ${JSON.stringify(step.winning_locator)}`),
+            e("div", { className: "text-slate-400 mt-1" }, `Strategy confidence ${step.heal_ai && step.heal_ai.used ? "AI-assisted" : "deterministic"}${step.heal_fallback ? " · " + step.heal_fallback : ""}`),
+            reviewed[`${r.id}:${step.order}`] && e("div", { className: "font-bold mt-1" }, `Reviewed: ${reviewed[`${r.id}:${step.order}`]}`),
+            e("div", { className: "flex gap-2 mt-2" },
+              e("button", { disabled: !!reviewed[`${r.id}:${step.order}`], className: "px-2 py-1 rounded bg-emerald-900 text-emerald-100 disabled:opacity-50", onClick: async () => {
+                try { const res = await API.post(`/api/recordings/${r.recording_id}/heals/${r.id}/${step.order}/review`, {decision:"accept"}); setReviewed(prev => ({...prev, [`${r.id}:${step.order}`]: "accepted"})); alert(res.message); }
+                catch (err) { alert(err.message || "Could not accept locator"); }
+              } }, "Accept & update recording"),
+              e("button", { disabled: !!reviewed[`${r.id}:${step.order}`], className: "px-2 py-1 rounded bg-red-950 text-red-200 disabled:opacity-50", onClick: async () => {
+                try { const res = await API.post(`/api/recordings/${r.recording_id}/heals/${r.id}/${step.order}/review`, {decision:"reject"}); setReviewed(prev => ({...prev, [`${r.id}:${step.order}`]: "rejected"})); alert(res.message); }
+                catch (err) { alert(err.message || "Could not reject locator"); }
+              } }, "Reject & pin original")),
+            e("details", { className: "mt-2" }, e("summary", { className: "cursor-pointer" }, "Candidate scores"),
+              e("pre", { className: "whitespace-pre-wrap text-[9px] text-slate-300 mt-1" }, JSON.stringify(step.candidate_scores || [], null, 2)))),
+          step.heal_failed && e("div", { className: "mt-2 p-2 rounded bg-red-950/40 border border-red-800 text-[10px]" },
+            e("b", {}, "No unique locator healed · ranked candidates for triage"),
+            e("pre", { className: "whitespace-pre-wrap text-[9px] text-slate-300 mt-1" }, JSON.stringify(step.candidate_scores || [], null, 2))))),
       r.video_path && e("video", { controls: true, className: "w-full rounded-2xl bg-black shadow-inner", src: "/api/runs/video/" + r.id }),
       r.trace_path && e("a", { href: "/api/runs/trace/" + r.id, download: "trace.zip",
         className: "inline-block text-[10px] font-bold px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 hover:border-indigo-500 text-indigo-200" },

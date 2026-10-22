@@ -37,6 +37,7 @@ Nothing here imports a second automation stack: steps are replayed by
 from __future__ import annotations
 
 from app.step_runtime import audit_selector, StepClock, StepRuntime
+from app.audit_trail import AuditTrail
 
 import asyncio
 import datetime
@@ -626,7 +627,21 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                         error_text = "This recording has no steps."
                     run_dir = os.path.join(ARTIFACTS, "runs", run_id)
                     os.makedirs(run_dir, exist_ok=True)
+                    try:
+                        trail = AuditTrail(run_dir, run_id)
+                        trail.append("run_started", {"steps": len(steps), "batch_id": batch_id,
+                                                       "screenshots": mode})
+                    except Exception:
+                        trail = None
+                    def append_audit(event, payload):
+                        if trail is not None:
+                            try:
+                                trail.append(event, payload)
+                            except Exception as audit_error:
+                                logger.warning("BATCH AUDIT %s (%s)", event, type(audit_error).__name__)
                     runtime = StepRuntime(page, run_dir, execution_speed=execution_speed)
+                    runtime.healing_context = {"app_id": item.get("project_id"),
+                                               "recording_id": item.get("recording_id")}
                     last_signature = None
                     total_steps = len(steps)
                     for index, step in enumerate(steps, 1):
@@ -651,7 +666,14 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                             else:
                                 result = await replay_step(page, step, variables, budgets=budgets, runtime=runtime)
                                 page = runtime.page
-                                if result:
+                                if isinstance(result, dict) and result.get("locator_healed"):
+                                    heal = result["locator_healed"]
+                                    entry.update({"healed": True, "original_locator": heal.get("original"),
+                                                  "winning_locator": heal.get("winning"),
+                                                  "candidate_scores": heal.get("candidate_scores"),
+                                                  "heal_ai": heal.get("ai"), "heal_fallback": heal.get("fallback")})
+                                    entry["result"] = result.get("result")
+                                elif result:
                                     entry["result"] = result
                                 steps_executed += 1
                             elapsed_ms = (time.time() - attempt_started) * 1000
@@ -671,6 +693,10 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                                 else:
                                     screenshots_skipped += 1
                         except Exception as exc:
+                            from app.locator_healing import HealingFailure, failure_table
+                            if isinstance(exc, HealingFailure):
+                                entry["heal_failed"] = True
+                                entry["candidate_scores"] = failure_table(exc.candidates)
                             elapsed_ms = (time.time() - attempt_started) * 1000
                             if "finished_at" not in entry:
                                 entry.update(step_clock.finish())
@@ -713,8 +739,28 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                                 entry = scrub_entry(entry, sensitive)
                                 error_text = scrub(error_text, sensitive)
                                 log_entries.append(entry)
+                                if entry.get("heal_failed"):
+                                    append_audit("locator_heal_failed", {"order": entry.get("order"),
+                                                  "candidates": entry.get("candidate_scores")})
+                                append_audit("step", {"order": entry.get("order"), "action": entry.get("action"),
+                                              "label": entry.get("label"), "status": entry.get("status"),
+                                              "duration_ms": entry.get("duration_ms"), "error": entry.get("error"),
+                                              "healed": False})
                                 break
                         entry = scrub_entry(entry, sensitive)
+                        if entry.get("healed"):
+                            append_audit("locator_healed", {"order": entry.get("order"),
+                                          "original_locator": entry.get("original_locator"),
+                                          "winning_locator": entry.get("winning_locator"),
+                                          "candidate_scores": entry.get("candidate_scores"),
+                                          "provider": (entry.get("heal_ai") or {}).get("provider"),
+                                          "model": (entry.get("heal_ai") or {}).get("model"),
+                                          "prompt_hash": (entry.get("heal_ai") or {}).get("prompt_hash"),
+                                          "response_hash": (entry.get("heal_ai") or {}).get("response_hash"),
+                                          "fallback": entry.get("heal_fallback")})
+                        append_audit("step", {"order": entry.get("order"), "action": entry.get("action"),
+                                      "label": entry.get("label"), "status": entry.get("status"),
+                                      "duration_ms": entry.get("duration_ms"), "healed": bool(entry.get("healed"))})
                         log_entries.append(entry)
                         if len(log_entries) > MAX_LOG_ENTRIES:
                             del log_entries[: len(log_entries) - MAX_LOG_ENTRIES]
@@ -723,6 +769,11 @@ async def execute_batch(batch_id: str, on_event=None, *, playwright_factory=None
                     await runtime.close()
                     page = runtime.page
                     elapsed = time.time() - recording_started
+                    if status == "passed" and any(row.get("healed") for row in log_entries):
+                        status = "healed"
+                    append_audit("run_finished", {"status": status, "steps": len(log_entries),
+                                  "elapsed": round(elapsed, 3),
+                                  "release_gate": "review_required" if status == "healed" else "clean_or_failed"})
                     if scenario_meta and status != 'passed':
                         scenario_failed = True
                     if status == "passed":

@@ -1334,6 +1334,61 @@ def recording_step_screenshot(rid: str, step_id: str):
     return FileResponse(path, media_type="image/png" if path.suffix.lower() == ".png" else "image/jpeg")
 
 
+@app.post("/api/recordings/{rid}/heals/{run_id}/{order}/review")
+async def review_locator_heal(rid: str, run_id: str, order: int, body: dict):
+    """Accept a healed locator into the saved recording or pin the original."""
+    decision = str((body or {}).get("decision") or "").lower()
+    if decision not in {"accept", "reject"}:
+        raise HTTPException(status_code=422, detail="decision must be accept or reject")
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        if run is None or run.recording_id != rid:
+            raise HTTPException(status_code=404, detail="Healed run not found")
+        entries = run.execution_log if isinstance(run.execution_log, list) else []
+        healed = next((item for item in entries if item.get("healed") and int(item.get("order") or -1) == order), None)
+        if not healed:
+            raise HTTPException(status_code=404, detail="Healed step not found in this run")
+        recording = db.get(Recording, rid)
+        if recording is None:
+            raise HTTPException(status_code=404, detail="Recording not found")
+        if recording.execution_plan:
+            raise HTTPException(status_code=422, detail="Execution-plan snapshots cannot be rewritten; edit the source recording")
+        step = next((item for item in recording.steps if item.order == order), None)
+        if step is None:
+            raise HTTPException(status_code=404, detail="Recording step not found")
+        original = healed.get("original_locator") or step.selector or {}
+        winning = healed.get("winning_locator")
+        if decision == "accept":
+            if not isinstance(winning, dict) or not winning.get("primary"):
+                raise HTTPException(status_code=422, detail="The run has no valid winning locator")
+            step.selector = winning
+            db.commit()
+            from app.locator_healing import unpin_original
+            unpin_original({"app_id": recording.project_id, "recording_id": rid}, order)
+        else:
+            # Rejection is not a recording edit: retain the source selector and
+            # disable all future automatic healing for this recording step.
+            from app.locator_healing import pin_original
+            pin_original({"app_id": recording.project_id, "recording_id": rid}, order)
+        accepted = dict(winning) if decision == "accept" else None
+    try:
+        from app.audit_trail import AuditTrail
+        trail = AuditTrail(os.path.join(ARTIFACTS, "runs", run_id), run_id)
+        trail.append("locator_heal_review", {"recording_id": rid, "order": order,
+                     "decision": decision, "original_locator": original,
+                     "winning_locator": accepted})
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="Could not append the review to the run audit trail") from exc
+    if decision == "accept":
+        saved = await asyncio.to_thread(library_store.export_recording, rid, publish=True) or {}
+        if saved.get("retry_scheduled"):
+            schedule_publish_retry()
+    return {"ok": True, "decision": decision, "recording_id": rid, "order": order,
+            "selector": accepted if accepted else original,
+            "message": ("Stored locator updated; this healing is a review signal, not a clean release pass."
+                        if decision == "accept" else "Original locator pinned; automatic healing is disabled for this step.")}
+
+
 @app.patch("/api/recordings/{rid}/steps/{step_id}")
 async def edit_recording_step(rid: str, step_id: str, body: dict):
     allowed = ACTIONS
@@ -1987,7 +2042,7 @@ def get_queue_status():
             "queued": queued,
             "running": running,
             "passed": db.query(Run).filter(Run.status == "passed").count(),
-            "failed": db.query(Run).filter(Run.status.in_(["failed", "error"])).count(),
+            "failed": db.query(Run).filter(Run.status.in_(["failed", "error", "healed"])).count(),
             "cancelled": db.query(Run).filter(Run.status == "cancelled").count(),
             "pending": queued + running,
             "passed_pct": round(100 * db.query(Run).filter(Run.status == "passed").count() / total, 1) if total else 0,

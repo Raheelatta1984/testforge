@@ -105,11 +105,11 @@ Result of this change: **72.0% as published → 85.7% verified**, 17 unverified
 claims → 0, open gaps **17 → 11**, differentiators **5 → 7**, and 458 unit tests
 green.
 
-## 5. First place: the four conversions, shipped
+## 5. First place: five conversions, shipped
 
 We were at 36.0 points from 42 evidenced capabilities. Passing Argus needed
 `> 37.8` (more than 90.0%), and every Partial converted to Yes adds 0.5. All
-four shipped in order, each with real probes in `app/market_data.json`:
+five shipped in order, each with real probes in `app/market_data.json`:
 
 | Work | Gain | Score after | What shipped |
 | --- | --- | --- | --- |
@@ -117,13 +117,9 @@ four shipped in order, each with real probes in `app/market_data.json`:
 | Audit trail and provenance → Yes | +0.5 | 88.1% | Every run appends `run_started`, per-step/per-case and `run_finished` events to `artifacts/runs/<run_id>/audit.jsonl`, each row sealed with a SHA-256 chained to the previous row; `GET /api/runs/audit/{run_id}` re-verifies on every read. |
 | Accessibility checks → Yes | +0.5 | 89.3% | A WCAG 2.x A/AA ten-rule subset (`TF-A11Y-01`–`10`: language, title, alt, control names, form labels, duplicate ids, main landmark, heading order, tab order, contrast) runs in-page over every crawled page, persists rule ids with criterion, level and impact, and is served by `POST /api/accessibility/scan`. |
 | Multi-browser engines → Yes | +0.5 | **90.5%** | Each matrix profile names its engine and the runner launches exactly that engine, with the engine recorded on every case; a CI job installs chromium, firefox and webkit and runs the same smoke plan on all three, with `TF_REQUIRE_ENGINES=1` turning a missing engine into a failure instead of a skip. |
-| Self-healing locators → Yes (not started) | +0.5 | 91.7% | Scored multi-candidate healing with an audit trail. Still the next conversion if we want more clearance. |
+| Self-healing locators → Yes | +0.5 | **91.7%** | `app/locator_healing.py` probes at most 12 unique candidates from independent test-id, role + accessible name, visible text, associated form label, CSS structural path and XPath strategies. Deterministic scoring rewards unique stable IDs/test IDs and penalizes depth/index use. Candidate probes and action execution stay within the normal per-action budget. Per-project/per-recording strategy wins and reject pins are stored only in a local JSON stats file (`TF_LOCATOR_HEAL_STATS` overrides its path). Every healed step retains original and winning locators plus ranked scores, emits `locator_healed` in the run's hash-chained `audit.jsonl`, and appears in Artifacts for accept/reject review. Accept updates the stored recording locator; reject pins the original so that step will not auto-heal. Failed heals attach their ranked table for triage. Optional agent reranking calls the configured Anthropic/Ollama provider only for tied/low-confidence candidates, sends compact element snippets (not secrets or DOM dumps), and records provider/model and prompt/response hashes. No provider/key means deterministic fallback, explicitly recorded. A healed run is **not a clean release pass**; review and accept, then rerun without healing. No vision-based healing or external stats service is claimed. |
 
-None of the four needed a model, a paid service or a vendor account — which is
-exactly the axis a free tool should compete on. The published matrix now reads
-**38.0 points, 90.5%, 42/42 claims verified, 7 gaps** (bounded parallel
-execution, scaling/capacity, RBAC, native mobile/rugged, self-healing,
-unknown-bug discovery, Windows desktop).
+The deterministic healing rules need no model, paid service or vendor account. Optional AI only helps break ties or low-confidence rankings; it never replaces the deterministic rules or evidence. The published matrix now reads **38.5 points, 91.7%, 42/42 claims verified, 6 gaps** (bounded parallel execution, scaling/capacity, RBAC, native mobile/rugged, unknown-bug discovery, Windows desktop). Self-healing is no longer a gap.
 
 Alongside the conversions: the Devices tab (║) adds fourteen emulation profiles
 (viewport, DPR, user agent, mobile/touch) with true-viewport bezel previews and
@@ -163,9 +159,9 @@ of building.
 3. ~~**Audit trail** (0.5)~~ — shipped (§5).
 4. ~~**Multi-browser engines** (0.5)~~ — shipped (§5).
 5. ~~**Accessibility subset** (0.5)~~ — shipped as an honest ten-rule A/AA subset (§5).
-6. **Self-healing locators** (0.5) — the remaining conversion on the path to
-   91.7%: scored multi-candidate healing with an audit trail, or it stays
-   Partial.
+6. ~~**Self-healing locators** (0.5)~~ — shipped with scored unique candidates, hash-chained audit events and human review (§5). A healed result is not a clean release pass.
+7. **Keep native/enterprise ratings honest.** Windows desktop automation and native mobile/rugged stay Partial until a real agent/device hub is exercised; ERP/CRM packs stay Partial until a real tenant pilot. Do not turn simulator fixtures into a Yes.
+8. **Evidence the competitor unknowns** (§6). Source Argus, TestAtlas, browser-use and the MCP listings so the table can reorder without more product code.
 
 ## 8. The caveat worth keeping in front of every slide
 
