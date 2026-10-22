@@ -84,9 +84,16 @@ root or `PYTHONPATH` to it):
 | `qa_get_sample` | `agent` | The agent's example input. |
 | `qa_run_agent` | `agent`, `input`, `mode` | Runs an agent on input you supply. |
 | `qa_run_from_source` | `agent`, `source`, `input?`, `mode` | Runs an agent on a stored run, recording or project. |
+| `market_position` | none | TestForge's audited position against the compared tools: coverage, differentiators, open gaps, audit state. Small by design. |
+| `market_gaps` | none | Every capability a compared tool claims and TestForge does not, with the leading tools and the disposition. |
+| `resolve_step` | `phrase`, `project_id?` | Reuse-first authoring: bound, ambiguous or unbound, with ranked candidates, placeholders and example values. |
+| `step_search` | `query`, `project_id?`, `limit?` | Deterministic ranked search over the step vocabulary built from stored recordings. |
+| `impact_analysis` | `changed_files`, `routes`, `labels`, `diff?`, `project_id?`, `max_tests?` | Which stored recordings a change reaches, with the reason for every selection and a batch payload. |
 
-All four tools are marked read-only. They never start a browser or change stored
-data. `mode: "rules"` keeps everything on the machine. `mode: "auto"` sends the
+All nine tools are marked read-only. They never start a browser or change stored
+data, and the five market/library tools answer from this instance's audited data
+and stored library, so an AI client does not have to paste a catalogue into the
+prompt. `mode: "rules"` keeps everything on the machine. `mode: "auto"` sends the
 scrubbed input to the configured AI provider, which for Ollama stays on the
 local network. The server uses the same `DATABASE_URL` and `TF_*` settings as the
 web app, and it sets up the schema on start, like the app does.

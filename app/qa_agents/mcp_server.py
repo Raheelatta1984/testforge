@@ -17,6 +17,11 @@ Tools (all read-only; they never start a browser or change stored data):
     qa_get_sample       an agent's example input
     qa_run_agent        run an agent on input you supply
     qa_run_from_source  run an agent on a stored run, recording or project
+    market_position     TestForge's audited position against the compared tools
+    market_gaps         capabilities a compared tool claims and TestForge does not
+    resolve_step        does an existing library step already cover this phrase?
+    step_search         search the library's reusable step vocabulary
+    impact_analysis     which stored recordings a change reaches, with reasons
 
 No MCP SDK is required: the protocol surface used here (initialize, ping, tools/list,
 tools/call) is small and is implemented directly, so no new dependency is added.
@@ -33,7 +38,9 @@ INSTRUCTIONS = (
     "QA agents for TestForge: requirement review, test case and Gherkin generation, API contract review, "
     "automation code review, failure triage, flaky test analysis, defect drafting, regression selection and "
     "release decisions. Results are advisory. Use mode 'rules' to keep everything on this machine; 'auto' "
-    "adds AI insights through the provider the server is configured for."
+    "adds AI insights through the provider the server is configured for. The market_*, resolve_step, "
+    "step_search and impact_analysis tools are read-only and answer from this instance's audited data and "
+    "stored library, so an AI client does not have to paste the whole catalogue into the prompt."
 )
 
 ERR_PARSE = -32700
@@ -98,7 +105,51 @@ def _tools(agent_ids: list[str]) -> list[dict]:
              "input": {"type": "object", "description": "Optional overrides for the built input."},
              "mode": mode}, "required": ["agent", "source"], "additionalProperties": False},
          "annotations": read_only},
+        {"name": "market_position",
+         "description": ("TestForge's audited position against the compared QA tools: coverage, differentiators, "
+                         "open gaps and whether every TestForge claim still has evidence. Small by design; ask "
+                         "for market_gaps for the full gap list."),
+         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+         "annotations": read_only},
+        {"name": "market_gaps",
+         "description": ("Every capability a compared tool claims and TestForge does not, with the leading tools "
+                         "and the disposition. Honest gap list, not a marketing table."),
+         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
+         "annotations": read_only},
+        {"name": "resolve_step",
+         "description": ("Reuse-first authoring: would this step phrase bind an existing definition? Returns "
+                         "bound, ambiguous or unbound with ranked candidates, placeholders and allowed values."),
+         "inputSchema": {"type": "object", "properties": {
+             "phrase": {"type": "string", "description": "The step phrase, e.g. 'sign in with the store account'."},
+             "project_id": {"type": "string", "description": "Optional project scope."}},
+             "required": ["phrase"], "additionalProperties": False},
+         "annotations": read_only},
+        {"name": "step_search",
+         "description": "Search the reusable step vocabulary built from stored recordings. Deterministic ranking.",
+         "inputSchema": {"type": "object", "properties": {
+             "query": {"type": "string"}, "project_id": {"type": "string"}, "limit": {"type": "integer"}},
+             "required": ["query"], "additionalProperties": False},
+         "annotations": read_only},
+        {"name": "impact_analysis",
+         "description": ("Which stored recordings does a change reach? Give changed_files, routes, labels or a "
+                         "diff; returns ranked recordings with reasons and a batch payload."),
+         "inputSchema": {"type": "object", "properties": {
+             "changed_files": {"type": "array", "items": {"type": "string"}},
+             "routes": {"type": "array", "items": {"type": "string"}},
+             "labels": {"type": "array", "items": {"type": "string"}},
+             "diff": {"type": "string", "description": "Optional unified diff (bounded)."},
+             "project_id": {"type": "string"}, "max_tests": {"type": "integer"}},
+             "additionalProperties": False},
+         "annotations": read_only},
     ]
+
+
+def _int_arg(value, default: int, maximum: int) -> int:
+    try:
+        number = int(value if value is not None else default)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(number, maximum))
 
 
 def _text_result(payload, is_error: bool = False) -> dict:
@@ -112,6 +163,44 @@ def _call_tool(name: str, args: dict) -> dict:
     redact, InputError = state["redact"], state["InputError"]
     agent_id = str(args.get("agent") or "")
     try:
+        # Market and library-intelligence tools. They take no agent, return a
+        # small payload and never mutate anything; each module owns the logic so
+        # the MCP answer cannot drift from the HTTP API or the dashboard.
+        if name in ("market_position", "market_gaps"):
+            from app import market_intel
+            if name == "market_position":
+                return _text_result(market_intel.compact_summary())
+            full = market_intel.matrix()
+            return _text_result({"generated_at": full["generated_at"], "gaps": full["gaps"],
+                                 "differentiators": full["differentiators"], "audit": full["audit"],
+                                 "note": "Only evidenced competitor claims are counted. 'Not stated' is never a win."})
+        if name == "resolve_step":
+            from app import step_catalog
+            phrase = str(args.get("phrase") or "")
+            if not phrase.strip():
+                return _text_result("Provide the step phrase to resolve.", True)
+            return _text_result(step_catalog.resolve_step(
+                phrase, project_id=args.get("project_id") or None,
+                limit=_int_arg(args.get("limit"), 5, 20)))
+        if name == "step_search":
+            from app import step_catalog
+            query = str(args.get("query") or args.get("q") or "")
+            if not query.strip():
+                return _text_result("Provide a query to search for.", True)
+            return _text_result(step_catalog.search(
+                query, project_id=args.get("project_id") or None,
+                limit=_int_arg(args.get("limit"), 10, 100)))
+        if name == "impact_analysis":
+            from app import impact_map
+            files = args.get("changed_files") or []
+            routes = args.get("routes") or []
+            labels = args.get("labels") or []
+            if not all(isinstance(item, list) for item in (files, routes, labels)):
+                return _text_result("changed_files, routes and labels must be arrays.", True)
+            return _text_result(impact_map.analyse(
+                changed_files=files, diff=str(args.get("diff") or ""), routes=routes, labels=labels,
+                project_id=args.get("project_id") or None,
+                max_tests=_int_arg(args.get("max_tests"), 25, 200)))
         if name == "qa_list_agents":
             catalogue = registry.catalogue()
             return _text_result({"agents": [{"id": a["id"], "name": a["name"], "input": a["input"],

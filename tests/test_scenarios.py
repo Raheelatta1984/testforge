@@ -513,31 +513,43 @@ class ScenarioTests(unittest.TestCase):
         self.assertGreaterEqual(done['duration_ms'], 0)
 
         rec = self.recording('Timed checkout')
-        started = datetime(2026, 10, 13, 14, 2, 11, 123000)
+        # Relative timestamps: PDFs expire 48 hours after completion, so a fixed
+        # date turns this test red two days later and says nothing about the code.
+        started = (datetime.utcnow() - timedelta(minutes=10)).replace(microsecond=123000)
+
+        def iso(moment):
+            return moment.strftime('%Y-%m-%dT%H:%M:%S.') + f'{moment.microsecond // 1000:03d}Z'
+
+        started_iso = iso(started)
+        first_iso = iso(started + timedelta(milliseconds=333))
+        second = started + timedelta(seconds=1)
+        second_iso = iso(second)
+        second_finish_iso = iso(second + timedelta(milliseconds=250))
         with SessionLocal() as db:
             run = Run(recording_id=rec['id'], status='failed', execution_speed=2.0, started_at=started,
                       finished_at=started + timedelta(seconds=5),
                       execution_log=[
                           {'order': 1, 'action': 'navigate', 'label': 'Open', 'status': 'passed',
-                           'started_at': '2026-10-13T14:02:11.123Z', 'finished_at': '2026-10-13T14:02:11.456Z',
+                           'started_at': started_iso, 'finished_at': first_iso,
                            'duration_ms': 333.0},
                           {'order': 2, 'action': 'click', 'label': 'Save', 'status': 'failed', 'error': 'boom',
-                           'started_at': '2026-10-13T14:02:12.000Z', 'finished_at': '2026-10-13T14:02:12.250Z',
+                           'started_at': second_iso, 'finished_at': second_finish_iso,
                            'duration_ms': 250.0}])
             db.add(run); db.commit(); rid = run.id
         with patch.object(library_store, '_finish', return_value=True):
             pdf_reports.finalize('run', rid)
         path, meta = pdf_reports.generate('run', rid)
-        self.assertEqual(meta['started_at'], '2026-10-13T14:02:11.123Z')
+        self.assertEqual(meta['started_at'], started_iso)
         self.assertEqual(meta['execution_speeds'], [2.0])
         self.assertEqual(meta['recordings'][0]['execution_speed'], 2.0)
         self.assertEqual(meta['recordings'][0]['duration_seconds'], 5.0)
         text = '\n'.join(page.extract_text() for page in PdfReader(str(path)).pages)
-        for needle in ('Started: 2026-10-13 14:02:11.123 UTC', 'Execution speed: 2x (fast)', 'Timing summary',
-                       'Step timing', 'Step started 2026-10-13 14:02:12.000 UTC'):
+        for needle in ('Started: ' + started_iso.replace('T', ' ').replace('Z', ' UTC'),
+                       'Execution speed: 2x (fast)', 'Timing summary', 'Step timing',
+                       'Step started ' + second_iso.replace('T', ' ').replace('Z', ' UTC')):
             self.assertIn(needle, text)
         index = (library_store.library_dir() / 'reports' / 'index.md').read_text()
-        self.assertIn('| 2026-10-13T14:02:11.123Z | 2x |', index)
+        self.assertIn('| ' + started_iso + ' | 2x |', index)
 
         # Batch: the run predates per-run speed, so the batch's own speed applies.
         with SessionLocal() as db:

@@ -1,0 +1,2214 @@
+{
+  "schema": "testforge-market-matrix/1",
+  "last_reviewed": "2026-10-22",
+  "disclaimer": "Competitor ratings are a point-in-time reading of public product documentation, the GitHub MCP listings supplied with this review, and each vendor's own words. Products change; every cell therefore carries a basis and an accessible note, and any cell the review could not evidence is marked 'unknown' instead of guessed. TestForge's own column is not marketing: each 'yes' is a claim with machine-checkable evidence (file, symbol, route or test) that GET /api/market/audit re-verifies on demand and in CI. Run the audit before quoting this matrix to anyone.",
+  "groups": [
+    {
+      "id": "discovery",
+      "name": "Discovery and verified defects",
+      "blurb": "Does the tool find defects nobody scripted, prove them, and hand over evidence a human or CI can trust?"
+    },
+    {
+      "id": "authoring",
+      "name": "Authoring and reuse",
+      "blurb": "How tests are created, reused, searched and repaired over time."
+    },
+    {
+      "id": "coverage",
+      "name": "Application coverage",
+      "blurb": "Which interfaces and application types the tool can actually drive."
+    },
+    {
+      "id": "api",
+      "name": "API and contract quality",
+      "blurb": "Testing the service layer rather than only the pixels."
+    },
+    {
+      "id": "ai",
+      "name": "AI agents and MCP interoperability",
+      "blurb": "Whether the tool can be driven by, or drive, an AI client without lock-in."
+    },
+    {
+      "id": "gates",
+      "name": "CI gates and release decisions",
+      "blurb": "Everything that decides whether a build may ship: determinism, machine-readable results, impact analysis."
+    },
+    {
+      "id": "trust",
+      "name": "Trust, operations and cost",
+      "blurb": "Licence, hosting, privacy, access control and the ability to keep running when a vendor or a model does not."
+    },
+    {
+      "id": "reporting",
+      "name": "Reporting and integration",
+      "blurb": "What a stakeholder, an auditor or a ticketing system receives."
+    }
+  ],
+  "tools": [
+    {
+      "id": "testforge",
+      "name": "TestForge",
+      "vendor": "This repository",
+      "kind": "platform",
+      "licence": "Apache-2.0 (free, self-hosted)",
+      "price": "Free",
+      "deployment": "Self-hosted: Docker Compose, Render, Azure; SQLite or Postgres",
+      "model_dependency": "None for the core; optional AI insights via ANTHROPIC_API_KEY",
+      "source": "https://github.com/Raheelatta1984/testforge",
+      "install": "docker compose up --build  (or ./start.sh)",
+      "basis": "Every capability is a claim checked by the claim audit against this repository; nothing is asserted that the code cannot show.",
+      "accent": "#6366f1",
+      "self": true
+    },
+    {
+      "id": "argus",
+      "name": "Argus Testing",
+      "vendor": "chriswu727",
+      "kind": "mcp",
+      "licence": "Free MCP listing; check upstream licence",
+      "price": "Free",
+      "deployment": "MCP server for web and macOS; runs where the AI client runs",
+      "model_dependency": "Yes: an AI client supplies the reasoning",
+      "source": "https://github.com/mcp/chriswu727/argus",
+      "install": "Install MCP server from the GitHub MCP listing",
+      "basis": "The comparison table in the supplied GitHub MCP listing screenshots (2026-10-22) plus the project description: autonomous QA for web and macOS that tests like a real engineer, finds bugs and verifies them.",
+      "accent": "#22d3ee"
+    },
+    {
+      "id": "testatlas",
+      "name": "TestAtlas",
+      "vendor": "Karzon (GitHub MCP listing)",
+      "kind": "mcp",
+      "licence": "Free MCP listing; check upstream licence",
+      "price": "Free",
+      "deployment": "Local .NET tool; analyses a .NET solution into codemap.db",
+      "model_dependency": "No: deterministic static analysis, offline",
+      "source": "https://github.com/mcp/Karzon/testatlas",
+      "install": ".NET SDK 8.0+ then install the MCP server (see docs/troubleshooting.md)",
+      "basis": "The README screenshot supplied with this review (2026-10-22): static analysis of a .NET solution into projects, Gherkin scenarios, step definitions, page objects, API clients and call edges, served over MCP with resolve_step, step_catalog, blast radius, FTS5 search, HTML report and a dependency map.",
+      "accent": "#a78bfa"
+    },
+    {
+      "id": "playwright-mcp",
+      "name": "Playwright MCP",
+      "vendor": "Microsoft",
+      "kind": "mcp",
+      "licence": "Apache-2.0 (open source)",
+      "price": "Free",
+      "deployment": "Local MCP server driving a real browser via accessibility snapshots",
+      "model_dependency": "Yes: an AI client decides every action",
+      "source": "https://github.com/microsoft/playwright-mcp",
+      "install": "npx @playwright/mcp@latest",
+      "basis": "The supplied comparison table plus Playwright MCP's documented role: a browser driver exposing page actions to an LLM, not a test generator, verifier or CI gate.",
+      "accent": "#34d399"
+    },
+    {
+      "id": "chrome-devtools-mcp",
+      "name": "Chrome DevTools MCP",
+      "vendor": "Google (Chrome team)",
+      "kind": "mcp",
+      "licence": "Apache-2.0 (open source)",
+      "price": "Free",
+      "deployment": "Local MCP server over the Chrome DevTools Protocol",
+      "model_dependency": "Yes: an AI client drives the inspection",
+      "source": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "install": "npx chrome-devtools-mcp@latest",
+      "basis": "The supplied comparison table plus the project description: DevTools inspection (performance, console, network, DOM) exposed to an AI client. Debugging tooling, not an independent verifier.",
+      "accent": "#fbbf24"
+    },
+    {
+      "id": "browser-use",
+      "name": "browser-use",
+      "vendor": "browser-use",
+      "kind": "agent",
+      "licence": "MIT (open source)",
+      "price": "Free (model tokens paid separately)",
+      "deployment": "Python library or cloud; browser agent",
+      "model_dependency": "Yes: the agent is an LLM loop",
+      "source": "https://github.com/browser-use/browser-use",
+      "install": "pip install browser-use",
+      "basis": "The supplied comparison table plus the project documentation: an LLM-driven browser agent that completes task-scoped objectives and scores its own result.",
+      "accent": "#f472b6"
+    },
+    {
+      "id": "playwright",
+      "name": "Playwright",
+      "vendor": "Microsoft",
+      "kind": "oss",
+      "licence": "Apache-2.0",
+      "price": "Free",
+      "deployment": "Self-hosted library and test runner",
+      "model_dependency": "None",
+      "source": "https://playwright.dev",
+      "install": "npm i -D @playwright/test",
+      "basis": "Public documentation: a browser automation library and test runner with assertions, tracing, multi-browser engines and codegen. It is a driver; authoring, evidence, triage and gates are the user's code.",
+      "accent": "#4ade80"
+    },
+    {
+      "id": "cypress",
+      "name": "Cypress",
+      "vendor": "Cypress.io",
+      "kind": "oss",
+      "licence": "MIT (Cloud is commercial)",
+      "price": "Free OSS; paid Cloud",
+      "deployment": "Self-hosted runner or Cypress Cloud",
+      "model_dependency": "None",
+      "source": "https://www.cypress.io",
+      "install": "npm i -D cypress",
+      "basis": "Public documentation: in-browser end-to-end and component testing with time travel, video and retry-ability; Cloud adds parallelisation and dashboards.",
+      "accent": "#38bdf8"
+    },
+    {
+      "id": "selenium",
+      "name": "Selenium",
+      "vendor": "Software Freedom Conservancy",
+      "kind": "oss",
+      "licence": "Apache-2.0",
+      "price": "Free",
+      "deployment": "Self-hosted (Grid for scale)",
+      "model_dependency": "None",
+      "source": "https://www.selenium.dev",
+      "install": "pip install selenium",
+      "basis": "Public documentation: the W3C WebDriver standard across four language bindings and a Grid for distribution. No authoring UI, report, triage or gate.",
+      "accent": "#86efac"
+    },
+    {
+      "id": "katalon",
+      "name": "Katalon Platform",
+      "vendor": "Katalon",
+      "kind": "commercial",
+      "licence": "Commercial; free tier",
+      "price": "Free tier; paid seats and add-ons",
+      "deployment": "Desktop Studio + cloud or self-hosted TestOps",
+      "model_dependency": "Optional AI features need the vendor cloud",
+      "source": "https://katalon.com",
+      "install": "Download Katalon Studio",
+      "basis": "Vendor documentation: record/spy/web and mobile keywords, self-healing, TestOps dashboards and Jira integration. Feature availability differs between the free and paid tiers.",
+      "accent": "#fb923c"
+    },
+    {
+      "id": "mabl",
+      "name": "mabl",
+      "vendor": "mabl",
+      "kind": "commercial",
+      "licence": "Commercial SaaS",
+      "price": "Paid subscription",
+      "deployment": "Vendor cloud only",
+      "model_dependency": "Yes: vendor-hosted ML/AI",
+      "source": "https://www.mabl.com",
+      "install": "Vendor-managed SaaS (no self-hosted option)",
+      "basis": "Vendor documentation: low-code test creation, auto-healing, cross-browser cloud execution, visual and accessibility checks, CI integrations.",
+      "accent": "#facc15"
+    },
+    {
+      "id": "testrigor",
+      "name": "testRigor",
+      "vendor": "testRigor",
+      "kind": "commercial",
+      "licence": "Commercial SaaS",
+      "price": "Paid subscription",
+      "deployment": "Vendor cloud; private cloud on request",
+      "model_dependency": "Yes: generative AI in the vendor cloud",
+      "source": "https://testrigor.com",
+      "install": "Vendor-managed SaaS",
+      "basis": "Vendor documentation: tests written in plain English and generated by AI, with self-healing and broad web/mobile/desktop coverage.",
+      "accent": "#c084fc"
+    },
+    {
+      "id": "applitools",
+      "name": "Applitools",
+      "vendor": "Applitools",
+      "kind": "commercial",
+      "licence": "Commercial; limited free tier",
+      "price": "Paid subscription",
+      "deployment": "Vendor cloud (Eyes) with SDKs",
+      "model_dependency": "Vendor visual AI",
+      "source": "https://applitools.com",
+      "install": "SDK + Eyes cloud account",
+      "basis": "Vendor documentation: visual AI comparison across browsers and devices, baseline management and root-cause reports. It is a visual validation specialist rather than an end-to-end test runner.",
+      "accent": "#f87171"
+    }
+  ],
+  "capabilities": [
+    {
+      "id": "autonomous-discovery",
+      "group": "discovery",
+      "name": "Finds unknown bugs without a script",
+      "why": "A scripted suite can only fail where somebody already wrote an expectation. Discovery of unscripted defects is the capability that separates QA from replay.",
+      "self": {
+        "rating": "partial",
+        "note": "app/explorer.py crawls a black-box URL with deterministic checks (HTTP 4xx/5xx, console errors, broken images, missing accessible names, duplicate ids, empty-form validation, slow responses) and files findings. It is rule-based exploration, not an LLM reasoning loop, so it will not invent business-logic scenarios.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/explorer.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/explorer.py",
+            "contains": "class Explorer"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/explorer/scan"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_market.py",
+            "contains": "explorer"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "browser-use": "partial",
+        "testrigor": "partial",
+        "mabl": "partial",
+        "testatlas": "no",
+        "playwright": "no",
+        "cypress": "no",
+        "chrome-devtools-mcp": "no",
+        "applitools": "no",
+        "selenium": "no",
+        "playwright-mcp": "no",
+        "katalon": "no"
+      },
+      "unknown": [],
+      "notes": {
+        "argus": "The listing's headline claim: autonomously finds unknown bugs (screenshot row 1).",
+        "playwright-mcp": "No: documented as a driver for an LLM's actions, not a bug finder.",
+        "chrome-devtools-mcp": "No: a debugger/inspector for an AI client.",
+        "browser-use": "Partial and task-scoped: it completes the objective it is given and scores its own result.",
+        "testrigor": "Partial: generative AI drafts tests from plain English, which still needs a human to state the intent.",
+        "testatlas": "No: maps an existing solution; it does not explore for defects.",
+        "playwright": "No: a driver and runner; discovery is the user's code.",
+        "selenium": "No: a driver.",
+        "katalon": "No: recorded/keyword authored tests."
+      },
+      "roadmap": "Implemented in this release as deterministic, zero-LLM discovery: reproducible rules, verified findings and receipts. LLM-authored exploratory scenarios are explicitly out of scope so the gate stays deterministic."
+    },
+    {
+      "id": "independent-verification",
+      "group": "discovery",
+      "name": "Independently verifies each finding",
+      "why": "An unverified finding wastes engineering time and destroys trust in the tool. Verification must be repeatable and must not be the same model scoring itself.",
+      "self": {
+        "rating": "yes",
+        "note": "Every explorer finding is re-checked on a second and third pass and only marked verified when the same condition reproduces; the receipt records attempts, timestamps and a SHA-256 over the finding body. Rules agents (failure triage, flaky analysis) also carry their signals so a human can re-derive the call.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/explorer.py",
+            "contains": "def verify_findings"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/explorer.py",
+            "contains": "receipt"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/explorer/scan"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_market.py",
+            "contains": "verification"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "testatlas": "no",
+        "browser-use": "no",
+        "playwright": "no",
+        "cypress": "no",
+        "chrome-devtools-mcp": "no",
+        "applitools": "no",
+        "selenium": "no",
+        "playwright-mcp": "no"
+      },
+      "unknown": [
+        "mabl",
+        "testrigor",
+        "katalon"
+      ],
+      "notes": {
+        "argus": "The listing claims each finding is independently verified and a receipt is produced (screenshot row 2).",
+        "browser-use": "No on independent verification: the same LLM loop scores its own outcome.",
+        "testatlas": "No: it maps an existing solution; it verifies bindings, not defects.",
+        "playwright": "No: assertions verify a written expectation, not an independent re-check of a new finding.",
+        "selenium": "No.",
+        "playwright-mcp": "No.",
+        "applitools": "No: matches a baseline somebody approved."
+      },
+      "roadmap": "Implemented in this release: deterministic re-check with a reproducible receipt."
+    },
+    {
+      "id": "evidence-bug-report",
+      "group": "discovery",
+      "name": "Evidence-rich bug report",
+      "why": "A defect a developer cannot reproduce is a conversation, not a fix. The report needs URL, steps, expected/actual, status codes and logs.",
+      "self": {
+        "rating": "yes",
+        "note": "Explorer findings carry the URL, the check that failed, captured console/network signals, bounded DOM evidence and replayable steps; app/qa_agents/defects.py renders Jira-ready markdown, Jira wiki and a CSV row, and app/report_routes.py attaches per-step screenshots to the HTML report.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/explorer.py",
+            "contains": "def defect_report"
+          },
+          {
+            "kind": "file",
+            "path": "app/qa_agents/defects.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/{run_id}/report.html"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "browser-use": "partial",
+        "mabl": "partial",
+        "katalon": "partial",
+        "testatlas": "no",
+        "playwright": "no",
+        "cypress": "no",
+        "testrigor": "partial",
+        "chrome-devtools-mcp": "no",
+        "applitools": "partial",
+        "selenium": "no",
+        "playwright-mcp": "no"
+      },
+      "unknown": [],
+      "notes": {
+        "argus": "Yes in the listing (screenshot row 3).",
+        "browser-use": "Partial: a screenshot and a final answer, not a defect dossier.",
+        "playwright-mcp": "No: raw page state and tool output.",
+        "testrigor": "Partial: dashboards and reports are advertised without a defect dossier.",
+        "applitools": "Partial: visual diffs and batch reports, not a full defect narrative.",
+        "playwright": "No: reporters emit test results, not a defect report."
+      },
+      "roadmap": "Existing capability, extended with explorer findings and the JUnit/JSON result files."
+    },
+    {
+      "id": "black-box",
+      "group": "discovery",
+      "name": "Works black-box (no repo access)",
+      "why": "Most testers do not own the system under test. A tool that needs the source cannot test a vendor product, an acquired system or somebody else's API.",
+      "self": {
+        "rating": "yes",
+        "note": "Recording, replay, assertions, batching, explorer and the QA agents all need a URL, credentials or pasted text. Source access is never required.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/recorder.py"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/explorer/scan"
+          },
+          {
+            "kind": "file",
+            "path": "app/import_formats.py"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "playwright-mcp": "yes",
+        "chrome-devtools-mcp": "yes",
+        "browser-use": "yes",
+        "playwright": "yes",
+        "cypress": "yes",
+        "selenium": "yes",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "applitools": "yes",
+        "testatlas": "no"
+      },
+      "unknown": [],
+      "notes": {
+        "testatlas": "No: static analysis needs the solution and a .NET toolchain."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "reproduction-receipt",
+      "group": "discovery",
+      "name": "Reproduction receipt for every finding",
+      "why": "A receipt makes a finding auditable after the fact: what ran, when, against which build, and whether it still reproduces.",
+      "self": {
+        "rating": "yes",
+        "note": "Explorer receipts carry a content hash, attempt count, timestamps and target build label; deterministic pilots mint a 24-hour receipt (app/support_matrix.py) and library publication writes push receipts (app/library_store.py).",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/explorer.py",
+            "contains": "receipt"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/support_matrix.py",
+            "contains": "def run_pilot_suite"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_market.py",
+            "contains": "receipt"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "browser-use": "no",
+        "chrome-devtools-mcp": "partial",
+        "playwright-mcp": "no"
+      },
+      "unknown": [
+        "testatlas",
+        "mabl",
+        "testrigor",
+        "katalon",
+        "playwright",
+        "cypress",
+        "selenium",
+        "applitools"
+      ],
+      "notes": {
+        "argus": "The listing names the verification artefact a receipt (screenshot row 2).",
+        "chrome-devtools-mcp": "Partial: DevTools traces and performance recordings are strong evidence, but not a verification receipt.",
+        "browser-use": "No: the agent re-runs only when asked and scores itself."
+      },
+      "roadmap": "Implemented in this release for discovery findings; run receipts already existed."
+    },
+    {
+      "id": "failure-triage",
+      "group": "discovery",
+      "name": "Failure triage and ownership",
+      "why": "A failure that is not classified becomes a group chat. Product, automation, data and environment failures belong to different people.",
+      "self": {
+        "rating": "yes",
+        "note": "app/qa_agents/triage.py classifies every failure as product, automation, data or environment with a confidence score and the signals behind it; the executor's retry buckets only decide retries and are unchanged.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/triage.py"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/agents/{agent_id}/run"
+          }
+        ]
+      },
+      "ratings": {
+        "mabl": "partial",
+        "katalon": "partial",
+        "testrigor": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "browser-use",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "playwright",
+        "cypress",
+        "selenium",
+        "applitools"
+      ],
+      "notes": {
+        "mabl": "Partial: failure classification and auto-healing are advertised with the vendor's ML, without published signal-level explanation."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "record-replay",
+      "group": "authoring",
+      "name": "Record and replay authoring",
+      "why": "Most testers are not programmers. Recording captures the real interaction and makes it repeatable.",
+      "self": {
+        "rating": "yes",
+        "note": "app/recorder.py records browser and Windows desktop sessions; app/executor.py replays them step by step with live preview, retries and evidence.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/recorder.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/executor.py"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/recordings"
+          }
+        ]
+      },
+      "ratings": {
+        "testatlas": "no",
+        "playwright-mcp": "partial",
+        "chrome-devtools-mcp": "no",
+        "browser-use": "partial",
+        "playwright": "partial",
+        "cypress": "partial",
+        "selenium": "no",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "applitools": "no"
+      },
+      "unknown": [
+        "argus"
+      ],
+      "notes": {
+        "playwright": "Partial: codegen produces a script that must then be maintained.",
+        "cypress": "Partial: the runner records video and time-travels, but authoring is code.",
+        "argus": "Not stated in the supplied listing."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "code-export",
+      "group": "authoring",
+      "name": "Portable code export",
+      "why": "Nobody should be trapped in a recorder. Export to code the team already owns and the tool can be replaced.",
+      "self": {
+        "rating": "yes",
+        "note": "app/export_formats.py emits Python and JavaScript Playwright, Gherkin, JSON execution plans, Jira/Azure/TestComplete workbooks and a runnable project skeleton (app/export_templates.py).",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/export_formats.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/export_templates.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/recordings/{rid}/resources/{filename}"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "partial",
+        "cypress": "partial",
+        "selenium": "partial",
+        "katalon": "yes",
+        "mabl": "partial",
+        "testrigor": "partial",
+        "playwright-mcp": "partial",
+        "testatlas": "yes"
+      },
+      "unknown": [
+        "argus",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Partial: it is the target language, not an exporter from a recording UI.",
+        "testatlas": "Yes per the README: Gherkin features, step definitions and a dependency map are committed outputs."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "step-catalog",
+      "group": "authoring",
+      "name": "Reusable step catalogue and phrase resolution",
+      "why": "Duplicated step wording is the main reason automation suites rot. Reuse-first authoring answers 'does this already exist?' before a new step is written.",
+      "self": {
+        "rating": "yes",
+        "note": "app/step_catalog.py builds a deterministic catalogue from the stored library: normalised action, placeholder pattern, allowed values, the recordings that use it, and a resolve_step answer of bound, ambiguous or unbound with ranked candidates.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/step_catalog.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/step_catalog.py",
+            "contains": "def resolve_step"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/steps/catalog"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/steps/resolve"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_market.py",
+            "contains": "step catalogue"
+          }
+        ]
+      },
+      "ratings": {
+        "testatlas": "yes",
+        "katalon": "partial",
+        "mabl": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "testatlas": "Yes: resolve_step and step_catalog are named outputs in the supplied README."
+      },
+      "roadmap": "Implemented in this release for the TestForge library."
+    },
+    {
+      "id": "step-search",
+      "group": "authoring",
+      "name": "Search across existing tests",
+      "why": "Search is how a tester avoids writing the fifth version of the same login step.",
+      "self": {
+        "rating": "yes",
+        "note": "GET /api/steps/search runs a bounded, deterministic ranked search over step labels, actions, URLs and recording names; GET /api/library already lists the catalogue. No index server and no LLM needed.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/step_catalog.py",
+            "contains": "def search"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/steps/search"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/library"
+          }
+        ]
+      },
+      "ratings": {
+        "testatlas": "yes",
+        "katalon": "partial",
+        "mabl": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "testatlas": "Yes: SQLite FTS5 over step definitions and scenarios per the README."
+      },
+      "roadmap": "Implemented in this release."
+    },
+    {
+      "id": "self-healing",
+      "group": "authoring",
+      "name": "Self-healing locators",
+      "why": "UI churn is the top maintenance cost of browser automation. Healing must be explainable, not a silent guess.",
+      "self": {
+        "rating": "partial",
+        "note": "The recorder captures structured, stable attributes (test id, role, accessible name, id, name) and replay reports an explicit ambiguity instead of clicking the first unrelated match; there is no scored candidate-healing engine yet, so this stays partial.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/recorder.py",
+            "contains": "_ELEMENT_JS"
+          },
+          {
+            "kind": "file",
+            "path": "app/step_runtime.py"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "playwright": "partial",
+        "cypress": "partial",
+        "testatlas": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "selenium",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Partial: strict-mode ambiguity errors and user-written fallbacks, not automatic healing.",
+        "testatlas": "Partial: reports ambiguous bindings instead of repairing steps."
+      },
+      "roadmap": "Roadmap: scored multi-candidate healing with an audit trail of every healed locator. Not claimed until it exists."
+    },
+    {
+      "id": "visual-regression",
+      "group": "authoring",
+      "name": "Visual regression and baselines",
+      "why": "Layout, overlap and rendering defects pass DOM assertions. Visual baselines catch them.",
+      "self": {
+        "rating": "no",
+        "note": "Screenshots are captured as evidence, but there is no baseline store or pixel diff. Do not claim visual validation.",
+        "evidence": []
+      },
+      "ratings": {
+        "applitools": "yes",
+        "mabl": "yes",
+        "katalon": "partial",
+        "testrigor": "partial",
+        "cypress": "partial",
+        "playwright": "partial",
+        "testatlas": "no"
+      },
+      "unknown": [
+        "argus",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "selenium"
+      ],
+      "notes": {
+        "applitools": "Yes: visual AI comparison is the product.",
+        "playwright": "Partial: toHaveScreenshot with baselines is built in, with human review of diffs.",
+        "mabl": "Yes: visual change detection is advertised."
+      },
+      "roadmap": "Roadmap: deterministic baseline store and a bounded Pillow diff (SSIM-style ratio plus bounding box) attached to the same evidence contract. Tracked as a gap because Applitools and mabl lead here."
+    },
+    {
+      "id": "accessibility-checks",
+      "group": "authoring",
+      "name": "Accessibility checks",
+      "why": "Accessible UIs are testable UIs: roles and labels are also the most stable automation locators.",
+      "self": {
+        "rating": "partial",
+        "note": "The explorer flags missing accessible names and duplicate ids, and the requirement and code-review agents flag missing accessibility criteria and fragile selectors. There is no WCAG rule engine or conformance report, so this is partial only.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/explorer.py",
+            "contains": "accessible"
+          },
+          {
+            "kind": "file",
+            "path": "app/qa_agents/code_review.py"
+          }
+        ]
+      },
+      "ratings": {
+        "mabl": "yes",
+        "katalon": "partial",
+        "cypress": "partial",
+        "playwright": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "selenium",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "mabl": "Yes: accessibility checks are an advertised feature.",
+        "playwright": "Partial: axe integration is available in the ecosystem, not built in."
+      },
+      "roadmap": "Roadmap: a WCAG 2.2 rule subset with per-page evidence and a conformance summary. Explorer signal collection is implemented now."
+    },
+    {
+      "id": "data-driven",
+      "group": "authoring",
+      "name": "Data-driven runs",
+      "why": "One flow must prove many rows: boundaries, invalid data and locale variants.",
+      "self": {
+        "rating": "yes",
+        "note": "Execution plans carry typed datasets (CSV/JSON upload, per-row overrides, precedence rules) and the plan runner reports per-row results (app/plan_runtime.py).",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/plan_runtime.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/plan_runtime.py",
+            "contains": "def parse_dataset_upload"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/plans/dataset/parse"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "partial",
+        "cypress": "partial",
+        "selenium": "partial",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "testatlas": "yes"
+      },
+      "unknown": [
+        "argus",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Partial: data comes from user code and fixtures, not a managed dataset.",
+        "testatlas": "Partial: datasets are part of Gherkin scenarios it maps, not a managed runner feature."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "multi-browser",
+      "group": "coverage",
+      "name": "Multi-browser engines",
+      "why": "Chromium-only coverage misses WebKit and Gecko behaviour, including the bugs that only affect Safari users.",
+      "self": {
+        "rating": "partial",
+        "note": "The execution matrix records a browser per profile, but the runner launches Chromium only. Firefox and WebKit are not yet selectable, and the docs say so.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/browser.py",
+            "contains": "chromium"
+          },
+          {
+            "kind": "file",
+            "path": "app/plan_runtime.py"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "partial",
+        "selenium": "yes",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "playwright-mcp": "partial",
+        "chrome-devtools-mcp": "no",
+        "browser-use": "partial",
+        "applitools": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas"
+      ],
+      "notes": {
+        "playwright": "Yes: Chromium, Firefox and WebKit from one API.",
+        "cypress": "Partial: Chromium-family and Firefox in the open-source runner; WebKit needs paid Cloud.",
+        "chrome-devtools-mcp": "No by design: it drives Chrome."
+      },
+      "roadmap": "Roadmap R13 from the Playwright gap review: engine selection, install strategy and engine recorded in results."
+    },
+    {
+      "id": "desktop-native",
+      "group": "coverage",
+      "name": "Windows desktop automation",
+      "why": "ERP and legacy business systems still open a WinForms, WPF or MFC window.",
+      "self": {
+        "rating": "partial",
+        "note": "app/desktop_runner.py provides a bounded sequential UIA adapter with a deterministic simulator and an authenticated Windows agent bridge. Live control requires TF_WINDOWS_AGENT_URL/TOKEN, and the Support Matrix badges it SIMULATOR READY rather than verified.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/desktop_runner.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/roadmap/support-matrix"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_roadmap.py",
+            "contains": "desktop"
+          }
+        ]
+      },
+      "ratings": {
+        "testrigor": "yes",
+        "katalon": "partial",
+        "mabl": "no",
+        "playwright": "no",
+        "cypress": "no",
+        "selenium": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "testrigor": "Yes: desktop (and mainframe) coverage is advertised.",
+        "selenium": "Partial: WinAppDriver exists but is a separate project and is no longer actively maintained by Microsoft."
+      },
+      "roadmap": "Implemented simulator-first; live Windows agent needed for a real target."
+    },
+    {
+      "id": "mobile-native",
+      "group": "coverage",
+      "name": "Native mobile and rugged devices",
+      "why": "Warehouse, field and consumer flows are mobile-first; a browser-only QA tool cannot see them.",
+      "self": {
+        "rating": "partial",
+        "note": "app/mobile_runner.py covers Android (UiAutomator2), iOS (XCUITest) and Zebra DataWedge scanning through a simulator or an authenticated Appium hub bridge. No real device is claimed without a configured hub.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/mobile_runner.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/static/mobile-zebra-demo.html"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_roadmap.py",
+            "contains": "mobile"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "applitools": "partial",
+        "selenium": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "playwright",
+        "cypress"
+      ],
+      "notes": {
+        "selenium": "Partial: Appium is a separate project built on the WebDriver protocol."
+      },
+      "roadmap": "Implemented simulator-first; live hub needed for a real device."
+    },
+    {
+      "id": "erp-packs",
+      "group": "coverage",
+      "name": "ERP/CRM domain packs",
+      "why": "Enterprise QA teams spend most of their time in Oracle, SAP, Salesforce and Dynamics, where locators and frames are hostile.",
+      "self": {
+        "rating": "partial",
+        "note": "Seven packs (Oracle, SAP Fiori, JD Edwards, Dynamics 365 F&O and Business Central, Odoo, Salesforce) run against a deterministic local fixture with positive/negative datasets and teardown resets. This is not vendor certification and no real tenant is claimed.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/domain_packs.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/static/erp-crm-demo.html"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_roadmap.py",
+            "contains": "erp"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "partial",
+        "mabl": "partial",
+        "testrigor": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "playwright",
+        "cypress",
+        "selenium",
+        "applitools"
+      ],
+      "notes": {
+        "katalon": "Partial: ERP testing is served by generic keyword/record features rather than shipped domain packs."
+      },
+      "roadmap": "Implemented packs; a real tenant pilot is customer work."
+    },
+    {
+      "id": "frames-tabs",
+      "group": "coverage",
+      "name": "Frames, iframes and popups",
+      "why": "Enterprise apps nest iframes and open popups; a runner that cannot switch context cannot test them.",
+      "self": {
+        "rating": "partial",
+        "note": "Evidence capture masks secrets across frames and the plan/executor model carries frame-aware steps, but there is no saved frame chain or popup-alias authoring yet.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/evidence.py",
+            "contains": "frames"
+          },
+          {
+            "kind": "file",
+            "path": "app/step_runtime.py"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "partial",
+        "selenium": "yes",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "cypress": "Partial: iframe support has historically needed workarounds; popups are constrained."
+      },
+      "roadmap": "Roadmap R05 from the Playwright gap review."
+    },
+    {
+      "id": "file-transfers",
+      "group": "coverage",
+      "name": "Uploads and downloads",
+      "why": "Invoice, statement and document flows are upload/download flows.",
+      "self": {
+        "rating": "partial",
+        "note": "The recorder and runner handle the application's own resource downloads and artifact ZIPs; user-authored upload fixtures and download-content assertions are not in the step contract yet.",
+        "evidence": [
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/recordings/{rid}/resources.zip"
+          },
+          {
+            "kind": "file",
+            "path": "app/executor.py"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "partial",
+        "selenium": "partial",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Yes: file chooser, setInputFiles and download events are first-class."
+      },
+      "roadmap": "Roadmap R04 from the Playwright gap review."
+    },
+    {
+      "id": "network-mocking",
+      "group": "coverage",
+      "name": "Network mocking and request control",
+      "why": "Deterministic tests need to force the 500, the timeout and the empty response without waiting for a real outage.",
+      "self": {
+        "rating": "no",
+        "note": "No route interception or fulfill/abort rules are exposed. Do not claim it.",
+        "evidence": []
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "yes",
+        "selenium": "partial",
+        "katalon": "partial",
+        "mabl": "partial",
+        "playwright-mcp": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Yes: page.route with fulfill/abort and HAR replay."
+      },
+      "roadmap": "Roadmap R06 from the Playwright gap review: scoped mocks that never leak between tests."
+    },
+    {
+      "id": "api-testing",
+      "group": "api",
+      "name": "HTTP/API testing",
+      "why": "Half the defects live behind the UI, and API checks are cheaper and more stable than clicking.",
+      "self": {
+        "rating": "partial",
+        "note": "The API contract agent reviews OpenAPI/Swagger specs and drafts contract tests; the stored run/agent APIs are exercised by the test suite. There is no first-class HTTP step in the execution plan with response assertions yet.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/api_contract.py"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_unit.py",
+            "contains": "api"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "yes",
+        "selenium": "partial",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "partial",
+        "testatlas": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Yes: APIRequestContext is a built-in HTTP client with assertions.",
+        "cypress": "Yes: cy.request is built in."
+      },
+      "roadmap": "Roadmap R06: HTTP steps with bounded status/header/JSON assertions and captured values."
+    },
+    {
+      "id": "api-contract-review",
+      "group": "api",
+      "name": "API contract review",
+      "why": "A missing 401, an echoed stack trace or an unbounded payload is cheapest to catch in the spec, before a single request runs.",
+      "self": {
+        "rating": "yes",
+        "note": "app/qa_agents/api_contract.py reviews OpenAPI 3 and Swagger 2 (JSON or YAML) for validation, security and error-contract gaps and drafts executable contract tests.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/api_contract.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/qa_agents/api_contract.py",
+            "contains": "def review"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "partial",
+        "mabl": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "mabl": "Partial: API testing is supported; a spec review is not a named feature."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "mcp-server",
+      "group": "ai",
+      "name": "MCP server (AI-client interoperability)",
+      "why": "MCP is how an AI client reaches a tool. A server means no lock-in to one vendor's assistant.",
+      "self": {
+        "rating": "yes",
+        "note": "app/qa_agents/mcp_server.py speaks JSON-RPC over stdio with no SDK dependency and exposes the nine agents, stored-data sources, market position, gaps, step resolution and impact analysis. Read-only tools never start a browser or change data.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/mcp_server.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/qa_agents/mcp_server.py",
+            "contains": "market_position"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_market.py",
+            "contains": "mcp"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "testatlas": "yes",
+        "playwright-mcp": "yes",
+        "chrome-devtools-mcp": "yes",
+        "browser-use": "partial"
+      },
+      "unknown": [
+        "playwright",
+        "cypress",
+        "selenium",
+        "katalon",
+        "mabl",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "argus": "Yes: distributed as an MCP server.",
+        "testatlas": "Yes: 'all of it served to an AI agent over stdio' per the README."
+      },
+      "roadmap": "Existing capability, extended in this release."
+    },
+    {
+      "id": "llm-agent-hub",
+      "group": "ai",
+      "name": "QA agent hub (requirements to defects)",
+      "why": "Teams want AI help across the whole lifecycle, not only at authoring time, and they need the rules to work when no model is available.",
+      "self": {
+        "rating": "yes",
+        "note": "Nine agents (requirements, test cases, API contract, code review, triage, flaky analysis, defect drafting, regression selection, release summary) run a deterministic rules engine always and add AI insights only when a provider key exists.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/registry.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/agents"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_unit.py",
+            "contains": "agent"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "partial",
+        "testatlas": "partial",
+        "browser-use": "partial",
+        "mabl": "partial",
+        "testrigor": "partial"
+      },
+      "unknown": [
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "katalon",
+        "applitools"
+      ],
+      "notes": {
+        "argus": "Partial: autonomous QA and verification, not a nine-agent lifecycle hub.",
+        "testatlas": "Partial: a static code map served to an agent."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "requirements-to-cases",
+      "group": "ai",
+      "name": "Requirements review and case generation",
+      "why": "Most escaped defects start as an ambiguous requirement. Reviewing the words is cheaper than testing the code.",
+      "self": {
+        "rating": "yes",
+        "note": "Requirement Review finds missing acceptance criteria, vague terms, unhandled edges and open questions; Test Case Generation produces positive, negative and boundary cases with a Jira/Azure-ready CSV and Gherkin.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/requirements.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/qa_agents/case_design.py"
+          }
+        ]
+      },
+      "ratings": {
+        "testrigor": "partial",
+        "mabl": "partial",
+        "katalon": "partial",
+        "testatlas": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "testrigor": "Partial: generates tests from plain-English intent; it does not review the requirement.",
+        "testatlas": "Partial: maps existing Gherkin rather than authoring it."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "zero-llm-gate",
+      "group": "gates",
+      "name": "Zero-LLM, deterministic CI gate",
+      "why": "A gate must return the same verdict for the same build. Model temperature has no place in a release decision.",
+      "self": {
+        "rating": "yes",
+        "note": "Replay, assertions, triage and all nine agents have a rules mode; batch runs are deterministic and sequential, JUnit XML and JSON results are emitted, and the market claim audit plus the pilot suite fail the build on drift. AI insights are additive and never required.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/ci_results.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/qa_agents/common.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/{run_id}/junit.xml"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_market.py",
+            "contains": "junit"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "playwright": "yes",
+        "cypress": "yes",
+        "selenium": "yes",
+        "playwright-mcp": "partial",
+        "browser-use": "partial",
+        "testatlas": "partial",
+        "katalon": "partial"
+      },
+      "unknown": [
+        "chrome-devtools-mcp",
+        "mabl",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "argus": "Yes in the supplied comparison (row 5).",
+        "playwright": "Yes: the runner and assertions are deterministic; gates are composed from its exit code and reporters.",
+        "browser-use": "Partial: the loop depends on a model, so results are not reproducible by construct.",
+        "testatlas": "Partial: deterministic analysis, but it is not a run gate."
+      },
+      "roadmap": "Implemented in this release: JUnit XML, JSON results, the claim audit and the pilot receipt are all model-free."
+    },
+    {
+      "id": "ci-native",
+      "group": "gates",
+      "name": "CI integration out of the box",
+      "why": "A tool that cannot be called from a pipeline is a manual chore.",
+      "self": {
+        "rating": "partial",
+        "note": "Batch runs, Jenkinsfile export, GitHub workflows, JSON/JUnit/PDF report endpoints and a documented Docker path exist. A packaged single-command CLI runner is not shipped, so this stays partial.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/library_store.py"
+          },
+          {
+            "kind": "file",
+            "path": ".github/workflows/ci.yml"
+          },
+          {
+            "kind": "file",
+            "path": "app/ci_results.py"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "yes",
+        "selenium": "yes",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "applitools": "partial",
+        "playwright-mcp": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "chrome-devtools-mcp",
+        "browser-use"
+      ],
+      "notes": {
+        "playwright": "Yes: first-class GitHub Actions and sharding support."
+      },
+      "roadmap": "Roadmap: a `tf run --plan` CLI wrapper over the existing API. The exported Jenkinsfile and JUnit results work today."
+    },
+    {
+      "id": "machine-readable-results",
+      "group": "gates",
+      "name": "Machine-readable results (JUnit/JSON)",
+      "why": "Every CI system and every dashboard speaks JUnit or JSON. Screenshots alone cannot gate a pipeline.",
+      "self": {
+        "rating": "yes",
+        "note": "app/ci_results.py renders deterministic JUnit XML (suites, cases, failures, skipped, timings, escaped text) for a single run or a batch, alongside the existing JSON run report and batch report.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/ci_results.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/{run_id}/junit.xml"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/batch/{batch_id}/junit.xml"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/{run_id}/report.json"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "yes",
+        "selenium": "partial",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "selenium": "Partial: reporting is delegated to the runner or framework around it."
+      },
+      "roadmap": "Implemented in this release."
+    },
+    {
+      "id": "impact-analysis",
+      "group": "gates",
+      "name": "Impact analysis and blast radius",
+      "why": "Running everything is slow; running nothing is negligent. Change-to-test mapping is the only way to be both fast and safe.",
+      "self": {
+        "rating": "yes",
+        "note": "app/impact_map.py builds a deterministic dependency graph from stored projects and recordings (URLs, step labels, selectors, actions) and answers which tests a changed file, route or label reaches, with the reason for each edge and a ready batch payload.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/impact_map.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/impact_map.py",
+            "contains": "def analyse"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/impact/analyse"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/impact/map"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_market.py",
+            "contains": "impact"
+          }
+        ]
+      },
+      "ratings": {
+        "testatlas": "yes",
+        "katalon": "partial",
+        "playwright": "partial",
+        "mabl": "partial"
+      },
+      "unknown": [
+        "argus",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "testrigor",
+        "applitools"
+      ],
+      "notes": {
+        "testatlas": "Yes: blast radius across a .NET solution is a headline capability in the supplied README.",
+        "playwright": "Partial: --only-changed needs user-built mapping."
+      },
+      "roadmap": "Implemented in this release over the TestForge library graph."
+    },
+    {
+      "id": "flaky-detection",
+      "group": "gates",
+      "name": "Flaky detection and analysis",
+      "why": "Flaky tests train teams to ignore red builds, which then hides real failures.",
+      "self": {
+        "rating": "yes",
+        "note": "app/qa_agents/flaky.py computes flip rate, timing ratio, repeated error clusters and time-of-day patterns from run history, and ranks root causes; the plan runner keeps the stricter 'passed on retry = flaky' status.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/flaky.py"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/agents/{agent_id}/from-source"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "partial",
+        "cypress": "partial",
+        "katalon": "partial",
+        "mabl": "partial",
+        "testrigor": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Partial: retries are configurable and reporters expose the flaky outcome, without root-cause analysis."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "parallel-execution",
+      "group": "gates",
+      "name": "Bounded parallel execution",
+      "why": "Suite duration decides how often teams can ship. Parallelism must be bounded to the machine that pays for it.",
+      "self": {
+        "rating": "no",
+        "note": "Execution is deliberately sequential: one Chromium per instance, a queue in front of it, and a batch runner that never overlaps. The scaling review plans bounded workers, and until then this column is honestly 'no'.",
+        "evidence": []
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "yes",
+        "selenium": "yes",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "testatlas": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Yes: workers and sharding are built in.",
+        "selenium": "Yes: Grid distributes sessions."
+      },
+      "roadmap": "Roadmap R14: isolated workers, global resource control and fair cancellation. Sequential stays the default for small deployments."
+    },
+    {
+      "id": "release-go-no-go",
+      "group": "gates",
+      "name": "Release go/no-go report",
+      "why": "Somebody has to sign the release. A generated verdict with the evidence beats a slide built by hand.",
+      "self": {
+        "rating": "yes",
+        "note": "app/qa_agents/release.py writes a stakeholder release summary with a go/no-go recommendation from the latest result of every test, known defects and open risks; PDF and HTML per-run reports supply the evidence.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/qa_agents/release.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/{run_id}/report.pdf"
+          }
+        ]
+      },
+      "ratings": {
+        "mabl": "partial",
+        "katalon": "partial",
+        "testrigor": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "mabl": "Partial: dashboards and quality signals, with the judgement left to the team."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "open-source-free",
+      "group": "trust",
+      "name": "Free and open source",
+      "why": "Cost and lock-in decide what a QA team can adopt without a procurement cycle.",
+      "self": {
+        "rating": "yes",
+        "note": "Apache-2.0, no per-seat or per-run pricing, no vendor account required.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "LICENSE"
+          },
+          {
+            "kind": "file",
+            "path": "requirements.txt"
+          }
+        ]
+      },
+      "ratings": {
+        "argus": "yes",
+        "testatlas": "yes",
+        "playwright": "yes",
+        "cypress": "partial",
+        "selenium": "yes",
+        "playwright-mcp": "yes",
+        "chrome-devtools-mcp": "yes",
+        "browser-use": "yes",
+        "katalon": "partial",
+        "mabl": "no",
+        "testrigor": "no",
+        "applitools": "no"
+      },
+      "unknown": [],
+      "notes": {
+        "argus": "Free MCP listing; confirm the upstream licence before redistribution.",
+        "cypress": "Partial: the runner is MIT, the useful parallel/dashboard features are paid.",
+        "katalon": "Partial: free tier with paid seats and add-ons."
+      },
+      "roadmap": "Existing position."
+    },
+    {
+      "id": "self-hosted-offline",
+      "group": "trust",
+      "name": "Self-hosted and offline-capable",
+      "why": "Regulated and air-gapped environments cannot send data to a vendor cloud.",
+      "self": {
+        "rating": "yes",
+        "note": "Runs from Docker/Compose with SQLite or your Postgres. The rules engine, replay, reports, explorer, step catalogue and impact map need no outbound model call; AI is opt-in via one environment variable.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "Dockerfile"
+          },
+          {
+            "kind": "file",
+            "path": "docker-compose.yml"
+          },
+          {
+            "kind": "file",
+            "path": "deploy/oracle/provision.sh"
+          }
+        ]
+      },
+      "ratings": {
+        "testatlas": "yes",
+        "playwright": "yes",
+        "cypress": "partial",
+        "selenium": "yes",
+        "playwright-mcp": "yes",
+        "chrome-devtools-mcp": "yes",
+        "browser-use": "partial",
+        "katalon": "partial",
+        "argus": "partial",
+        "testrigor": "no",
+        "mabl": "no",
+        "applitools": "no"
+      },
+      "unknown": [],
+      "notes": {
+        "cypress": "Partial: the OSS runner is local, the collaboration layer is Cloud.",
+        "argus": "Partial: the server is local, but the AI client supplies the reasoning.",
+        "katalon": "Partial: Studio is local; TestOps can be self-hosted on paid plans.",
+        "mabl": "No: vendor cloud only.",
+        "testrigor": "No: vendor cloud (private cloud on request).",
+        "applitools": "No: Eyes cloud and account are required."
+      },
+      "roadmap": "Existing position."
+    },
+    {
+      "id": "evidence-redaction",
+      "group": "trust",
+      "name": "Secret redaction in evidence",
+      "why": "Reports and screenshots leak credentials more often than breaches do. Redaction has to be the default.",
+      "self": {
+        "rating": "yes",
+        "note": "app/qa_agents/common.py scrubs passwords, tokens, keys, connection strings and e-mails from every agent input and output; app/errors.py redacts errors; app/evidence.py masks password fields and known secret values before encoding screenshots.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/qa_agents/common.py",
+            "contains": "_SECRET_PATTERNS"
+          },
+          {
+            "kind": "file",
+            "path": "app/errors.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/evidence.py",
+            "contains": "mask"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_unit.py",
+            "contains": "redact"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "partial",
+        "mabl": "partial",
+        "testrigor": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "katalon": "Partial: secure storage for credentials, without evidence-level masking guarantees."
+      },
+      "roadmap": "Existing capability."
+    },
+    {
+      "id": "access-control",
+      "group": "trust",
+      "name": "Access control and RBAC",
+      "why": "QA data contains production credentials and customer data. Single-tenant demos are not a security model.",
+      "self": {
+        "rating": "partial",
+        "note": "app/access_control.py provides one operator token with signed sessions, rate-limited login and a health signal that says when the instance is unprotected. There is no multi-user RBAC or SSO, and the docs say so.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/access_control.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/auth/status"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "applitools": "yes"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use"
+      ],
+      "notes": {
+        "mabl": "Yes: SSO and workspace roles are standard SaaS controls."
+      },
+      "roadmap": "Roadmap: SSO/RBAC with per-project roles. The single-token gate stays as the secure default."
+    },
+    {
+      "id": "scalability",
+      "group": "trust",
+      "name": "Scaling and capacity controls",
+      "why": "A tool that falls over at 200 tests is a pilot, not a platform.",
+      "self": {
+        "rating": "partial",
+        "note": "Postgres read replicas, PgBouncer, a bounded shared cache, image sharding, a run queue with hygiene and explicit per-endpoint caps exist (app/db_replicas.py, app/cache.py, app/run_queue.py, app/guardrails.py). Execution itself stays one browser per instance, so throughput scales by instance, not by worker.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/db_replicas.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/run_queue.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/guardrails.py"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_scale.py",
+            "contains": "Scaling units"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "selenium": "yes",
+        "cypress": "yes",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "testatlas": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "testatlas": "Partial: a local analysis tool, with no execution fleet to scale."
+      },
+      "roadmap": "Implemented controls; worker parallelism is R14."
+    },
+    {
+      "id": "audit-trail",
+      "group": "trust",
+      "name": "Audit trail and provenance",
+      "why": "An auditor asks who changed what, what ran against which build, and whether the report is the one that was produced.",
+      "self": {
+        "rating": "partial",
+        "note": "Run step logs carry timestamps and outcomes; library publication writes receipts with commit SHAs; pilot and claim audits carry expiry and hashes. There is no append-only, tamper-evident audit log yet.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/library_store.py",
+            "contains": "def publish_outcome"
+          },
+          {
+            "kind": "file",
+            "path": "app/support_matrix.py"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "playwright",
+        "cypress",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "katalon": "Yes: TestOps keeps execution history and audit views."
+      },
+      "roadmap": "Roadmap: append-only event log with hash chaining for run and configuration changes."
+    },
+    {
+      "id": "html-pdf-reports",
+      "group": "reporting",
+      "name": "Self-contained HTML and PDF reports",
+      "why": "A report has to open on a manager's laptop with no server, no account and no network.",
+      "self": {
+        "rating": "yes",
+        "note": "Per-run HTML with embedded screenshots and a strict CSP, PDF via reportlab, batch reports, and this market matrix itself exports as a standalone HTML or Markdown document from the API.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/report_routes.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/pdf_reports.py"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/market/report.html"
+          }
+        ]
+      },
+      "ratings": {
+        "testatlas": "partial",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "partial",
+        "playwright": "partial",
+        "cypress": "partial",
+        "applitools": "partial"
+      },
+      "unknown": [
+        "argus",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use"
+      ],
+      "notes": {
+        "testatlas": "Partial: an HTML drill-down report is advertised; PDF is not named.",
+        "playwright": "Partial: the HTML reporter is built in, PDF needs user code."
+      },
+      "roadmap": "Existing capability, extended in this release."
+    },
+    {
+      "id": "video-trace",
+      "group": "reporting",
+      "name": "Video and trace artefacts",
+      "why": "A failing step is explained in seconds by a video or a trace, and in hours by a log.",
+      "self": {
+        "rating": "partial",
+        "note": "Runs record video where the capture policy allows and per-step screenshots are capped and masked; a Playwright trace archive is not produced.",
+        "evidence": [
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/video/{run_id}"
+          },
+          {
+            "kind": "file",
+            "path": "app/evidence.py"
+          }
+        ]
+      },
+      "ratings": {
+        "playwright": "yes",
+        "cypress": "yes",
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "yes",
+        "selenium": "partial",
+        "playwright-mcp": "partial"
+      },
+      "unknown": [
+        "argus",
+        "testatlas",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "playwright": "Yes: trace viewer with snapshots, network and console."
+      },
+      "roadmap": "Roadmap: optional trace.zip per failed run with a bounded size and a viewer link."
+    },
+    {
+      "id": "test-management-integration",
+      "group": "reporting",
+      "name": "Test-management and ticketing export",
+      "why": "Results that never reach Jira or Azure DevOps are retyped by somebody, and retyping loses evidence.",
+      "self": {
+        "rating": "yes",
+        "note": "Jira, Azure DevOps and TestComplete CSV and Excel workbooks, defect drafts in Jira wiki and Markdown, a step-per-row export and a Jira-ready CSV from case generation.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/export_formats.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/qa_agents/defects.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/export_formats.py",
+            "contains": "jira"
+          }
+        ]
+      },
+      "ratings": {
+        "katalon": "yes",
+        "mabl": "yes",
+        "testrigor": "partial",
+        "cypress": "partial",
+        "testatlas": "partial"
+      },
+      "unknown": [
+        "argus",
+        "playwright",
+        "selenium",
+        "playwright-mcp",
+        "chrome-devtools-mcp",
+        "browser-use",
+        "applitools"
+      ],
+      "notes": {
+        "katalon": "Yes: native Jira/Azure DevOps integrations in TestOps.",
+        "testatlas": "Partial: exports a feature/step map rather than results."
+      },
+      "roadmap": "Existing capability."
+    }
+  ],
+  "sources": [
+    {
+      "id": "supplied-argus",
+      "title": "Argus Testing — Autonomous QA MCP (GitHub MCP listing, comparison table)",
+      "url": "https://github.com/mcp/chriswu727/argus",
+      "accessed": "2026-10-22",
+      "kind": "supplied screenshot"
+    },
+    {
+      "id": "supplied-testatlas",
+      "title": "TestAtlas README (GitHub MCP listing)",
+      "url": "https://github.com/mcp/Karzon",
+      "accessed": "2026-10-22",
+      "kind": "supplied screenshot"
+    },
+    {
+      "id": "playwright",
+      "title": "Playwright documentation",
+      "url": "https://playwright.dev/docs/intro",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "playwright-mcp",
+      "title": "Playwright MCP",
+      "url": "https://github.com/microsoft/playwright-mcp",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "chrome-devtools-mcp",
+      "title": "Chrome DevTools MCP",
+      "url": "https://github.com/ChromeDevTools/chrome-devtools-mcp",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "browser-use",
+      "title": "browser-use",
+      "url": "https://github.com/browser-use/browser-use",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "cypress",
+      "title": "Cypress documentation",
+      "url": "https://docs.cypress.io",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "selenium",
+      "title": "Selenium documentation",
+      "url": "https://www.selenium.dev/documentation/",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "katalon",
+      "title": "Katalon Platform",
+      "url": "https://katalon.com",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "mabl",
+      "title": "mabl",
+      "url": "https://www.mabl.com",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "testrigor",
+      "title": "testRigor",
+      "url": "https://testrigor.com",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    },
+    {
+      "id": "applitools",
+      "title": "Applitools",
+      "url": "https://applitools.com",
+      "accessed": "2026-10-22",
+      "kind": "vendor documentation"
+    }
+  ]
+}

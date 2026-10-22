@@ -28,6 +28,10 @@ jobs:
           cache: pip
       - run: pip install -r requirements.txt -r requirements-test.txt
       - run: python -m unittest discover -s tests -p "test_*.py" -t .
+      # Zero-LLM gate for the market comparison: fails when a TestForge claim
+      # loses the evidence it is published with, so a stale capability matrix
+      # cannot reach main.
+      - run: python -m tools.market_audit
 
   harness:
     name: Full harness (with Chromium)
