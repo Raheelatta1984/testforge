@@ -114,10 +114,44 @@ class FakePage:
         return self.body_text
 
 
+class FakeTracing:
+    """Stands in for Playwright's context.tracing: records the call, writes a file."""
+
+    def __init__(self):
+        self.started = None
+        self.stopped = None
+
+    async def start(self, **kwargs):
+        self.started = dict(kwargs)
+
+    async def stop(self, path=None):
+        self.stopped = path
+        if path:
+            from pathlib import Path
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"fake-trace-zip")
+
+
+class FakeVideo:
+    """Stands in for page.video: path() materialises a marker file."""
+
+    def __init__(self, path):
+        self._path = str(path)
+
+    async def path(self):
+        from pathlib import Path
+        target = Path(self._path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"fake-video")
+        return self._path
+
+
 class FakeContext:
     def __init__(self, page):
         self.page = page
         self.closed = False
+        self.tracing = FakeTracing()
 
     async def new_page(self):
         return self.page

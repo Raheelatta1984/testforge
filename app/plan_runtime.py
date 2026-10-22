@@ -28,6 +28,13 @@ DEVICES = {
     "tablet": {"viewport": {"width": 820, "height": 1180}, "has_touch": True},
     "mobile": {"viewport": {"width": 390, "height": 844}, "has_touch": True},
 }
+try:
+    # The Devices tab catalogue: every profile id becomes a matrix device
+    # whose entry is the exact new_context kwargs the run applies.
+    from .devices import PLAN_DEVICES as _PLAN_DEVICES
+    DEVICES.update(_PLAN_DEVICES)
+except ImportError:  # exported companion source without the catalogue
+    pass
 MAX_CASES = 25
 MAX_ACTIONS = 2000
 

@@ -1,0 +1,13 @@
+pipeline {
+  agent any
+  stages {
+    stage('TestForge') {
+      steps {
+        echo 'Executing navigate on Open /demo.html'
+        echo 'Executing click on Click name'
+        echo 'Executing type on Type: {{user}}'
+        echo 'Executing click on Click Continue'
+      }
+    }
+  }
+}

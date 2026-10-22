@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TestForge ERP purchase-order demo</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:2rem;background:#0f172a;color:#e2e8f0}
+  main{max-width:46rem;margin:auto;background:#1e293b;padding:1.5rem;border-radius:1rem}
+  label{display:block;margin:.6rem 0 .2rem} input,select{padding:.5rem;width:100%;box-sizing:border-box}
+  button{padding:.55rem 1rem;margin:.6rem .3rem .6rem 0;cursor:pointer}
+  table{border-collapse:collapse;margin:1rem 0} th,td{border:1px solid #475569;padding:.35rem .7rem}
+  a{color:#7dd3fc}
+</style>
+</head>
+<body>
+<main id="root">
+  <h1 id="app-title">ERP purchase orders</h1>
+  <p>Tenant: <span data-testid="tenant-name" id="tenant-name">demo</span></p>
+  <section data-testid="po-panel" aria-label="New purchase order">
+    <label>Supplier <input id="po-supplier" data-testid="po-supplier" aria-label="Supplier"></label>
+    <label>Amount (AUD) <input id="po-amount" data-testid="po-amount" aria-label="Amount" inputmode="decimal"></label>
+    <button id="po-submit" data-testid="po-submit">Approve PO</button>
+    <p id="po-status" data-testid="po-status" role="status">Ready</p>
+  </section>
+  <table data-testid="po-lines" id="po-lines">
+    <thead><tr><th>Line</th><th>Item</th><th>Amount</th></tr></thead>
+    <tbody><tr><td>1</td><td>Widget</td><td>AUD 250.00</td></tr></tbody>
+  </table>
+  <p>Deterministic fixture (no real ERP): approving writes one numbered PO.</p>
+</main>
+<script>
+(function(){
+  var counter = 1;
+  document.getElementById('po-submit').addEventListener('click', function(){
+    var supplier = document.getElementById('po-supplier').value.trim();
+    var amount = document.getElementById('po-amount').value.trim();
+    var status = document.getElementById('po-status');
+    if(!supplier || !/^\d+(\.\d{1,2})?$/.test(amount) || Number(amount) <= 0){
+      status.textContent = 'PO rejected: supplier and a positive amount are required';
+      return;
+    }
+    var number = 'PO-2026-' + String(counter).padStart(3, '0');
+    counter += 1;
+    status.textContent = number + ' approved for ' + supplier + ': AUD ' + Number(amount).toFixed(2);
+  });
+})();
+</script>
+</body>
+</html>

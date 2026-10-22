@@ -97,6 +97,10 @@ class Page:
     interactive: list = field(default_factory=list)
     title: str = ""
     mode: str = "http"
+    # Computed-style contrast samples collected in-page by PlaywrightFetcher:
+    # [{tag, selector, fg, bg, size_px, bold}]. Empty in HTTP mode, where the
+    # contrast rule falls back to inline styles or reports not-checked.
+    a11y_samples: list = field(default_factory=list)
 
 
 @dataclass
@@ -483,7 +487,32 @@ class PlaywrightFetcher:
                             ids: Array.from(document.querySelectorAll('[id]')).map(el => el.id).slice(0,2000),
                             interactive, forms, images,
                             resources: Array.from(document.querySelectorAll('script[src],link[href],iframe[src]'))
-                              .map(el => ({url: el.src || el.href || '', kind: el.tagName.toLowerCase()})).slice(0,300)
+                              .map(el => ({url: el.src || el.href || '', kind: el.tagName.toLowerCase()})).slice(0,300),
+                            contrast: (() => {
+                              const out = [];
+                              const els = document.querySelectorAll('p,li,td,th,a,button,span,div,h1,h2,h3,h4,h5,h6,label');
+                              for (const el of els) {
+                                if (out.length >= 40) break;
+                                const text = (el.innerText || '').trim();
+                                if (!text || text.length > 200) continue;
+                                const style = getComputedStyle(el);
+                                if (style.display === 'none' || style.visibility === 'hidden') continue;
+                                let bg = style.backgroundColor;
+                                let node = el;
+                                let hops = 0;
+                                while ((bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') && node.parentElement && hops < 6) {
+                                  node = node.parentElement; hops++;
+                                  bg = getComputedStyle(node).backgroundColor;
+                                }
+                                if (bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = 'rgb(255, 255, 255)';
+                                out.push({tag: el.tagName.toLowerCase(),
+                                          selector: (el.id ? '#' + el.id : el.tagName.toLowerCase()),
+                                          fg: style.color, bg: bg,
+                                          size_px: parseFloat(style.fontSize) || 0,
+                                          bold: parseInt(style.fontWeight) >= 700 || style.fontWeight === 'bold'});
+                              }
+                              return out;
+                            })()
                           };
                         }""") or {}
                     page.body = str(structure.get("html") or "")[:MAX_BODY]
@@ -493,6 +522,19 @@ class PlaywrightFetcher:
                     page.interactive = [item for item in structure.get("interactive") or [] if isinstance(item, dict)]
                     page.forms = [item for item in structure.get("forms") or [] if isinstance(item, dict)]
                     page.resources = [item for item in structure.get("resources") or [] if isinstance(item, dict)]
+                    samples = []
+                    for item in structure.get("contrast") or []:
+                        if not isinstance(item, dict):
+                            continue
+                        samples.append({
+                            "tag": clip(str(item.get("tag") or "text"), 20),
+                            "selector": clip(str(item.get("selector") or ""), 120),
+                            "fg": clip(str(item.get("fg") or ""), 60),
+                            "bg": clip(str(item.get("bg") or ""), 60),
+                            "size_px": item.get("size_px") or 0,
+                            "bold": bool(item.get("bold")),
+                        })
+                    page.a11y_samples = samples[:40]
                     bad_images = {item["url"] for item in image_failures if item.get("status", 200) >= 400}
                     broken = {item["url"] for item in failed}
                     page.images = [{"src": str(item.get("src") or ""), "alt": item.get("alt") or "",
@@ -882,6 +924,32 @@ class Explorer:
             verified.append(finding)
         return verified
 
+    # -- accessibility ----------------------------------------------------
+    def accessibility_report(self, pages) -> dict:
+        """The WCAG A/AA subset over every crawled page. Additive: findings,
+        counts and the receipt are untouched, so discovery keeps its shape."""
+        from app.accessibility import scan_page
+        scanned = []
+        violations = []
+        for page in pages:
+            try:
+                result = scan_page(page)
+            except Exception:
+                continue
+            scanned.append({"url": page.url, "counts": result["counts"]})
+            for violation in result["violations"]:
+                if len(violations) >= 50:
+                    break
+                violations.append({"url": page.url, **violation})
+            if len(violations) >= 50:
+                break
+        by_impact: dict[str, int] = {}
+        for violation in violations:
+            impact = str(violation.get("impact") or "minor")
+            by_impact[impact] = by_impact.get(impact, 0) + 1
+        return {"scanned": len(scanned), "pages": scanned, "violations": violations,
+                "counts": {"violations": len(violations), "by_impact": by_impact}}
+
     # -- report -----------------------------------------------------------
     def scan(self) -> dict:
         started = time.monotonic()
@@ -903,6 +971,7 @@ class Explorer:
             finding.evidence = {**finding.evidence, "occurrences": counts.get(finding.signature, 1)}
         findings.sort(key=lambda item: (SEVERITY_ORDER.get(item.severity, 9), item.check, item.url, item.signature))
         findings = findings[:MAX_FINDINGS]
+        accessibility = self.accessibility_report(pages)
         elapsed = round(time.monotonic() - started, 3)
         report = {
             "schema": "testforge-explorer-report/1",
@@ -918,6 +987,7 @@ class Explorer:
             "fetch_failures": self.failures[:50],
             "findings": [finding.as_dict() for finding in findings],
             "counts": _counts(findings),
+            "accessibility": accessibility,
             "notes": [
                 "Deterministic, rule-based discovery: no language model is used, so the same target and the "
                 "same rules produce the same report.",

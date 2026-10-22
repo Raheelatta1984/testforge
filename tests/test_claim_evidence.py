@@ -683,3 +683,429 @@ class CiRunnerTests(unittest.TestCase):
             self.assertEqual(tf.main(["status", "run-2", "--quiet"]), 1)
         self.assertIn("<testsuite", out.read_text())
         self.assertEqual(json.loads((self.root / "one.json").read_text())["run_id"], "run-1")
+
+
+class TraceArtifactTests(unittest.TestCase):
+    """Video and trace.zip are recorded for a run and downloadable."""
+
+    @classmethod
+    def setUpClass(cls):
+        # Importing the app materialises the file library into the database,
+        # which drops ad-hoc rows - so the import happens before any test data.
+        from app.db import init_db
+        init_db()
+        from fastapi.testclient import TestClient
+        from app.main import app
+        cls.client = TestClient(app)
+
+    def test_CE_60_a_run_records_video_and_a_trace_zip_side_by_side(self):
+        import app.executor as executor
+        from app.config import ARTIFACTS
+        from app.db import Project, Recording, RecordingStep, Run, SessionLocal
+        from tests.fakes import FakePage, FakePlaywright, FakeVideo
+
+        with SessionLocal() as db:
+            project = Project(name="trace-demo", base_url="")
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+            recording = Recording(project_id=project.id, name="trace-demo",
+                                  start_url="http://127.0.0.1/demo.html")
+            db.add(recording)
+            db.commit()
+            db.refresh(recording)
+            db.add(RecordingStep(recording_id=recording.id, order=1, action="navigate",
+                                 value="/demo.html", label="Open"))
+            db.add(RecordingStep(recording_id=recording.id, order=2, action="click",
+                                 label="Go", selector={"primary": "#go", "x": 1, "y": 2}))
+            db.commit()
+            run = Run(recording_id=recording.id, status="queued")
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            run_id = run.id
+
+        page = FakePage(known=["#go"])
+        page.video = FakeVideo(os.path.join(ARTIFACTS, "runs", run_id, "video.webm"))
+        fake = FakePlaywright(page)
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        original = executor.async_playwright
+        executor.async_playwright = lambda: fake
+        try:
+            with patch.dict(os.environ, {"TF_TRACE": "1", "TF_ENABLE_VIDEO": "1"}):
+                asyncio.run(executor.execute_run(run_id, on_event, display_window=False))
+        finally:
+            executor.async_playwright = original
+
+        run_dir = Path(ARTIFACTS) / "runs" / run_id
+        self.assertTrue((run_dir / "trace.zip").is_file(),
+                        "the run keeps its trace.zip next to the step evidence")
+        self.assertTrue((run_dir / "video.webm").is_file(),
+                        "the run keeps its video next to the step evidence")
+        self.assertEqual(fake.browser.context.tracing.started,
+                         {"screenshots": True, "snapshots": True, "sources": True})
+        with SessionLocal() as db:
+            row = db.get(Run, run_id)
+            self.assertEqual(row.status, "passed")
+            self.assertTrue((row.trace_path or "").endswith("trace.zip"))
+            self.assertTrue((row.video_path or "").endswith("video.webm"))
+
+        trace = self.client.get(f"/api/runs/trace/{run_id}")
+        self.assertEqual(trace.status_code, 200)
+        self.assertEqual(trace.content, b"fake-trace-zip")
+        detail = self.client.get(f"/api/runs/{run_id}").json()
+        self.assertIn("trace.zip", detail["trace_path"])
+        self.assertEqual(self.client.get("/api/runs/trace/does-not-exist").status_code, 404)
+
+    def test_CE_61_tracing_opts_out_cleanly_and_never_breaks_a_run(self):
+        import app.executor as executor
+        from app import browser as browser_module
+        from app.config import ARTIFACTS
+        from app.db import Project, Recording, RecordingStep, Run, SessionLocal
+        from tests.fakes import FakePage, FakePlaywright
+
+        self.assertTrue(browser_module.trace_ok())
+        with patch.dict(os.environ, {"TF_TRACE": "0"}):
+            self.assertFalse(browser_module.trace_ok())
+
+        with SessionLocal() as db:
+            project = Project(name="trace-off", base_url="")
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+            recording = Recording(project_id=project.id, name="trace-off",
+                                  start_url="http://127.0.0.1/demo.html")
+            db.add(recording)
+            db.commit()
+            db.refresh(recording)
+            db.add(RecordingStep(recording_id=recording.id, order=1, action="navigate",
+                                 value="/demo.html", label="Open"))
+            db.commit()
+            run = Run(recording_id=recording.id, status="queued")
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            run_id = run.id
+
+        fake = FakePlaywright(FakePage(known=[]))
+        original = executor.async_playwright
+        executor.async_playwright = lambda: fake
+        try:
+            with patch.dict(os.environ, {"TF_TRACE": "0", "TF_ENABLE_VIDEO": "0"}):
+                asyncio.run(executor.execute_run(run_id, lambda event: asyncio.sleep(0),
+                                                 display_window=False))
+        finally:
+            executor.async_playwright = original
+
+        self.assertIsNone(fake.browser.context.tracing.started)
+        self.assertFalse((Path(ARTIFACTS) / "runs" / run_id / "trace.zip").exists())
+        with SessionLocal() as db:
+            row = db.get(Run, run_id)
+            self.assertEqual(row.status, "passed")
+            self.assertIsNone(row.trace_path)
+
+
+class AuditTrailTests(unittest.TestCase):
+    """Append-only per-run event log, hash-chained, tamper-evident."""
+
+    @classmethod
+    def setUpClass(cls):
+        from app.db import init_db
+        init_db()
+        from fastapi.testclient import TestClient
+        from app.main import app
+        cls.client = TestClient(app)
+
+    def test_CE_62_a_tampered_row_fails_verification(self):
+        from app.audit_trail import AuditTrail
+        root = Path(tempfile.mkdtemp(prefix="tf-audit-"))
+        try:
+            trail = AuditTrail(root, "run-1")
+            trail.append("run_started", {"steps": 2})
+            trail.append("step", {"order": 1, "status": "passed"})
+            trail.append("run_finished", {"status": "passed"})
+            good = trail.verify()
+            self.assertTrue(good["ok"])
+            self.assertEqual(good["rows"], 3)
+            self.assertTrue(good["complete"])
+            self.assertRegex(good["head"], r"^[0-9a-f]{64}$")
+
+            def rewrite(lines):
+                (root / "audit.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+            original = (root / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+
+            # Mutate one row's payload on disk: verification must fail.
+            row = json.loads(original[1])
+            row["payload"]["status"] = "failed"
+            mutated = list(original)
+            mutated[1] = json.dumps(row)
+            rewrite(mutated)
+            bad = trail.verify()
+            self.assertFalse(bad["ok"])
+            self.assertIn("modified", bad["detail"])
+
+            # Removing a middle row breaks the sequence: also detected.
+            rewrite([original[0], original[2]])
+            dropped = trail.verify()
+            self.assertFalse(dropped["ok"])
+
+            # Reordering rows breaks the chain: also detected.
+            rewrite([original[1], original[0], original[2]])
+            reordered = trail.verify()
+            self.assertFalse(reordered["ok"])
+
+            # A file swapped in from another run does not verify here.
+            rewrite(original)
+            self.assertTrue(trail.verify()["ok"])
+            foreign = AuditTrail(root, "run-2")
+            self.assertFalse(foreign.verify()["ok"])
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_CE_63_payloads_are_bounded_and_empty_trails_verify(self):
+        from app.audit_trail import AuditTrail, MAX_PAYLOAD_CHARS
+        root = Path(tempfile.mkdtemp(prefix="tf-audit-"))
+        try:
+            trail = AuditTrail(root, "run-9")
+            empty = trail.verify()
+            self.assertTrue(empty["ok"])
+            self.assertEqual(empty["rows"], 0)
+            self.assertFalse(empty["complete"])
+            row = trail.append("step", {"label": "x" * (MAX_PAYLOAD_CHARS + 500)})
+            self.assertLessEqual(len(row["payload"]["label"]), MAX_PAYLOAD_CHARS)
+            self.assertTrue(trail.verify()["ok"])
+            with self.assertRaises(ValueError):
+                trail.append("  ", {})
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+    def test_CE_64_a_run_writes_a_verifiable_audit_trail(self):
+        import app.executor as executor
+        from app.config import ARTIFACTS
+        from app.db import Project, Recording, RecordingStep, Run, SessionLocal
+        from tests.fakes import FakePage, FakePlaywright
+
+        with SessionLocal() as db:
+            project = Project(name="audit-demo", base_url="")
+            db.add(project)
+            db.commit()
+            db.refresh(project)
+            recording = Recording(project_id=project.id, name="audit-demo",
+                                  start_url="http://127.0.0.1/demo.html")
+            db.add(recording)
+            db.commit()
+            db.refresh(recording)
+            db.add(RecordingStep(recording_id=recording.id, order=1, action="navigate",
+                                 value="/demo.html", label="Open"))
+            db.add(RecordingStep(recording_id=recording.id, order=2, action="click",
+                                 label="Go", selector={"primary": "#go", "x": 1, "y": 2}))
+            db.commit()
+            run = Run(recording_id=recording.id, status="queued")
+            db.add(run)
+            db.commit()
+            db.refresh(run)
+            run_id = run.id
+
+        fake = FakePlaywright(FakePage(known=["#go"]))
+        events = []
+
+        async def on_event(event):
+            events.append(event)
+
+        original = executor.async_playwright
+        executor.async_playwright = lambda: fake
+        try:
+            asyncio.run(executor.execute_run(run_id, on_event, display_window=False))
+        finally:
+            executor.async_playwright = original
+
+        audit_path = Path(ARTIFACTS) / "runs" / run_id / "audit.jsonl"
+        self.assertTrue(audit_path.is_file(), "the run keeps its audit.jsonl next to the evidence")
+        payload = self.client.get(f"/api/runs/audit/{run_id}").json()
+        self.assertTrue(payload["verified"])
+        self.assertTrue(payload["complete"])
+        self.assertEqual([entry["event"] for entry in payload["entries"]],
+                         ["run_started", "step", "step", "run_finished"])
+        self.assertEqual(payload["entries"][1]["payload"]["status"], "passed")
+        detail = self.client.get(f"/api/runs/{run_id}").json()
+        self.assertTrue(detail["audit"]["present"])
+        self.assertTrue(detail["audit"]["verified"])
+
+        # Tamper with the file after the run: the endpoint must report it.
+        lines = audit_path.read_text(encoding="utf-8").splitlines()
+        row = json.loads(lines[1])
+        row["payload"]["status"] = "failed"
+        lines[1] = json.dumps(row)
+        audit_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        tampered = self.client.get(f"/api/runs/audit/{run_id}").json()
+        self.assertFalse(tampered["verified"])
+        self.assertEqual(tampered["entries"], [])
+        self.assertEqual(self.client.get("/api/runs/audit/does-not-exist").status_code, 404)
+
+
+class AccessibilityTests(unittest.TestCase):
+    """WCAG A/AA subset: labels, roles, contrast, landmarks, focus order."""
+
+    BAD_HTML = """<html><head><title></title></head><body>
+<img src="x.png">
+<button></button>
+<input type="text" id="q">
+<h1>Hi</h1><h3>Skip</h3>
+<div tabindex="3">x</div>
+<p style="color:#999999; background-color:#ffffff">dim</p>
+<div id="dup"></div><span id="dup"></span>
+</body></html>"""
+
+    GOOD_HTML = """<html lang="en"><head><title>Clean</title></head><body><main>
+<h1>Clean</h1>
+<img src="x.png" alt="demo">
+<a href="/next">go</a>
+<label>Your name <input type="text" id="n"></label>
+</main></body></html>"""
+
+    @classmethod
+    def setUpClass(cls):
+        from app.db import init_db
+        init_db()
+        from fastapi.testclient import TestClient
+        from app.main import app
+        cls.client = TestClient(app)
+
+    @staticmethod
+    def _page(html, title="", interactive=None, images=None, ids=None, samples=None):
+        from app.explorer import Page
+        return Page(url="https://example.test/", status=200, body=html, title=title,
+                    interactive=interactive or [], images=images or [], ids=ids or [],
+                    a11y_samples=samples or [])
+
+    def test_CE_70_the_subset_flags_labels_roles_landmarks_and_focus_order(self):
+        from app.accessibility import scan_page
+        interactive = [
+            {"tag": "button", "type": "", "id": "", "name": "", "role": "", "aria_label": "",
+             "title": "", "alt": "", "placeholder": "", "text": "", "hidden": False, "href": ""},
+            {"tag": "input", "type": "text", "id": "q", "name": "", "role": "", "aria_label": "",
+             "title": "", "alt": "", "placeholder": "", "text": "", "hidden": False, "href": ""},
+        ]
+        report = scan_page(self._page(
+            self.BAD_HTML, title="", interactive=interactive,
+            images=[{"src": "https://example.test/x.png", "alt": ""}], ids=["dup", "dup"]))
+        failed = {rule["id"]: rule for rule in report["rules"] if rule["status"] == "fail"}
+        for rule_id in ("TF-A11Y-01", "TF-A11Y-02", "TF-A11Y-03", "TF-A11Y-04", "TF-A11Y-05",
+                        "TF-A11Y-06", "TF-A11Y-07", "TF-A11Y-08", "TF-A11Y-09", "TF-A11Y-10"):
+            self.assertIn(rule_id, failed, f"{rule_id} should fail on the bad fixture")
+        # Every violation persists its rule id, criterion, level and impact.
+        violation = {item["id"]: item for item in report["violations"]}["TF-A11Y-04"]
+        self.assertEqual((violation["wcag"], violation["level"], violation["impact"]),
+                         ("4.1.2", "A", "serious"))
+        contrast = failed["TF-A11Y-10"]
+        self.assertEqual(contrast["wcag"], "1.4.3")
+        self.assertLess(contrast["nodes"][0]["ratio"], 4.5)
+
+    def test_CE_71_a_clean_page_passes_and_contrast_maths_is_exact(self):
+        from app.accessibility import contrast_ratio, parse_colour, scan_page
+        self.assertEqual(contrast_ratio((0, 0, 0), (255, 255, 255)), 21.0)
+        self.assertEqual(contrast_ratio((17, 17, 17), (17, 17, 17)), 1.0)
+        self.assertLess(contrast_ratio((119, 119, 119), (255, 255, 255)), 4.5)
+        self.assertGreaterEqual(contrast_ratio((118, 118, 118), (255, 255, 255)), 4.5)
+        self.assertEqual(parse_colour("#fff"), (255, 255, 255))
+        self.assertEqual(parse_colour("rgb(1, 2, 3)"), (1, 2, 3))
+        self.assertIsNone(parse_colour("nonsense"))
+        interactive = [
+            {"tag": "a", "type": "", "id": "", "name": "", "role": "", "aria_label": "",
+             "title": "", "alt": "", "placeholder": "", "text": "go", "hidden": False,
+             "href": "/next"},
+            {"tag": "input", "type": "text", "id": "n", "name": "", "role": "", "aria_label": "",
+             "title": "", "alt": "", "placeholder": "", "text": "", "hidden": False, "href": ""},
+        ]
+        report = scan_page(self._page(
+            self.GOOD_HTML, title="Clean", interactive=interactive,
+            images=[{"src": "https://example.test/x.png", "alt": "demo"}], ids=["n"]))
+        self.assertEqual(report["violations"], [])
+        self.assertEqual(report["counts"], {"rules": 10, "passed": 9, "failed": 0,
+                                            "not_checked": 1})
+        skipped = [rule for rule in report["rules"] if rule["status"] == "not-checked"]
+        self.assertEqual([rule["id"] for rule in skipped], ["TF-A11Y-10"])
+        # Rendered samples fail the rule when computed contrast is too low.
+        low = scan_page(self._page(
+            self.GOOD_HTML, title="Clean", interactive=interactive,
+            images=[{"src": "https://example.test/x.png", "alt": "demo"}], ids=["n"],
+            samples=[{"tag": "p", "selector": "#body", "fg": "rgb(153, 153, 153)",
+                      "bg": "rgb(255, 255, 255)", "size_px": 14, "bold": False}]))
+        self.assertEqual([item["id"] for item in low["violations"]], ["TF-A11Y-10"])
+
+    def test_CE_72_the_scan_endpoint_persists_rule_ids_and_impact(self):
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from app.config import ARTIFACTS
+
+        fixture = self.BAD_HTML.encode()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_GET(self):
+                body = fixture if self.path == "/" else b"missing"
+                self.send_response(200 if self.path == "/" else 404)
+                self.send_header("Content-Type", "text/html")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            base = f"http://127.0.0.1:{server.server_port}/"
+            response = self.client.post("/api/accessibility/scan", json={
+                "url": base, "mode": "http", "max_pages": 1, "max_depth": 0,
+                "allow_private": True})
+            self.assertEqual(response.status_code, 200, response.text)
+            payload = response.json()
+            found = {item["id"]: item for item in payload["violations"]}
+            for rule_id in ("TF-A11Y-01", "TF-A11Y-03", "TF-A11Y-04", "TF-A11Y-09",
+                            "TF-A11Y-10"):
+                self.assertIn(rule_id, found)
+            self.assertEqual(found["TF-A11Y-01"]["impact"], "serious")
+            self.assertEqual(payload["counts"]["pages"], 1)
+            scan_id = payload["scan_id"]
+            self.assertTrue((Path(ARTIFACTS) / "a11y" / f"{scan_id}.json").is_file())
+            stored = self.client.get(f"/api/accessibility/scans/{scan_id}").json()
+            self.assertEqual(len(stored["pages"][0]["rules"]), 10)
+            rules = self.client.get("/api/accessibility/rules").json()["rules"]
+            self.assertEqual(len(rules), 10)
+            self.assertEqual(self.client.post("/api/accessibility/scan",
+                                              json={"url": "gopher://x"}).status_code, 400)
+            self.assertEqual(self.client.get("/api/accessibility/scans/nope").status_code, 404)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=5)
+
+    def test_CE_73_explorer_reports_carry_the_accessibility_section(self):
+        from app import explorer
+        cleaned = self._page(self.GOOD_HTML, title="Clean", interactive=[
+            {"tag": "a", "type": "", "id": "", "name": "", "role": "", "aria_label": "",
+             "title": "", "alt": "", "placeholder": "", "text": "go", "hidden": False,
+             "href": "/next"}],
+            images=[{"src": "https://example.test/x.png", "alt": "demo"}], ids=["n"])
+
+        class StubFetcher:
+            mode = "stub"
+
+            def fetch(self, url):
+                cleaned.url = url
+                return cleaned
+
+        report = explorer.Explorer("https://example.test/", fetcher=StubFetcher(),
+                                   max_pages=1, max_depth=0).scan()
+        section = report["accessibility"]
+        self.assertEqual(section["scanned"], 1)
+        self.assertEqual(section["violations"], [])
+        self.assertIn("receipt", report)
+        self.assertIn("findings", report)

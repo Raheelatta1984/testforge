@@ -489,6 +489,15 @@ class RecorderAndExportTests(unittest.TestCase):
             self.assertLess(script.index('data-testid'), script.index('data-sap-ui-id'))
             self.assertLess(script.index('data-sap-ui-id'), script.index('data-field'))
             self.assertIn('stableId', script)
+            # A stable id beats placeholder copy (LB-REC-02 records #name, not
+            # input[placeholder="Your name"]): placeholder text changes with
+            # copy/i18n, while stableId() already filters generated ids.
+            if 'stableId(node.id)' in script:
+                self.assertLess(script.index('stableId(node.id)'),
+                                script.index('const placeholder'))
+            else:
+                self.assertLess(script.index('stableId(el.id)'),
+                                script.index('getAttribute("placeholder")'))
 
     def test_new_actions_are_canonical_everywhere(self):
         self.assertEqual(normalize_step({'action': 'table_lookup', 'selector': {'primary': 'table', 'row_text': 'Ada', 'column': 'Status'}, 'value': 'status'})['action'], 'table_lookup')

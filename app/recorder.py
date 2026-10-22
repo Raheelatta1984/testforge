@@ -64,9 +64,9 @@ _ELEMENT_JS = """
     const role = attr(node, "role");
     if (aria && role) return node.tagName.toLowerCase() + '[role="' + cssEscape(role) + '"][aria-label="' + aria.replace(/"/g, '\\\\"') + '"]';
     if (aria) return node.tagName.toLowerCase() + '[aria-label="' + aria.replace(/"/g, '\\\\"') + '"]';
+    if (stableId(node.id)) return "#" + cssEscape(node.id);
     const placeholder = attr(node, "placeholder");
     if (placeholder) return node.tagName.toLowerCase() + '[placeholder="' + placeholder.replace(/"/g, '\\\\"') + '"]';
-    if (stableId(node.id)) return "#" + cssEscape(node.id);
     const parts = [];
     let cur = node;
     while (cur && cur.nodeType === 1 && parts.length < 6 && cur.tagName !== "HTML") {
@@ -101,8 +101,8 @@ _FOCUSED_JS = """
   else if (el.getAttribute("data-field")) selector = '[data-field="' + cssEscape(el.getAttribute("data-field")) + '"]';
   else if (el.getAttribute("name")) selector = el.tagName.toLowerCase() + '[name="' + cssEscape(el.getAttribute("name")) + '"]';
   else if (el.getAttribute("aria-label")) selector = el.tagName.toLowerCase() + '[aria-label="' + el.getAttribute("aria-label").replace(/"/g, '\\\\"') + '"]';
-  else if (el.getAttribute("placeholder")) selector = el.tagName.toLowerCase() + '[placeholder="' + el.getAttribute("placeholder").replace(/"/g, '\\\\"') + '"]';
   else if (stableId(el.id)) selector = "#" + cssEscape(el.id);
+  else if (el.getAttribute("placeholder")) selector = el.tagName.toLowerCase() + '[placeholder="' + el.getAttribute("placeholder").replace(/"/g, '\\\\"') + '"]';
   if (!selector) {
     const parts = [];
     let cur = el;

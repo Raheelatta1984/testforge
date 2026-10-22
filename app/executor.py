@@ -19,7 +19,8 @@ from pathlib import Path
 from playwright.async_api import async_playwright
 
 from app import guardrails
-from app.browser import Preview, explain_launch_error, launch_kwargs, video_ok
+from app.audit_trail import AuditTrail
+from app.browser import Preview, explain_launch_error, launch_kwargs, trace_ok, video_ok
 from app.config import ARTIFACTS, logger
 from app.db import Recording, Run, SessionLocal, interpolate, resolve_variables
 from app.guardrails import browser_budget, live_frames
@@ -62,6 +63,25 @@ def _save(run_id, **fields):
         for key, value in fields.items():
             setattr(run, key, value)
         db.commit()
+
+
+def _audit(trail, event, payload=None):
+    """Append to the run's audit trail. An audit failure is logged, never fatal:
+    the run's verdict must not depend on its own bookkeeping."""
+    if trail is None:
+        return
+    try:
+        trail.append(event, payload or {})
+    except Exception as exc:
+        logger.warning("AUDIT APPEND %s (%s)", event, type(exc).__name__)
+
+
+def _step_audit(entry):
+    """The compact, already-scrubbed projection a step leaves in the trail."""
+    return {"order": entry.get("order"), "step_index": entry.get("step_index"),
+            "action": entry.get("action"), "label": entry.get("label"),
+            "status": entry.get("status"), "duration_ms": entry.get("duration_ms"),
+            "error": entry.get("error"), "evidence": bool(entry.get("screenshot"))}
 
 
 async def _click(page, selector, action_ms: int | None = None):
@@ -368,6 +388,9 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                         entry['screenshot'] = f"/api/runs/screenshot/{run_id}/{Path(entry['screenshot']).name}"
                     entry = scrub_entry(entry, plan_sensitive)
                     logs.append(entry)
+            _audit(trail, 'case', {'case': case.get('case'), 'row': case.get('row'),
+                                     'status': case.get('status'), 'browser': case.get('browser'),
+                                     'runner': case.get('runner')})
             percent = int(done / total * 100)
             _save(run_id, progress_pct=percent, execution_log=list(logs))
             await on_event({'type': 'status', 'status': 'running', 'percent': percent})
@@ -383,10 +406,20 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             from app.secrets_store import reveal_map, scrub_entry
             values, _ = environment(project_id, plan, reveal_map(variable_snapshot) if variable_snapshot is not None else None)
             _save(run_id, status='running', started_at=datetime.datetime.utcnow())
+            try:
+                trail = AuditTrail(Path(ARTIFACTS) / 'runs' / run_id, run_id)
+            except Exception:
+                trail = None
+                logger.warning("AUDIT OPEN %s failed", run_id)
+            _audit(trail, 'run_started', {'plan': True,
+                                          'cases': len(plan['dataset']) * len(plan['matrix']),
+                                          'profiles': [profile.get('browser') or profile.get('runner')
+                                                       for profile in plan['matrix']]})
             result = await run_plan(plan, values, Path(ARTIFACTS) / 'runs' / run_id,
                                     chromium_options=launch_kwargs(), on_progress=progress,
                                     on_step=desktop_step,
                                     input_overrides=reveal_map(overrides), evidence=callback(Path(ARTIFACTS) / 'runs' / run_id, plan_sensitive))
+            _audit(trail, 'run_finished', {'status': result['status'], 'cases': result.get('total')})
             _save(run_id, status=result['status'], progress_pct=100, finished_at=datetime.datetime.utcnow(), execution_log=logs)
             await on_event({'type': 'done', 'status': result['status'], 'percent': 100})
         return
@@ -442,10 +475,18 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
         log_entries = []
         status = "passed"
         error_text = None
+        try:
+            trail = AuditTrail(run_dir, run_id)
+        except Exception:
+            trail = None
+            logger.warning("AUDIT OPEN %s failed", run_id)
+        _audit(trail, "run_started", {"steps": len(steps), "screenshots": screenshots,
+                                      "window": window_is_enabled()})
 
         if not steps:
             status = "error"
             error_text = "This recording has no steps. Record at least one action, then run it again."
+            _audit(trail, "run_finished", {"status": status, "steps": 0, "error": "no steps"})
             _save(
                 run_id,
                 status=status,
@@ -519,11 +560,22 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                 vw = int(os.environ.get("TF_VIEWPORT_WIDTH", "1024"))
                 vh = int(os.environ.get("TF_VIEWPORT_HEIGHT", "640"))
                 context_kwargs = {"viewport": {"width": vw, "height": vh}, "device_scale_factor": 1}
-                # Video disabled for speed unless explicitly enabled (saves CPU)
-                if video_ok() and os.environ.get("TF_ENABLE_VIDEO", "0") == "1":
+                # Video is evidence, not decoration: it records for every run the
+                # browser can write (small size, capped by run retention) unless
+                # the operator opts out with TF_ENABLE_VIDEO=0.
+                if video_ok() and os.environ.get("TF_ENABLE_VIDEO", "1").strip().lower() not in {"0", "false", "no", "off"}:
                     context_kwargs["record_video_dir"] = run_dir
                     context_kwargs["record_video_size"] = {"width": min(vw, 640), "height": min(vh, 400)}
                 context = await browser.new_context(**context_kwargs)
+                # A Playwright trace (screenshots, DOM snapshots, sources) for the
+                # whole run, kept next to the video. TF_TRACE=0 opts out.
+                tracing = False
+                if trace_ok() and hasattr(context, "tracing"):
+                    try:
+                        await context.tracing.start(screenshots=True, snapshots=True, sources=True)
+                        tracing = True
+                    except Exception:
+                        tracing = False
                 page = await context.new_page()
                 # Keep the lightweight preview loop alive so an operator can
                 # switch it on mid-run. Its viewer/mode gate means no screenshot
@@ -617,6 +669,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                                     entry['evidence_error'] = type(evidence_error).__name__
                             entry["percent"] = percent
                             entry = scrub_entry(entry, sensitive)
+                            _audit(trail, "step", _step_audit(entry))
                             log_entries.append(entry)
                             await on_event(entry)
                             status = "failed"
@@ -624,6 +677,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                             _save(run_id, status="failed", progress_pct=percent, execution_log=list(log_entries))
                             break
                         entry = scrub_entry(entry, sensitive)
+                        _audit(trail, "step", _step_audit(entry))
                         log_entries.append(entry)
                         await on_event(entry)
                         _save(run_id, progress_pct=entry["percent"], execution_log=list(log_entries))
@@ -637,6 +691,17 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                     except Exception as exc:
                         logger.warning("RUN ACTION CLEANUP %s (%s)", run_id, type(exc).__name__)
                     video_path = None
+                    trace_path = None
+                    try:
+                        # The trace must stop before its context closes; stopping
+                        # without a path would discard it.
+                        if tracing:
+                            await context.tracing.stop(path=str(Path(run_dir) / "trace.zip"))
+                            candidate = Path(run_dir) / "trace.zip"
+                            if candidate.is_file() and candidate.stat().st_size > 0:
+                                trace_path = str(candidate)
+                    except Exception:
+                        trace_path = None
                     try:
                         await context.close()
                         if video is not None:
@@ -649,6 +714,8 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                         pass
                     if video_path and os.path.isfile(video_path):
                         _save(run_id, video_path=video_path)
+                    if trace_path and os.path.isfile(trace_path):
+                        _save(run_id, trace_path=trace_path)
         except Exception as exc:
             status = "error"
             error_text = scrub(explain_launch_error(exc), sensitive)
@@ -669,6 +736,8 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             fields["rog_qa_log"] = "QA: marked failed. Open the step log and screenshots."
         else:
             fields["rog_qa_log"] = f"QA: every recorded step completed in {elapsed:.1f}s."
+        _audit(trail, "run_finished", {"status": status, "steps": len(log_entries),
+                                         "elapsed": round(elapsed, 3)})
         _save(run_id, **fields)
         await on_event({
             "type": "done", "status": status, "error": error_text, "log": log_entries,

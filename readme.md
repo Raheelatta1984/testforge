@@ -165,7 +165,7 @@ The **Market position** tab (and `GET /api/market/matrix`) compares TestForge wi
 - **The gaps are published.** Eleven capabilities still show a competitor ahead (parallel execution, self-healing, WCAG conformance, multi-browser, RBAC, video/trace, audit trail and others), each with the leading tools and the roadmap disposition.
 - **Two artefacts, one source.** `GET /api/market/report.html` serves a self-contained, printable document (strict CSP, no scripts, no external assets) and `GET /api/market/report.md` serves the same matrix as Markdown.
 
-Gaps that could be closed without a model or a paid service were implemented in this repository: deterministic black-box discovery with independent verification and receipts (`app/explorer.py`), a reusable step catalogue with phrase resolution (`app/step_catalog.py`), a library dependency graph with impact analysis (`app/impact_map.py`), JUnit/JSON CI output (`app/ci_results.py`), deterministic visual baselines (`app/visual_regression.py`), a bounded execution pool (`app/run_pool.py`), the `tf` CI runner (`tools/tf.py`), and five extra read-only MCP tools.
+Gaps that could be closed without a model or a paid service were implemented in this repository: deterministic black-box discovery with independent verification and receipts (`app/explorer.py`), a reusable step catalogue with phrase resolution (`app/step_catalog.py`), a library dependency graph with impact analysis (`app/impact_map.py`), JUnit/JSON CI output (`app/ci_results.py`), deterministic visual baselines (`app/visual_regression.py`), a bounded execution pool (`app/run_pool.py`), the `tf` CI runner (`tools/tf.py`), and five extra read-only MCP tools. Four more conversions followed, each with machine-checked probes: per-run video plus a Playwright `trace.zip` (`Run.trace_path`, `GET /api/runs/trace/{run_id}`), an append-only hash-chained audit trail per run (`app/audit_trail.py`, `GET /api/runs/audit/{run_id}`), a WCAG A/AA ten-rule subset with persisted rule ids and impact (`app/accessibility.py`, `POST /api/accessibility/scan`), and multi-browser plan execution with a CI job that installs and runs chromium, firefox and webkit (`tests/test_multi_browser.py`). That took the matrix from 85.7% to **90.5% — past Argus at 90.0%** — with 42/42 claims verified and 7 gaps left. The Devices tab (║) adds fourteen emulation profiles with true-viewport previews and deterministic per-device runs over the zebra, ERP, CRM and combined fixtures.
 
 Two honesty fixes shipped with them. The Docker image now ships the paths the evidence probes cite (`tests/`, `.github/`, `deploy/`, `tools/`, `Dockerfile`, `docker-compose.yml`), because the audit runs inside the container and was reporting our own shipped features as **Unverified** while CI called them verified. And four capabilities that already existed — network mocking, HTTP steps, uploads/downloads and frame chains — were claimed as they are, because a matrix that under-claims is still publishing something false. Where we stand, what it would take to lead, and what should never be claimed are in [`docs/market-strategy-2026-10.md`](docs/market-strategy-2026-10.md). Full method, limits, API reference and the honesty rules are in [`docs/market-position.md`](docs/market-position.md). Tests: `tests/test_market.py`, `tests/test_claim_evidence.py`.
 
@@ -228,7 +228,7 @@ The harness runs the unit suite and the library scenarios. Library scenarios are
 python -m tests.harness
 ```
 
-The market comparison is gated separately and needs no browser: `python -m tools.market_audit` exits non-zero when a TestForge claim loses its evidence, and CI runs it after the unit suite. `tests/test_market.py` covers the matrix, audit, reports, step catalogue, impact map, explorer, JUnit output, MCP tools, dashboard wiring and no-downgrade checks. `tests/test_claim_evidence.py` covers the evidence the container must ship, the runtime-parity of the HTTP/mock/file/frame steps, visual baselines, the execution pool and the `tf` CLI.
+The market comparison is gated separately and needs no browser: `python -m tools.market_audit` exits non-zero when a TestForge claim loses its evidence, and CI runs it after the unit suite. `tests/test_market.py` covers the matrix, audit, reports, step catalogue, impact map, explorer, JUnit output, MCP tools, dashboard wiring and no-downgrade checks. `tests/test_claim_evidence.py` covers the evidence the container must ship, the runtime-parity of the HTTP/mock/file/frame steps, visual baselines, the execution pool and the `tf` CLI, plus the trace-artefact, audit-trail and accessibility probes. `tests/test_multi_browser.py` runs one smoke plan on chromium, firefox and webkit (a missing engine fails under `TF_REQUIRE_ENGINES=1` in the CI multi-browser job, which installs all three). `tests/test_devices.py` covers the device catalogue, device-context wiring and device-run validation without a browser.
 
 ### The `tf` CI runner
 
@@ -251,7 +251,7 @@ and synthetic domain fixtures are served locally. It also lists optional public 
 fashion websites as external learning targets; no external site is embedded or contacted until a user
 opens one or chooses it for an AI recording. Never use a real account, submit an order or enter payment data.
 
-1. **Select the sample project** — `TestForge Testing Tool` ships in `library/projects/qa-sample-app`,
+1. **Select the sample project** — `TestForge Sample App` ships in `library/projects/qa-sample-app`,
    points at `/demo.html` and already defines `{{user}} = Ada`. If an instance was started against an
    empty `TF_LIBRARY_DIR` the tab offers to create it, as an ordinary project save.
 2. **Replay a ready-made test** — `Hello literal` types a fixed name; `Hello variable` types `{{user}}`,
@@ -374,6 +374,20 @@ PDFs from the same low-quality JPEG captured once per step.
 **Encryption is operator-provisioned and the dashboard says so up front.** `TF_VARIABLE_ENCRYPTION_KEYS`
 must hold a Fernet keyring before an encrypted value can be saved; `render.yaml` declares it
 `sync: false`, so a new Render service starts without one. `GET /api/health` reports
+`encryption: {configured, ready, keys, reason}` — no key material — and the **Variables** tab reads
+that when it opens: while the keyring is missing or unusable it prints which variable to set, the
+command that generates a key, where to put it and the `new,old` rotation syntax, and it disables
+**Encrypt at rest** instead of taking a password into a field that will reject it. Plaintext
+variables keep saving normally. Nothing is generated automatically — a key invented at boot would
+change on the next deploy and permanently strand every value sealed with the old one.
+
+PDFs can be uploaded as GitHub release assets with 48-hour retention and oldest-first
+hourly maintenance; only summaries/links enter Git. Remote publication is opt-in,
+requires host configuration, and cannot clean up while the application is asleep or
+offline. No paid worker/CI scheduler was added; screenshot/PDF work is not zero-cost.
+
+See [setup, security limits, input precedence and retention operations](docs/scenarios-secrets-and-pdf-reports.md).
+service starts without one. `GET /api/health` reports
 `encryption: {configured, ready, keys, reason}` — no key material — and the **Variables** tab reads
 that when it opens: while the keyring is missing or unusable it prints which variable to set, the
 command that generates a key, where to put it and the `new,old` rotation syntax, and it disables

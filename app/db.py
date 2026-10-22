@@ -218,6 +218,10 @@ class Run(Base):
     progress_pct: Mapped[int] = mapped_column(Integer, default=0)
     execution_log: Mapped[list] = mapped_column(JSON, default=list)
     video_path: Mapped[str] = mapped_column(String(1000), nullable=True)
+    # Playwright trace.zip for the run (screenshots, snapshots, sources), written
+    # to artifacts/runs/<run_id>/trace.zip. Nullable: plan/batch runs and runs
+    # from before tracing keep working, and repair_schema() adds the column.
+    trace_path: Mapped[str] = mapped_column(String(1000), nullable=True)
 
     # ROG AGENT INVESTIGATION
     rog_monitor_log: Mapped[str] = mapped_column(Text, nullable=True)

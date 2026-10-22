@@ -131,6 +131,20 @@ def video_ok() -> bool:
     return _mode() == "bundled" and os.environ.get("TF_NO_VIDEO") != "1"
 
 
+def trace_ok() -> bool:
+    """Whether a run should record a Playwright trace.zip.
+
+    Same rule as video: the bundled browser can always write one, a stand-in
+    binary often cannot, and TF_TRACE=0 opts a run out (for example a tight
+    loop where per-step screenshots are evidence enough).
+    """
+    if os.environ.get("TF_CHROMIUM_PATH", "").strip():
+        return False
+    if os.environ.get("TF_TRACE", "1").strip().lower() in {"0", "false", "no", "off"}:
+        return False
+    return _mode() == "bundled"
+
+
 def explain_launch_error(exc: Exception) -> str:
     text = str(exc).strip()
     first = text.splitlines()[0] if text else exc.__class__.__name__

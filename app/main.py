@@ -230,6 +230,16 @@ def _recording_dict(recording: Recording, with_steps: bool = False) -> dict:
     return payload
 
 
+def _audit_summary(run_id: str) -> dict:
+    """Presence + re-verification of the run's audit trail, for full payloads."""
+    try:
+        from app.audit_trail import verify_run
+        return verify_run(run_id)
+    except Exception:
+        return {"present": False, "verified": None, "rows": 0,
+                "detail": "audit trail is unavailable", "head": None, "complete": False}
+
+
 def _run_dict(run: Run, with_log: bool = True) -> dict:
     """Serialise run state and the small recording summary used by audit tabs."""
     all_log = list(run.execution_log or [])
@@ -264,6 +274,8 @@ def _run_dict(run: Run, with_log: bool = True) -> dict:
         "progress_pct": run.progress_pct or 0,
         "step_count": len(all_log),
         "video_path": run.video_path,
+        "trace_path": getattr(run, "trace_path", None),
+        "audit": _audit_summary(run.id) if with_log else None,
         "rog_monitor_log": run.rog_monitor_log,
         "rog_devops_log": run.rog_devops_log,
         "rog_qa_log": run.rog_qa_log,
@@ -1429,11 +1441,14 @@ async def queue_run(body: dict):
         execution_speed = normalize_speed(body.get("execution_speed", 1.0))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    # Fast check
+    # Fast check: get_recording reads the file, but the executor reads the DB,
+    # and boot no longer materializes. A file hit must still ensure the DB row.
     rec = library_store.get_recording(target_id)
     if rec is None:
         if not library_store.materialize_recording(target_id):
             raise HTTPException(status_code=404, detail="Recording not found")
+    else:
+        library_store.materialize_recording(target_id)
     # Queue hygiene: with one browser a second queued run of the same recording
     # only waits behind the first. Reuse it unless the caller insists.
     if not body.get("force") and not body.get("variables"):
@@ -1610,6 +1625,7 @@ def _select_batch_recordings(body: dict) -> tuple[list[dict], list[str]]:
             if recording is None:
                 unknown.append(recording_id)
                 continue
+            library_store.materialize_recording(recording_id)
             selected.append({
                 "id": recording["id"],
                 "name": recording.get("name") or recording["id"],
@@ -2105,6 +2121,37 @@ def get_video(run_id: str):
     return FileResponse(path)
 
 
+@app.get("/api/runs/trace/{run_id}")
+def get_trace(run_id: str):
+    """Download the run's trace.zip (open it in the Playwright trace viewer)."""
+    with SessionLocal() as db:
+        run = db.get(Run, run_id)
+        if run is None or not run.trace_path:
+            raise HTTPException(status_code=404, detail="No trace for this run")
+        path = run.trace_path
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Trace file is missing")
+    artifacts_root = os.path.realpath(ARTIFACTS)
+    if not os.path.realpath(path).startswith(artifacts_root + os.sep):
+        raise HTTPException(status_code=404, detail="Trace file is missing")
+    return FileResponse(path, media_type="application/zip", filename="trace.zip")
+
+
+@app.get("/api/runs/audit/{run_id}")
+def get_audit(run_id: str):
+    """The run's hash-chained audit trail, re-verified on every read."""
+    from app.audit_trail import AuditTrail
+    from app.config import ARTIFACTS as ARTIFACTS_ROOT
+    run_dir = os.path.join(ARTIFACTS_ROOT, "runs", run_id)
+    trail = AuditTrail(run_dir, run_id)
+    if not os.path.isfile(os.path.join(run_dir, "audit.jsonl")):
+        raise HTTPException(status_code=404, detail="No audit trail for this run")
+    result = trail.verify()
+    return {"run_id": run_id, "file": "audit.jsonl", "verified": result["ok"],
+            "rows": result["rows"], "detail": result["detail"], "head": result["head"],
+            "complete": result["complete"], "entries": trail.read() if result["ok"] else []}
+
+
 @app.get("/api/library/health")
 async def library_health():
     """What is on disk versus what the catalog, database and recorder know about.
@@ -2342,6 +2389,8 @@ async def ws_rec(ws: WebSocket, rid: str):
             await ws.send_json({"type": "error", "message": "Recording not found"})
             await ws.close()
             return
+    else:
+        library_store.materialize_recording(rid)
     with SessionLocal() as db:
         recording = db.get(Recording, rid)
         if recording is None:
@@ -2669,6 +2718,12 @@ app.include_router(intel_router)
 # baseline. Compares the step evidence a run already captured; starts nothing.
 from app.visual_routes import router as visual_router
 app.include_router(visual_router)
+# Accessibility: the WCAG A/AA subset over a black-box URL, persisted per scan.
+from app.accessibility_routes import router as accessibility_router
+app.include_router(accessibility_router)
+# Devices: the emulation catalogue and deterministic per-device runs.
+from app.devices_routes import router as devices_router
+app.include_router(devices_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")
