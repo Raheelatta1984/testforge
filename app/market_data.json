@@ -732,17 +732,32 @@
       "name": "Self-healing locators",
       "why": "UI churn is the top maintenance cost of browser automation. Healing must be explainable, not a silent guess.",
       "self": {
-        "rating": "partial",
-        "note": "The recorder captures structured, stable attributes (test id, role, accessible name, id, name) and replay reports an explicit ambiguity instead of clicking the first unrelated match; there is no scored candidate-healing engine yet, so this stays partial.",
+        "rating": "yes",
+        "note": "Yes: browser replay detects missing or ambiguous primaries, probes up to 12 independently generated test-id, role/name, visible-text, form-label, CSS-path and XPath candidates, requires a unique match, scores deterministically with local per-project/per-recording strategy stats, and records the original, winner, ranked candidates and optional AI rerank hashes in the run audit. Healing is visible and requires review; healed runs are not clean release passes. AI reranking is optional (Anthropic or Ollama) and receives only compact candidate snippets; without a configured provider deterministic ranking remains in force. Review accept/reject is available in Artifacts. No vision-based healing or external stats service is claimed.",
         "evidence": [
           {
-            "kind": "symbol",
-            "path": "app/recorder.py",
-            "contains": "_ELEMENT_JS"
+            "kind": "file",
+            "path": "app/locator_healing.py"
           },
           {
-            "kind": "file",
-            "path": "app/step_runtime.py"
+            "kind": "symbol",
+            "path": "app/locator_healing.py",
+            "contains": "resolve_locator"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/executor.py",
+            "contains": "replay_step"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/recordings/{rid}/heals/{run_id}/{order}/review"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_locator_healing.py",
+            "contains": "class LocatorHealingTests"
           }
         ]
       },
@@ -766,7 +781,7 @@
         "playwright": "Partial: strict-mode ambiguity errors and user-written fallbacks, not automatic healing.",
         "testatlas": "Partial: reports ambiguous bindings instead of repairing steps."
       },
-      "roadmap": "Roadmap: scored multi-candidate healing with an audit trail of every healed locator. Not claimed until it exists."
+      "roadmap": "Shipped: scored, bounded local locator healing with explicit audit and human review. See docs/market-strategy-2026-10.md §5."
     },
     {
       "id": "visual-regression",

@@ -9,9 +9,9 @@ can re-derive every link and detect any mutated, reordered or removed row.
 What it proves: *this* is the log the run wrote, in order, unmodified since.
 What it does not prove on its own: that no lines were dropped from the *tail*.
 A caller that compares the ``head`` hash across reads (the audit endpoint
-reports it) detects truncation too; a log whose last entry is not
-``run_finished`` is additionally reported as incomplete, which is what a
-truncated file looks like.
+reports it) detects truncation too; a log whose last entry is neither
+``run_finished`` nor a post-run ``locator_heal_review`` is additionally
+reported as incomplete, which is what a truncated file looks like.
 
 Bounds: every payload value is clipped, rows past 5,000 are refused (a run
 expands to at most 2,000 steps), and verification refuses files over 4 MiB.
@@ -154,7 +154,7 @@ class AuditTrail:
                         "head": None, "complete": False}
             prev = str(row["hash"])
         return {"ok": True, "rows": len(rows), "detail": f"{len(rows)} rows chained",
-                "head": prev, "complete": rows[-1].get("event") == "run_finished"}
+                "head": prev, "complete": rows[-1].get("event") in {"run_finished", "locator_heal_review"}}
 
 
 def verify_file(path) -> dict:

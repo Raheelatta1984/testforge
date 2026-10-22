@@ -32,7 +32,7 @@ from xml.sax.saxutils import escape, quoteattr
 MAX_RUNS = 200
 MAX_LOG_ENTRIES = 2000
 MAX_TEXT = 20_000
-FAILED = {"failed", "error"}
+FAILED = {"failed", "error", "healed"}
 SKIPPED = {"cancelled", "queued", "running", "skipped"}
 
 _UNSAFE_XML = re.compile("[\x00-\x08\x0b\x0c\x0e-\x1f]")
@@ -62,7 +62,10 @@ def _failure_text(run: dict) -> str:
         if len(parts) >= 5:
             break
     if not parts:
-        parts.append(run.get("error") or run.get("cancel_reason") or f"Run finished as {run.get('status')}")
+        if run.get("status") == "healed":
+            parts.append("A locator was healed; review the recording and rerun clean before release.")
+        else:
+            parts.append(run.get("error") or run.get("cancel_reason") or f"Run finished as {run.get('status')}")
     return _clean("\n".join(str(part) for part in parts), 4000)
 
 
@@ -148,7 +151,7 @@ def summary(runs, suite_name: str = "TestForge") -> dict:
             counts["skipped"] += 1
         else:
             counts["other"] += 1
-    verdict = "failed" if counts["failed"] else ("incomplete" if counts["skipped"] else "passed")
+    verdict = "failed" if counts["failed"] else ("incomplete" if counts["skipped"] or counts["other"] else "passed")
     return {
         "schema": "testforge-ci-summary/1",
         "suite": _clean(suite_name, 200),

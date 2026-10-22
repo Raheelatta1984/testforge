@@ -8,7 +8,8 @@ class FakeLocator:
         self.first = self
 
     async def count(self):
-        return 1 if self.selector in self.page.known else 0
+        key = selector_key(self.selector)
+        return int(self.page.counts.get(key, 1 if self.selector in self.page.known else 0))
 
     async def click(self, timeout=None):
         self.page.timeouts[selector_key(self.selector)] = timeout
@@ -66,6 +67,8 @@ class FakeKeyboard:
 class FakePage:
     def __init__(self, known=None, flaky=None, url="http://127.0.0.1:8765/demo.html"):
         self.known = set(known or [])
+        self.counts = {}
+        self.healing_candidates = None
         self.clicks = []
         self.fills = []
         self.typed = []
@@ -98,6 +101,21 @@ class FakePage:
 
     def locator(self, selector):
         return FakeLocator(self, selector)
+
+    def get_by_test_id(self, value):
+        return FakeLocator(self, f'[data-testid="{value}"]')
+
+    def get_by_role(self, role, name=None, exact=True):
+        return FakeLocator(self, f'role={role}|name={name or ""}')
+
+    def get_by_text(self, value, exact=True):
+        return FakeLocator(self, f'text={value}')
+
+    def get_by_label(self, value, exact=True):
+        return FakeLocator(self, f'label={value}')
+
+    def get_by_placeholder(self, value, exact=True):
+        return FakeLocator(self, f'placeholder={value}')
 
     async def goto(self, url, wait_until=None, timeout=None):
         self.gotos.append((url, wait_until, timeout))

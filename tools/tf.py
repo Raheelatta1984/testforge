@@ -37,8 +37,8 @@ DEFAULT_BASE = os.environ.get("TF_BASE_URL", "http://127.0.0.1:8000")
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_WAIT_SECONDS = 1800.0
 DEFAULT_POLL_SECONDS = 3.0
-TERMINAL = {"passed", "failed", "error", "cancelled", "completed"}
-FAILED = {"failed", "error", "cancelled"}
+TERMINAL = {"passed", "healed", "failed", "error", "cancelled", "completed"}
+FAILED = {"failed", "healed", "error", "cancelled"}
 PROG = "tf"
 
 

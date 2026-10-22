@@ -81,7 +81,12 @@ def _step_audit(entry):
     return {"order": entry.get("order"), "step_index": entry.get("step_index"),
             "action": entry.get("action"), "label": entry.get("label"),
             "status": entry.get("status"), "duration_ms": entry.get("duration_ms"),
-            "error": entry.get("error"), "evidence": bool(entry.get("screenshot"))}
+            "error": entry.get("error"), "evidence": bool(entry.get("screenshot")),
+            "healed": bool(entry.get("healed")),
+            "original_locator": entry.get("original_locator"),
+            "winning_locator": entry.get("winning_locator"),
+            "candidate_scores": entry.get("candidate_scores"),
+            "heal_fallback": entry.get("heal_fallback")}
 
 
 async def _click(page, selector, action_ms: int | None = None):
@@ -101,7 +106,8 @@ async def _click(page, selector, action_ms: int | None = None):
     primary = selector.get("primary")
     failure = None
     if primary:
-        loc = page.locator(primary)
+        from app.step_runtime import locator as build_locator
+        loc = build_locator(page, selector)
         try:
             count = await loc.count()
             if count >= 1:
@@ -126,6 +132,53 @@ async def _focus(page, selector, action_ms: int | None = None):
             await page.mouse.click(float(selector["x"]), float(selector["y"]))
 
 
+async def _execute_with_heal(action, selector, timeout_ms, heal, callback, context=None, order=0):
+    """Execute the winner, then at most two ranked unique alternatives on a
+    transient locator failure. All attempts share the remaining normal timeout.
+    """
+    if not heal:
+        return await callback(selector, timeout_ms)
+    from app.locator_healing import HealingFailure, record_success
+    ranked = [row for row in (heal.get("candidate_scores") or []) if row.get("count") == 1]
+    winner = heal.get("winning") or selector
+    ordered = [winner]
+    for row in ranked:
+        spec = row.get("locator")
+        if isinstance(spec, dict) and spec != winner and spec not in ordered:
+            ordered.append(spec)
+    if action not in {"click", "fill", "hover", "check", "uncheck", "select_option"}:
+        ordered = ordered[:1]
+    else:
+        ordered = ordered[:3]
+    deadline = time.monotonic() + max(0.001, int(heal.get("remaining_budget_ms") or timeout_ms) / 1000)
+    last_error = None
+    for index, spec in enumerate(ordered):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        attempt_ms = max(1, int(remaining * 1000 / max(1, len(ordered) - index)))
+        try:
+            result = await callback(spec, attempt_ms)
+        except Exception as exc:
+            last_error = exc
+            transient = "timeout" in (type(exc).__name__ + " " + str(exc)).lower() or "detached" in str(exc).lower()
+            if not transient or index >= len(ordered) - 1:
+                break
+            continue
+        row = next((row for row in ranked if row.get("locator") == spec), None)
+        heal["winning"] = spec
+        if row:
+            heal["strategy"] = row.get("strategy")
+            heal["confidence"] = row.get("score")
+        heal["action_attempts"] = index + 1
+        record_success(context, order, heal.get("strategy") or "unknown")
+        return result
+    heal["action_attempts"] = min(len(ordered), 3)
+    detail = str(last_error or "The locator action budget was exhausted").splitlines()[0][:300]
+    raise HealingFailure(f"All ranked locator candidates failed for {action}: {detail}",
+                         heal.get("candidate_scores") or []) from last_error
+
+
 async def replay_step(page, step, variables, budgets=None, runtime=None):
     """Replay one recorded step.
 
@@ -137,14 +190,28 @@ async def replay_step(page, step, variables, budgets=None, runtime=None):
     value = strict_interpolate(raw, variables) if raw else None
     if (step.get("selector") or {}).get("strict") or action not in BASIC | {"text", "key", "key_press", "loop", "repeat"}:
         try:
-            checked = normalize_step(step)
+            checked = normalize_step(step, step.get("order") or step.get("step_index") or 1)
         except ValueError as exc:
             raise RuntimeError(str(exc)) from exc
         if budgets and "timeout_ms" not in checked["selector"]:
             key = "navigate_ms" if action == "navigate" else "action_ms"
             checked["selector"]["timeout_ms"] = max(1, min(30000, int(budgets.get(key, 3000))))
         runner = runtime or StepRuntime(page)
-        return await runner.perform(checked, variables)
+        from app.locator_healing import resolve_locator
+        heal = await resolve_locator(page, checked, int((budgets or {}).get("action_ms", DEFAULT_BUDGETS["action_ms"])),
+                                     getattr(runtime, "healing_context", None))
+        current_timeout = int(checked["selector"].get("timeout_ms") or (budgets or {}).get("action_ms", DEFAULT_BUDGETS["action_ms"]))
+        if heal:
+            current_timeout = min(current_timeout, int(heal.get("remaining_budget_ms") or current_timeout))
+        async def perform_checked(spec, timeout):
+            checked["selector"] = dict(spec, strict=True, timeout_ms=max(1, min(current_timeout, timeout)))
+            return await runner.perform(checked, variables)
+        result = await _execute_with_heal(action, checked["selector"], current_timeout, heal,
+                    perform_checked, getattr(runtime, "healing_context", None),
+                    checked.get("order") or checked.get("step_index") or 0)
+        if heal:
+            return {"locator_healed": heal, "result": result}
+        return result
     selector = step.get("selector") or {}
     budget = dict(DEFAULT_BUDGETS)
     if isinstance(budgets, dict):
@@ -156,6 +223,22 @@ async def replay_step(page, step, variables, budgets=None, runtime=None):
     navigate_ms = budget["navigate_ms"]
     action_ms = budget["action_ms"]
     type_delay_ms = budget["type_delay_ms"]
+    from app.locator_healing import HealingFailure, resolve_locator
+    try:
+        heal = await resolve_locator(page, step, action_ms, getattr(runtime, "healing_context", None))
+    except HealingFailure:
+        # Preserve the recorder's established pointer fallback after candidate
+        # generation has had its chance. It is not considered a healed locator.
+        if action == "click" and selector.get("x") is not None and selector.get("y") is not None:
+            heal = None
+        else:
+            raise
+    if heal:
+        selector = dict(heal["winning"])
+        action_ms = min(action_ms, int(heal.get("remaining_budget_ms") or action_ms))
+
+    def heal_result():
+        return {"locator_healed": heal} if heal else None
 
     # Handle repeat metadata
     repeat = step.get("repeat") or 1
@@ -191,21 +274,27 @@ async def replay_step(page, step, variables, budgets=None, runtime=None):
             else:
                 await page.goto(url, wait_until="commit", timeout=min(max(navigate_ms, 1000), 15000))
         return
+    order = step.get("order") or step.get("step_index") or 0
+    context = getattr(runtime, "healing_context", None)
     if action == "click":
-        await _click(page, selector, action_ms)
-        return
+        async def click_candidate(spec, timeout):
+            await _click(page, spec, timeout)
+        await _execute_with_heal(action, selector, action_ms, heal, click_candidate, context, order)
+        return heal_result()
     if action in ("fill", "type", "text"):
-        if selector:
-            await _focus(page, selector, action_ms)
-        if action == "fill" and selector.get("primary"):
-            await page.locator(selector["primary"]).first.fill(value or "", timeout=action_ms)
-        else:
-            # Fast typing, compatible with FakeKeyboard in tests
-            try:
-                await page.keyboard.type(value or "", delay=type_delay_ms)
-            except TypeError:
-                await page.keyboard.type(value or "")
-        return
+        async def fill_candidate(spec, timeout):
+            if spec:
+                await _focus(page, spec, timeout)
+            if action == "fill" and spec.get("primary"):
+                from app.step_runtime import locator as build_locator
+                await build_locator(page, spec).first.fill(value or "", timeout=timeout)
+            else:
+                try:
+                    await page.keyboard.type(value or "", delay=type_delay_ms)
+                except TypeError:
+                    await page.keyboard.type(value or "")
+        await _execute_with_heal(action, selector, action_ms, heal, fill_candidate, context, order)
+        return heal_result()
     if action in ("press", "key", "key_press"):
         await page.keyboard.press(value or selector.get("key") or "Enter")
         return
@@ -213,8 +302,12 @@ async def replay_step(page, step, variables, budgets=None, runtime=None):
         name = raw
         if not name or not selector.get("primary"):
             raise RuntimeError("Save variable needs a name and input selector")
-        variables[name] = await page.locator(selector["primary"]).first.input_value(timeout=action_ms)
-        return
+        async def save_candidate(spec, timeout):
+            from app.step_runtime import locator as build_locator
+            return await build_locator(page, spec).first.input_value(timeout=timeout)
+        variables[name] = await _execute_with_heal(action, selector, action_ms, heal, save_candidate,
+                                                  context, order)
+        return heal_result()
     raise RuntimeError(f"Unsupported action: {action}")
 
 
@@ -460,6 +553,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             steps = await _expand_steps_with_repeat(raw_steps)
             start_url = recording.start_url
             from app.secrets_store import reveal_map, sensitive_values, SecretValue, scrub, scrub_entry
+            healing_context = {"app_id": recording.project_id, "recording_id": recording.id}
             variables = reveal_map(variable_snapshot) if variable_snapshot is not None else resolve_variables(db, recording.project_id)
             variables.update(reveal_map(overrides))
             sensitive = sensitive_values(db, [recording.project_id])
@@ -592,6 +686,7 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                 shot_tasks = set()
                 video = page.video
                 runtime = StepRuntime(page, run_dir, execution_speed=execution_speed)
+                runtime.healing_context = healing_context
                 try:
                     total = len(steps)
                     for index, step in enumerate(steps, 1):
@@ -631,7 +726,15 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                                 entry.update(clock.finish())
                                 page = runtime.page
                                 preview.page = page
-                                if result:
+                                if isinstance(result, dict) and result.get("locator_healed"):
+                                    heal = result["locator_healed"]
+                                    entry.update({"healed": True, "original_locator": heal.get("original"),
+                                                  "winning_locator": heal.get("winning"),
+                                                  "candidate_scores": heal.get("candidate_scores"),
+                                                  "heal_ai": heal.get("ai"),
+                                                  "heal_fallback": heal.get("fallback")})
+                                    entry["result"] = result.get("result")
+                                elif result:
                                     entry["result"] = result
                                 if screenshots == "all":
                                     try:
@@ -652,6 +755,10 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                                 entry["status"] = "passed"
                                 entry["percent"] = int(index / total * 100)
                         except Exception as exc:
+                            from app.locator_healing import HealingFailure, failure_table
+                            if isinstance(exc, HealingFailure):
+                                entry["heal_failed"] = True
+                                entry["candidate_scores"] = failure_table(exc.candidates)
                             if "finished_at" not in entry:
                                 entry.update(clock.finish())
                             entry["status"] = "failed"
@@ -669,6 +776,9 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                                     entry['evidence_error'] = type(evidence_error).__name__
                             entry["percent"] = percent
                             entry = scrub_entry(entry, sensitive)
+                            if entry.get("heal_failed"):
+                                _audit(trail, "locator_heal_failed", {"order": entry.get("order"),
+                                      "candidates": entry.get("candidate_scores")})
                             _audit(trail, "step", _step_audit(entry))
                             log_entries.append(entry)
                             await on_event(entry)
@@ -677,6 +787,16 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                             _save(run_id, status="failed", progress_pct=percent, execution_log=list(log_entries))
                             break
                         entry = scrub_entry(entry, sensitive)
+                        if entry.get("healed"):
+                            _audit(trail, "locator_healed", {"order": entry.get("order"),
+                                  "original_locator": entry.get("original_locator"),
+                                  "winning_locator": entry.get("winning_locator"),
+                                  "candidate_scores": entry.get("candidate_scores"),
+                                  "provider": (entry.get("heal_ai") or {}).get("provider"),
+                                  "model": (entry.get("heal_ai") or {}).get("model"),
+                                  "prompt_hash": (entry.get("heal_ai") or {}).get("prompt_hash"),
+                                  "response_hash": (entry.get("heal_ai") or {}).get("response_hash"),
+                                  "fallback": entry.get("heal_fallback")})
                         _audit(trail, "step", _step_audit(entry))
                         log_entries.append(entry)
                         await on_event(entry)
@@ -721,6 +841,10 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             error_text = scrub(explain_launch_error(exc), sensitive)
             logger.warning("RUN FAILED %s (%s)", run_id, type(exc).__name__)
 
+        # A repaired locator is useful evidence, but it is deliberately not a
+        # clean release pass. CI must review the recording and rerun it clean.
+        if status == "passed" and any(item.get("healed") for item in log_entries):
+            status = "healed"
         elapsed = time.time() - start_time
         fields = {
             "status": status,
@@ -734,13 +858,17 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
             fields["rog_monitor_log"] = f"Execution failed: {error_text[:800]}"
             fields["rog_devops_log"] = f"Browser session closed after {elapsed:.1f}s. The run was not retried automatically."
             fields["rog_qa_log"] = "QA: marked failed. Open the step log and screenshots."
+        elif status == "healed":
+            fields["rog_qa_log"] = f"QA: steps completed using a healed locator in {elapsed:.1f}s; review and rerun clean before release."
         else:
             fields["rog_qa_log"] = f"QA: every recorded step completed in {elapsed:.1f}s."
         _audit(trail, "run_finished", {"status": status, "steps": len(log_entries),
-                                         "elapsed": round(elapsed, 3)})
+                                         "elapsed": round(elapsed, 3),
+                                         "release_gate": "review_required" if status == "healed" else "clean_or_failed"})
         _save(run_id, **fields)
         await on_event({
             "type": "done", "status": status, "error": error_text, "log": log_entries,
-            "elapsed": elapsed, "display_window": window_is_enabled(),
+            "elapsed": elapsed, "release_gate": "review_required" if status == "healed" else "clean_or_failed",
+            "display_window": window_is_enabled(),
         })
         logger.info("RUN DONE %s status=%s elapsed=%.1fs", run_id, status, elapsed)
