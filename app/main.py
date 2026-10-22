@@ -1441,11 +1441,14 @@ async def queue_run(body: dict):
         execution_speed = normalize_speed(body.get("execution_speed", 1.0))
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
-    # Fast check
+    # Fast check: get_recording reads the file, but the executor reads the DB,
+    # and boot no longer materializes. A file hit must still ensure the DB row.
     rec = library_store.get_recording(target_id)
     if rec is None:
         if not library_store.materialize_recording(target_id):
             raise HTTPException(status_code=404, detail="Recording not found")
+    else:
+        library_store.materialize_recording(target_id)
     # Queue hygiene: with one browser a second queued run of the same recording
     # only waits behind the first. Reuse it unless the caller insists.
     if not body.get("force") and not body.get("variables"):
@@ -1622,6 +1625,7 @@ def _select_batch_recordings(body: dict) -> tuple[list[dict], list[str]]:
             if recording is None:
                 unknown.append(recording_id)
                 continue
+            library_store.materialize_recording(recording_id)
             selected.append({
                 "id": recording["id"],
                 "name": recording.get("name") or recording["id"],
@@ -2385,6 +2389,8 @@ async def ws_rec(ws: WebSocket, rid: str):
             await ws.send_json({"type": "error", "message": "Recording not found"})
             await ws.close()
             return
+    else:
+        library_store.materialize_recording(rid)
     with SessionLocal() as db:
         recording = db.get(Recording, rid)
         if recording is None:

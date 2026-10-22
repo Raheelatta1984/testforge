@@ -37,8 +37,6 @@ jobs:
     name: Full harness (with Chromium)
     runs-on: ubuntu-latest
     timeout-minutes: 40
-    permissions:
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
         # The harness records the commit it tested with `git rev-parse`.
@@ -54,33 +52,6 @@ jobs:
       # be able to push to a repository. The harness also strips them from the
       # server environment it starts and sets TF_LIBRARY_PUBLISH=0.
       - run: python -m tests.harness --require-browser
-      # TEMPORARY DEBUG (remove before merge): the sandbox running this agent
-      # cannot download CI logs or artifacts (egress allowlist), so the harness
-      # summary is posted to the PR where it can be read back over the API.
-      - name: Post harness summary to the PR (temporary debug)
-        if: always()
-        run: |
-          REPORT=$(ls -t logs/*/results.md 2>/dev/null | head -n 1)
-          SCEN=$(ls -t logs/*/scenarios.log 2>/dev/null | head -n 1)
-          HARN=$(ls -t logs/*/harness.log 2>/dev/null | head -n 1)
-          {
-            echo "## Harness debug report (temporary, will be removed)"
-            echo "### results.md"
-            echo '```'
-            cat "$REPORT" 2>/dev/null || echo "(no results.md)"
-            echo '```'
-            echo "### scenario FAIL/SKIP lines"
-            echo '```'
-            grep -E "FAIL|SKIP|aborted" "$SCEN" 2>/dev/null | head -n 30 || echo "(no scenarios.log)"
-            echo '```'
-            echo "### harness.log tail"
-            echo '```'
-            tail -n 15 "$HARN" 2>/dev/null || echo "(no harness.log)"
-            echo '```'
-          } > /tmp/harness-report.md
-          gh pr comment ${{ github.event.pull_request.number }} --body-file /tmp/harness-report.md
-        env:
-          GH_TOKEN: ${{ github.token }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
