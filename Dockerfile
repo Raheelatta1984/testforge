@@ -38,6 +38,19 @@ COPY logs ./logs
 # The Azure deployment guide ships with the image so the dashboard's Azure tab
 # can render it (GET /api/docs/azure-guide). A few hundred KB of markdown.
 COPY docs ./docs
+# --- claim evidence -------------------------------------------------------
+# Every TestForge "yes" in the market matrix is published with a probe: a file,
+# a symbol, a route or a test. The audit that re-verifies them runs inside this
+# container (GET /api/market/audit, tools/market_audit), so the paths the claims
+# cite outside app/ have to be in the image. Without them the hosted report
+# marks those claims "unverified" while CI, which has the whole checkout, calls
+# them verified - a published lie produced entirely by the build. Under 1MB.
+COPY tests ./tests
+COPY tools ./tools
+COPY .github ./.github
+COPY deploy ./deploy
+COPY Dockerfile ./Dockerfile
+COPY docker-compose.yml ./docker-compose.yml
 RUN mkdir -p /app/artifacts/runs /app/artifacts/rec /app/artifacts/batches
 
 ENV TF_ARTIFACTS=/app/artifacts \

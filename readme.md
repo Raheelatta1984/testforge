@@ -162,10 +162,12 @@ The **Market position** tab (and `GET /api/market/matrix`) compares TestForge wi
 
 - **No unsourced competitor cell.** Each tool records the basis it was read from (the supplied GitHub MCP listing screenshots, vendor documentation, or an explicit `unknown`). "Not stated" is excluded from the score — it is neither a win nor a loss.
 - **No unsupported TestForge claim.** Every **Yes** carries machine-checkable evidence probes, and the audit re-verifies them. A claim that loses its evidence shows as **Unverified**, becomes a gap, and fails `python -m tools.market_audit` (exit 1) — so a stale claim cannot survive CI. `POST /api/market/audit` writes a 24-hour receipt with a SHA-256 over its own content.
-- **The gaps are published.** Seventeen capabilities show a competitor ahead (parallel execution, visual regression, self-healing, WCAG conformance, network mocking, multi-browser, RBAC and others), each with the leading tools and the roadmap disposition.
+- **The gaps are published.** Eleven capabilities still show a competitor ahead (parallel execution, self-healing, WCAG conformance, multi-browser, RBAC, video/trace, audit trail and others), each with the leading tools and the roadmap disposition.
 - **Two artefacts, one source.** `GET /api/market/report.html` serves a self-contained, printable document (strict CSP, no scripts, no external assets) and `GET /api/market/report.md` serves the same matrix as Markdown.
 
-Gaps that could be closed without a model or a paid service were implemented in this repository: deterministic black-box discovery with independent verification and receipts (`app/explorer.py`), a reusable step catalogue with phrase resolution (`app/step_catalog.py`), a library dependency graph with impact analysis (`app/impact_map.py`), JUnit/JSON CI output (`app/ci_results.py`), and five extra read-only MCP tools. Full method, limits, API reference and the honesty rules are in [`docs/market-position.md`](docs/market-position.md). Tests: `tests/test_market.py`.
+Gaps that could be closed without a model or a paid service were implemented in this repository: deterministic black-box discovery with independent verification and receipts (`app/explorer.py`), a reusable step catalogue with phrase resolution (`app/step_catalog.py`), a library dependency graph with impact analysis (`app/impact_map.py`), JUnit/JSON CI output (`app/ci_results.py`), deterministic visual baselines (`app/visual_regression.py`), a bounded execution pool (`app/run_pool.py`), the `tf` CI runner (`tools/tf.py`), and five extra read-only MCP tools.
+
+Two honesty fixes shipped with them. The Docker image now ships the paths the evidence probes cite (`tests/`, `.github/`, `deploy/`, `tools/`, `Dockerfile`, `docker-compose.yml`), because the audit runs inside the container and was reporting our own shipped features as **Unverified** while CI called them verified. And four capabilities that already existed — network mocking, HTTP steps, uploads/downloads and frame chains — were claimed as they are, because a matrix that under-claims is still publishing something false. Where we stand, what it would take to lead, and what should never be claimed are in [`docs/market-strategy-2026-10.md`](docs/market-strategy-2026-10.md). Full method, limits, API reference and the honesty rules are in [`docs/market-position.md`](docs/market-position.md). Tests: `tests/test_market.py`, `tests/test_claim_evidence.py`.
 
 ## Environment variables
 | Variable | Default | Effect |
@@ -226,7 +228,18 @@ The harness runs the unit suite and the library scenarios. Library scenarios are
 python -m tests.harness
 ```
 
-The market comparison is gated separately and needs no browser: `python -m tools.market_audit` exits non-zero when a TestForge claim loses its evidence, and CI runs it after the unit suite. `tests/test_market.py` covers the matrix, audit, reports, step catalogue, impact map, explorer, JUnit output, MCP tools, dashboard wiring and no-downgrade checks.
+The market comparison is gated separately and needs no browser: `python -m tools.market_audit` exits non-zero when a TestForge claim loses its evidence, and CI runs it after the unit suite. `tests/test_market.py` covers the matrix, audit, reports, step catalogue, impact map, explorer, JUnit output, MCP tools, dashboard wiring and no-downgrade checks. `tests/test_claim_evidence.py` covers the evidence the container must ship, the runtime-parity of the HTTP/mock/file/frame steps, visual baselines, the execution pool and the `tf` CLI.
+
+### The `tf` CI runner
+
+```bash
+python -m tools.tf run --plan nightly.json --wait --junit results.xml --json report.json
+python -m tools.tf status <run_id|batch_id>
+python -m tools.tf junit <run_id> -o results.xml
+python -m tools.tf report <run_id> -o run.json
+```
+
+A plan file is `{"recording_ids": ["…"], "name": "nightly", "screenshots": "failure"}`; one id becomes a run, several become a batch. Standard library only, so it runs on any CI image with Python 3.9+. Exit codes: `0` passed, `1` a test failed, `2` a pipeline mistake (bad plan, unreachable server, timed out waiting). Point it at a deployment with `--base` / `TF_BASE_URL` and, when the deployment sets a token, `--token` / `TF_ACCESS_TOKEN`.
 
 Scenarios are documented in `tests/SCENARIOS.md`. Each run writes a timestamped report under `logs/`, and `logs/index.md` lists them. Chromium is required for the browser scenarios (`LB-REC-*`, `LB-RUN-*`, `LB-BAT-01`); unit tests run without it, and the batch executor is unit-tested against an in-memory browser double.
 

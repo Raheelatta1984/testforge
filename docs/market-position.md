@@ -191,4 +191,6 @@ impact analysis and the explorer.
 | `GET /api/runs/{id}/results.json` | CI summary with an explicit exit code |
 | `GET /api/runs/batch/{id}/results.json` | CI summary for a batch |
 
-Tests: `tests/test_market.py` (31 cases covering the matrix, claim audit, reports, step catalogue, impact map, explorer, JUnit output, MCP tools, the CLI gate, the dashboard wiring and the no-downgrade checks).
+Tests: `tests/test_market.py` (31 cases covering the matrix, claim audit, reports, step catalogue, impact map, explorer, JUnit output, MCP tools, the CLI gate, the dashboard wiring and the no-downgrade checks) and `tests/test_claim_evidence.py` (the evidence the deployed image must ship, plus the capabilities that were shipped but under-claimed).
+
+For where this leaves us against the top of the table, what it would take to lead, and what must never be claimed, see [`docs/market-strategy-2026-10.md`](market-strategy-2026-10.md).

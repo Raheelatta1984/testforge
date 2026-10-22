@@ -9,7 +9,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 
-from app import desktop_recording, guardrails, logs_local, run_queue, secrets_store
+from app import (desktop_recording, guardrails, logs_local, run_pool,
+                   run_queue, secrets_store)
 from app.config import ARTIFACTS
 from app.errors import redact
 from app.db import (
@@ -563,6 +564,8 @@ def scaling():
         report["pool"] = pool_report()
     except Exception as exc:
         report["pool"] = f"unavailable: {redact(exc)}"
+    report["execution_pool"] = run_pool.execution_pool.report()
+    report["browser_budget"] = guardrails.browser_budget.report()
     try:
         from app.db_replicas import status as replica_status
         report["replicas"] = replica_status()
@@ -1514,7 +1517,10 @@ async def queue_run(body: dict):
             from app.pdf_reports import finalize
             await asyncio.to_thread(finalize, 'run', rid)
 
-    task = asyncio.create_task(task_wrapper())
+    # Bounded execution: the pool hands out slots in submission order and is
+    # clamped by the shared browser budget, so a burst of runs cannot open more
+    # Chromium processes than this deployment was configured to run.
+    task = run_pool.execution_pool.submit(task_wrapper, name=f"run:{rid}")
     # The queue reaper only cancels runs that nobody owns, so ownership has to be
     # recorded the moment the worker exists and dropped the moment it finishes.
     run_queue.register(rid, task)
@@ -1845,7 +1851,7 @@ async def start_batch(body: dict | None = None):
                 from app.pdf_reports import finalize
                 await asyncio.to_thread(finalize, 'batch', batch_id)
 
-        task = asyncio.create_task(batch_wrapper())
+        task = run_pool.execution_pool.submit(batch_wrapper, name=f"batch:{batch_id}")
         handle = _BatchHandle(task, batch_id)
         for run_id in run_ids:
             run_queue.register(run_id, handle)
@@ -1978,6 +1984,7 @@ def get_queue_status():
     # pending forever.
     payload["hygiene"] = run_queue.snapshot(limit=20)
     payload["clearable"] = payload["hygiene"]["clearable"]
+    payload["pool"] = run_pool.execution_pool.report()
     return payload
 
 
@@ -2017,6 +2024,10 @@ async def clear_run_queue(body: dict | None = None):
     reason = body.get("reason")
     if reason is not None and not isinstance(reason, str):
         raise HTTPException(status_code=422, detail="reason must be text")
+    if body.get("cancel_running"):
+        # Cancel the workers too, not only their rows: a cancelled run whose task
+        # still holds the browser keeps the queue blocked.
+        run_pool.execution_pool.cancel_all()
     report = await asyncio.to_thread(
         run_queue.clear,
         older_than_minutes=older_than,
@@ -2654,6 +2665,10 @@ app.include_router(market_router)
 # zero-LLM black-box discovery and JUnit/JSON CI results.
 from app.intel_routes import router as intel_router
 app.include_router(intel_router)
+# Visual baselines: deterministic, bounded pixel diff against a promoted
+# baseline. Compares the step evidence a run already captured; starts nothing.
+from app.visual_routes import router as visual_router
+app.include_router(visual_router)
 
 static_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
 app.mount("/", StaticFiles(directory=static_path, html=True), name="static")

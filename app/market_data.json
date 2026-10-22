@@ -774,9 +774,33 @@
       "name": "Visual regression and baselines",
       "why": "Layout, overlap and rendering defects pass DOM assertions. Visual baselines catch them.",
       "self": {
-        "rating": "no",
-        "note": "Screenshots are captured as evidence, but there is no baseline store or pixel diff. Do not claim visual validation.",
-        "evidence": []
+        "rating": "yes",
+        "note": "app/visual_regression.py stores a promoted baseline per recording, step and viewport and compares it with a bounded Pillow diff: per-pixel luminance delta, a tolerance that absorbs JPEG re-encode noise, a changed-pixel ratio, the mean delta and the bounding box of the change. app/visual_routes.py promotes a run's step evidence (POST /api/visual/baselines), compares a run against it (POST /api/visual/compare) and returns a pass/fail verdict per step with both content hashes. Deliberately not included, and not claimed: no AI ignore-regions, no cross-browser baseline matrix and no auto-healing - a baseline changes only when a human promotes a new one.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/visual_regression.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/visual_routes.py"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/visual/compare"
+          },
+          {
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/visual/baselines"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "VisualRegressionTests"
+          }
+        ]
       },
       "ratings": {
         "applitools": "yes",
@@ -799,7 +823,7 @@
         "playwright": "Partial: toHaveScreenshot with baselines is built in, with human review of diffs.",
         "mabl": "Yes: visual change detection is advertised."
       },
-      "roadmap": "Roadmap: deterministic baseline store and a bounded Pillow diff (SSIM-style ratio plus bounding box) attached to the same evidence contract. Tracked as a gap because Applitools and mabl lead here."
+      "roadmap": "Shipped: the deterministic baseline store and the bounded Pillow diff from this roadmap, on the same evidence contract. Applitools and mabl still lead on visual AI ignore-regions and cross-browser baseline matrices, which are out of scope here."
     },
     {
       "id": "accessibility-checks",
@@ -1076,17 +1100,33 @@
       "name": "Frames, iframes and popups",
       "why": "Enterprise apps nest iframes and open popups; a runner that cannot switch context cannot test them.",
       "self": {
-        "rating": "partial",
-        "note": "Evidence capture masks secrets across frames and the plan/executor model carries frame-aware steps, but there is no saved frame chain or popup-alias authoring yet.",
+        "rating": "yes",
+        "note": "A step addresses nested frames through a saved CSS frame chain of up to five selectors, validated at authoring time and honoured by both the Python replay runtime and the exported JavaScript runtime; a popup is opened with a page alias and switched back to by name; and evidence masking walks every frame before a screenshot is written. Not claimed: automatic frame discovery during recording - the chain is authored, not inferred from a session.",
         "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/step_runtime.py",
+            "contains": "frames must contain at most five"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/export_runtime.js",
+            "contains": "frames"
+          },
           {
             "kind": "symbol",
             "path": "app/evidence.py",
             "contains": "frames"
           },
           {
-            "kind": "file",
-            "path": "app/step_runtime.py"
+            "kind": "test",
+            "path": "tests/test_browser_features.py",
+            "contains": "frames"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "CE_13_frame_chains_and_page_aliases_are_authorable"
           }
         ]
       },
@@ -1109,7 +1149,7 @@
       "notes": {
         "cypress": "Partial: iframe support has historically needed workarounds; popups are constrained."
       },
-      "roadmap": "Roadmap R05 from the Playwright gap review."
+      "roadmap": "Shipped: saved frame chains and popup aliases (R05). The remaining gap is inferring the chain while recording instead of authoring it."
     },
     {
       "id": "file-transfers",
@@ -1117,8 +1157,8 @@
       "name": "Uploads and downloads",
       "why": "Invoice, statement and document flows are upload/download flows.",
       "self": {
-        "rating": "partial",
-        "note": "The recorder and runner handle the application's own resource downloads and artifact ZIPs; user-authored upload fixtures and download-content assertions are not in the step contract yet.",
+        "rating": "yes",
+        "note": "upload_file carries an inline fixture whose filename, MIME type and base64 payload are all validated and size-capped, and download asserts the suggested filename, enforces the 512 KiB evidence cap and saves the artefact into the run directory. Both steps exist in the Python replay runtime and in the exported JavaScript runtime, and the recorder's own resource downloads and artifact ZIPs still work as before. Not claimed: assertions on the bytes of a downloaded file - the step contract compares name and size, not content.",
         "evidence": [
           {
             "kind": "route",
@@ -1126,8 +1166,24 @@
             "path": "/api/recordings/{rid}/resources.zip"
           },
           {
-            "kind": "file",
-            "path": "app/executor.py"
+            "kind": "symbol",
+            "path": "app/step_runtime.py",
+            "contains": "Download filename did not match"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/export_runtime.js",
+            "contains": "setInputFiles"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_browser_features.py",
+            "contains": "upload_file"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "CE_12_uploads_and_downloads_are_first_class_steps"
           }
         ]
       },
@@ -1150,7 +1206,7 @@
       "notes": {
         "playwright": "Yes: file chooser, setInputFiles and download events are first-class."
       },
-      "roadmap": "Roadmap R04 from the Playwright gap review."
+      "roadmap": "Shipped: user-authored upload fixtures and download assertions (R04). The remaining gap is content-level assertions on a downloaded file (checksum or parsed body)."
     },
     {
       "id": "network-mocking",
@@ -1158,9 +1214,30 @@
       "name": "Network mocking and request control",
       "why": "Deterministic tests need to force the 500, the timeout and the empty response without waiting for a real outage.",
       "self": {
-        "rating": "no",
-        "note": "No route interception or fulfill/abort rules are exposed. Do not claim it.",
-        "evidence": []
+        "rating": "yes",
+        "note": "mock_route installs a scoped route with a fulfilled status, body and content type - or an abort - and clear_routes removes every mock the recording installed, so a mock cannot leak into the next test. Both are capped at ten live mocks per recording and validated at authoring time (bounded URL pattern, HTTP status range, response size). Implemented in the Python replay runtime and in the exported JavaScript runtime, and covered by tests in both. Not claimed: HAR replay and automatic mock recording from a live session.",
+        "evidence": [
+          {
+            "kind": "symbol",
+            "path": "app/step_runtime.py",
+            "contains": "At most ten network mocks"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/export_runtime.js",
+            "contains": "Network mock limit reached"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_browser_features.py",
+            "contains": "mock_route"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "CE_11_network_mocks_exist_in_both_runtimes_and_are_bounded"
+          }
+        ]
       },
       "ratings": {
         "playwright": "yes",
@@ -1181,7 +1258,7 @@
       "notes": {
         "playwright": "Yes: page.route with fulfill/abort and HAR replay."
       },
-      "roadmap": "Roadmap R06 from the Playwright gap review: scoped mocks that never leak between tests."
+      "roadmap": "Shipped: scoped mocks that never leak between tests (R06). The remaining gap is HAR replay and recording mocks from a live session, neither of which is claimed."
     },
     {
       "id": "api-testing",
@@ -1189,17 +1266,32 @@
       "name": "HTTP/API testing",
       "why": "Half the defects live behind the UI, and API checks are cheaper and more stable than clicking.",
       "self": {
-        "rating": "partial",
-        "note": "The API contract agent reviews OpenAPI/Swagger specs and drafts contract tests; the stored run/agent APIs are exercised by the test suite. There is no first-class HTTP step in the execution plan with response assertions yet.",
+        "rating": "yes",
+        "note": "The step contract has a first-class api_request step: method, headers, body, expected status, a JSON path with an expected value and a captured variable, bounded by the same 512 KiB cap as file evidence and validated at authoring time. It runs in the Python replay runtime and in the exported JavaScript runtime, and Postman collections import straight into it. The API contract agent still reviews OpenAPI/Swagger specs and drafts contract tests on top of it.",
         "evidence": [
           {
             "kind": "file",
             "path": "app/qa_agents/api_contract.py"
           },
           {
+            "kind": "symbol",
+            "path": "app/step_runtime.py",
+            "contains": "api_request"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/export_runtime.js",
+            "contains": "api_request"
+          },
+          {
             "kind": "test",
-            "path": "tests/test_unit.py",
-            "contains": "api"
+            "path": "tests/test_browser_features.py",
+            "contains": "api_request"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "CE_10_http_step_exists_in_both_runtimes_with_assertions"
           }
         ]
       },
@@ -1223,7 +1315,7 @@
         "playwright": "Yes: APIRequestContext is a built-in HTTP client with assertions.",
         "cypress": "Yes: cy.request is built in."
       },
-      "roadmap": "Roadmap R06: HTTP steps with bounded status/header/JSON assertions and captured values."
+      "roadmap": "Shipped: HTTP steps with bounded status/header/JSON assertions and captured values (R06). Not claimed: a full Postman-style collection runner with environments and scripts."
     },
     {
       "id": "api-contract-review",
@@ -1460,20 +1552,25 @@
       "name": "CI integration out of the box",
       "why": "A tool that cannot be called from a pipeline is a manual chore.",
       "self": {
-        "rating": "partial",
-        "note": "Batch runs, Jenkinsfile export, GitHub workflows, JSON/JUnit/PDF report endpoints and a documented Docker path exist. A packaged single-command CLI runner is not shipped, so this stays partial.",
+        "rating": "yes",
+        "note": "tools/tf.py is the packaged runner: `tf run --plan nightly.json --wait --junit results.xml --json report.json` queues a run or a batch over the existing API, polls until it is terminal, collects the JUnit XML and the JSON report, and exits 0 for a pass, 1 for a failed suite and 2 for a pipeline mistake. Standard library only, so it runs on any CI image with Python 3.9+. Alongside it: batch runs, Jenkinsfile export, GitHub workflows, JSON/JUnit/PDF report endpoints and a documented Docker path. Not claimed: vendor-specific CI apps or hosted dashboards.",
         "evidence": [
           {
             "kind": "file",
-            "path": "app/library_store.py"
+            "path": "tools/tf.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/ci_results.py"
           },
           {
             "kind": "file",
             "path": ".github/workflows/ci.yml"
           },
           {
-            "kind": "file",
-            "path": "app/ci_results.py"
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "CiRunnerTests"
           }
         ]
       },
@@ -1496,7 +1593,7 @@
       "notes": {
         "playwright": "Yes: first-class GitHub Actions and sharding support."
       },
-      "roadmap": "Roadmap: a `tf run --plan` CLI wrapper over the existing API. The exported Jenkinsfile and JUnit results work today."
+      "roadmap": "Shipped: `tf run --plan` (plus status, junit and report) over the existing API. Not claimed: a first-party GitHub Action or a hosted CI dashboard."
     },
     {
       "id": "machine-readable-results",
@@ -1653,9 +1750,33 @@
       "name": "Bounded parallel execution",
       "why": "Suite duration decides how often teams can ship. Parallelism must be bounded to the machine that pays for it.",
       "self": {
-        "rating": "no",
-        "note": "Execution is deliberately sequential: one Chromium per instance, a queue in front of it, and a batch runner that never overlaps. The scaling review plans bounded workers, and until then this column is honestly 'no'.",
-        "evidence": []
+        "rating": "partial",
+        "note": "app/bounded_pool.py and app/run_pool.py give every execution unit a bounded, fair, cancellable slot: single runs and whole batches share one pool whose width is TF_MAX_CONCURRENT_RUNS clamped by the browser budget (TF_MAX_BROWSERS), slots are handed out in submission order, cancel_all stops in-flight work and never starts the rest, and the width defaults to 1 so the hosted instance stays exactly as sequential as it always was. Partial, not yes: the recordings inside one batch are still replayed one at a time, so a single suite does not get shorter unless it is split across runs.",
+        "evidence": [
+          {
+            "kind": "file",
+            "path": "app/bounded_pool.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/run_pool.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/main.py",
+            "contains": "run_pool.execution_pool.submit"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/queue/status"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "PoolTests"
+          }
+        ]
       },
       "ratings": {
         "playwright": "yes",
@@ -1677,7 +1798,7 @@
         "playwright": "Yes: workers and sharding are built in.",
         "selenium": "Yes: Grid distributes sessions."
       },
-      "roadmap": "Roadmap R14: isolated workers, global resource control and fair cancellation. Sequential stays the default for small deployments."
+      "roadmap": "Part shipped (R14): the bounded pool, global resource control and fair cancellation exist, and sequential is still the default. Still open: replaying the recordings of one batch in parallel, each in its own context, with the memory guard deciding the real ceiling."
     },
     {
       "id": "release-go-no-go",
