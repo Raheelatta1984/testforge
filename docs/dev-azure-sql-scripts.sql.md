@@ -129,6 +129,7 @@ CREATE TABLE runs (
     progress_pct INTEGER NOT NULL,
     execution_log NVARCHAR(max) NOT NULL,
     video_path VARCHAR(1000) NULL,
+    trace_path VARCHAR(1000) NULL,
     rog_monitor_log TEXT NULL,
     rog_devops_log TEXT NULL,
     rog_qa_log TEXT NULL,

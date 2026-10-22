@@ -2,43 +2,31 @@
   "projects": [
     {
       "id": "qa-sample-app",
-      "name": "TestForge Testing Tool",
+      "name": "TestForge Sample App",
       "path": "library/projects/qa-sample-app/project.json",
+      "variables": [
+        "user"
+      ],
       "recordings": [
         {
-          "created_at": "2026-10-13T14:10:55Z",
-          "id": "266bf0f6-2629-4be0-9f9b-135724912ad3",
-          "name": "Korger Leaning",
-          "parent_id": null,
-          "path": "library/projects/qa-sample-app/recordings/266bf0f6-2629-4be0-9f9b-135724912ad3/recording.json",
-          "purpose": "",
+          "id": "qa-hello-literal",
+          "name": "Hello literal",
+          "step_count": 4,
           "resources": [
-            "Jenkinsfile",
-            "LICENSE",
-            "README.md",
-            "azure-devops.csv",
-            "azure-devops.xlsx",
-            "jira.csv",
-            "jira.xlsx",
-            "package.json",
-            "playwright.config.ts",
-            "playwright_test.js",
-            "playwright_test.py",
-            "recorded_page.js",
-            "recorded_page.py",
-            "recording.feature",
-            "recording.spec.ts",
-            "requirements.txt",
-            "steps.json",
-            "testcomplete.csv",
-            "testcomplete.xlsx"
+            "Jenkinsfile"
           ],
-          "start_url": "https://www.kroger.com/",
-          "step_count": 0,
-          "tags": ""
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-literal/recording.json"
+        },
+        {
+          "id": "qa-hello-variable",
+          "name": "Hello variable",
+          "step_count": 4,
+          "resources": [
+            "Jenkinsfile"
+          ],
+          "path": "library/projects/qa-sample-app/recordings/qa-hello-variable/recording.json"
         }
-      ],
-      "variables": []
+      ]
     },
     {
       "id": "a8107955-5370-4125-bfc0-813060e10786",

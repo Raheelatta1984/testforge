@@ -20,8 +20,8 @@ do beat three deep ones, and that is a deliberate, published limitation.
 
 | Tool | Score | Yes | Partial | No | Not stated |
 | --- | --- | --- | --- | --- | --- |
+| **TestForge (after the four conversions)** | **90.5%** | 34 | 8 | 0 | **0** |
 | Argus Testing (MCP listing) | **90.0%** | 8 | 2 | 0 | **32** |
-| **TestForge (after this change)** | **85.7%** | 30 | 12 | 0 | **0** |
 | Katalon Platform | 73.7% | 19 | 18 | 1 | 4 |
 | mabl | 72.4% | 20 | 15 | 3 | 4 |
 | testRigor | 70.3% | 15 | 15 | 2 | 10 |
@@ -105,22 +105,31 @@ Result of this change: **72.0% as published → 85.7% verified**, 17 unverified
 claims → 0, open gaps **17 → 11**, differentiators **5 → 7**, and 458 unit tests
 green.
 
-## 5. Can we take first place? Yes — here is the exact remaining distance
+## 5. First place: the four conversions, shipped
 
-We are at 36.0 points from 42 evidenced capabilities. Passing Argus needs
-`> 37.8` (more than 90.0%). Every Partial we convert to Yes adds 0.5:
+We were at 36.0 points from 42 evidenced capabilities. Passing Argus needed
+`> 37.8` (more than 90.0%), and every Partial converted to Yes adds 0.5. All
+four shipped in order, each with real probes in `app/market_data.json`:
 
-| Work | Gain | Score after | Honest cost |
+| Work | Gain | Score after | What shipped |
 | --- | --- | --- | --- |
-| Video and trace artefacts → Yes (bounded `trace.zip` per failed run, viewer link) | +0.5 | 86.9% | Medium. Playwright tracing on the run context, size cap, artefact route. |
-| Audit trail and provenance → Yes (append-only, hash-chained event log) | +0.5 | 88.1% | Medium. New table or append-only file, chain verification, route. |
-| Multi-browser engines → Yes (`TF_BROWSER_ENGINE`, firefox/webkit, engine recorded in results) | +0.5 | 89.3% | Medium. Three launch sites, install guidance, image no longer chromium-only. |
-| Accessibility checks → Yes (bounded WCAG 2.2 subset with per-page evidence) | +0.5 | **90.5%** | Large. A real rule engine, not a keyword scan. |
-| Self-healing locators → Yes (scored multi-candidate healing with an audit trail) | +0.5 | 91.7% | Large. |
+| Video and trace artefacts → Yes | +0.5 | 86.9% | Every replay run records video plus a Playwright `trace.zip` (screenshots, snapshots, sources) under `artifacts/runs/<run_id>/`, downloadable from the Artifacts tab (`GET /api/runs/trace/{run_id}`); `TF_ENABLE_VIDEO=0` / `TF_TRACE=0` opt out. |
+| Audit trail and provenance → Yes | +0.5 | 88.1% | Every run appends `run_started`, per-step/per-case and `run_finished` events to `artifacts/runs/<run_id>/audit.jsonl`, each row sealed with a SHA-256 chained to the previous row; `GET /api/runs/audit/{run_id}` re-verifies on every read. |
+| Accessibility checks → Yes | +0.5 | 89.3% | A WCAG 2.x A/AA ten-rule subset (`TF-A11Y-01`–`10`: language, title, alt, control names, form labels, duplicate ids, main landmark, heading order, tab order, contrast) runs in-page over every crawled page, persists rule ids with criterion, level and impact, and is served by `POST /api/accessibility/scan`. |
+| Multi-browser engines → Yes | +0.5 | **90.5%** | Each matrix profile names its engine and the runner launches exactly that engine, with the engine recorded on every case; a CI job installs chromium, firefox and webkit and runs the same smoke plan on all three, with `TF_REQUIRE_ENGINES=1` turning a missing engine into a failure instead of a skip. |
+| Self-healing locators → Yes (not started) | +0.5 | 91.7% | Scored multi-candidate healing with an audit trail. Still the next conversion if we want more clearance. |
 
-Four of those five and we pass Argus. All five and we are 4 points clear. None of
-them needs a model, a paid service or a vendor account — which is exactly the
-axis a free tool should compete on.
+None of the four needed a model, a paid service or a vendor account — which is
+exactly the axis a free tool should compete on. The published matrix now reads
+**38.0 points, 90.5%, 42/42 claims verified, 7 gaps** (bounded parallel
+execution, scaling/capacity, RBAC, native mobile/rugged, self-healing,
+unknown-bug discovery, Windows desktop).
+
+Alongside the conversions: the Devices tab (║) adds fourteen emulation profiles
+(viewport, DPR, user agent, mobile/touch) with true-viewport bezel previews and
+deterministic per-device runs over the zebra, ERP, CRM and combined fixtures;
+and the red `LB-LIB-01` harness scenario is green again after the committed
+`qa-sample-app` fixtures it asserts were restored.
 
 **Three rows cannot be closed by us alone, and should stay Partial until they
 are real:** Windows desktop automation and native mobile/rugged devices need a
@@ -150,14 +159,13 @@ of building.
 1. **Evidence the competitor unknowns** (§6). One sourced pass over Argus,
    TestAtlas, browser-use and the two MCPs. Expected: the table reorders without
    a line of product code.
-2. **Trace artefacts** (0.5) — smallest of the four feature gaps, and a real
-   defect-triage win on its own.
-3. **Audit trail** (0.5) — also a trust win with regulated buyers, which is where
-   "free and self-hosted" already wins deals.
-4. **Multi-browser engines** (0.5) — the loudest gap in every evaluation against
-   Playwright and Selenium.
-5. **Accessibility subset** (0.5) — the hardest of the four; schedule it last and
-   rate it honestly if it lands as a rule subset rather than full WCAG 2.2.
+2. ~~**Trace artefacts** (0.5)~~ — shipped (§5).
+3. ~~**Audit trail** (0.5)~~ — shipped (§5).
+4. ~~**Multi-browser engines** (0.5)~~ — shipped (§5).
+5. ~~**Accessibility subset** (0.5)~~ — shipped as an honest ten-rule A/AA subset (§5).
+6. **Self-healing locators** (0.5) — the remaining conversion on the path to
+   91.7%: scored multi-candidate healing with an audit trail, or it stays
+   Partial.
 
 ## 8. The caveat worth keeping in front of every slide
 

@@ -58,3 +58,21 @@ jobs:
           name: harness-logs
           path: logs/
           retention-days: 14
+
+  multi-browser:
+    name: Smoke plan on chromium, firefox and webkit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-test.txt
+      # All three engines, with system dependencies, on the runner: the smoke
+      # below launches each one for real. TF_REQUIRE_ENGINES=1 turns a missing
+      # engine into a failure instead of a skip, so this job can never pass on
+      # Chromium alone.
+      - run: python -m playwright install --with-deps chromium firefox webkit
+      - run: TF_TEST_BROWSER=1 TF_REQUIRE_ENGINES=1 python -m unittest tests.test_multi_browser -v

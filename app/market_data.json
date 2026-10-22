@@ -831,17 +831,37 @@
       "name": "Accessibility checks",
       "why": "Accessible UIs are testable UIs: roles and labels are also the most stable automation locators.",
       "self": {
-        "rating": "partial",
-        "note": "The explorer flags missing accessible names and duplicate ids, and the requirement and code-review agents flag missing accessibility criteria and fragile selectors. There is no WCAG rule engine or conformance report, so this is partial only.",
+        "rating": "yes",
+        "note": "A WCAG 2.x A/AA subset (rules TF-A11Y-01 to TF-A11Y-10: page language and title, image alt, control names, form labels, duplicate ids, a main landmark, heading order, tab order, text contrast 4.5:1/3:1) runs in-page over every crawled page in app/explorer.py, persists rule ids with WCAG criterion, level and impact, and is served by POST /api/accessibility/scan with persisted per-scan reports and GET /api/accessibility/rules. Rendered scans (TF_EXPLORER_BROWSER=1) add computed-style contrast samples; static scans cover inline styles only, which the report and endpoint notes say plainly.",
         "evidence": [
+          {
+            "kind": "file",
+            "path": "app/accessibility.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/accessibility.py",
+            "contains": "def scan_page"
+          },
           {
             "kind": "symbol",
             "path": "app/explorer.py",
-            "contains": "accessible"
+            "contains": "accessibility_report"
           },
           {
-            "kind": "file",
-            "path": "app/qa_agents/code_review.py"
+            "kind": "route",
+            "method": "POST",
+            "path": "/api/accessibility/scan"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/accessibility/rules"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "TF-A11Y"
           }
         ]
       },
@@ -865,7 +885,7 @@
         "mabl": "Yes: accessibility checks are an advertised feature.",
         "playwright": "Partial: axe integration is available in the ecosystem, not built in."
       },
-      "roadmap": "Roadmap: a WCAG 2.2 rule subset with per-page evidence and a conformance summary. Explorer signal collection is implemented now."
+      "roadmap": "Shipped: the WCAG 2.x A/AA subset with per-page evidence, impact counts and a conformance summary, from this roadmap. A full axe-grade engine and cross-page keyboard-path verification are out of scope here."
     },
     {
       "id": "data-driven",
@@ -920,17 +940,32 @@
       "name": "Multi-browser engines",
       "why": "Chromium-only coverage misses WebKit and Gecko behaviour, including the bugs that only affect Safari users.",
       "self": {
-        "rating": "partial",
-        "note": "The execution matrix records a browser per profile, but the runner launches Chromium only. Firefox and WebKit are not yet selectable, and the docs say so.",
+        "rating": "yes",
+        "note": "Each matrix profile names its engine and the runner launches exactly that engine (getattr(pw, profile['browser']) in app/plan_runtime.py), sequentially, with the engine recorded on every case; the shared-batch Chromium-only guard fails closed. A CI job installs chromium, firefox and webkit with system dependencies and runs the same smoke plan on all three (tests/test_multi_browser.py), with TF_REQUIRE_ENGINES=1 turning a missing engine into a failure instead of a skip. Recording and the live preview stay Chromium-only, which the docs say.",
         "evidence": [
           {
             "kind": "symbol",
-            "path": "app/browser.py",
-            "contains": "chromium"
+            "path": "app/plan_runtime.py",
+            "contains": "getattr(pw, profile['browser']).launch"
           },
           {
             "kind": "file",
-            "path": "app/plan_runtime.py"
+            "path": "tests/test_multi_browser.py"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_multi_browser.py",
+            "contains": "TF_REQUIRE_ENGINES"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_multi_browser.py",
+            "contains": "(\"chromium\", \"firefox\", \"webkit\")"
+          },
+          {
+            "kind": "symbol",
+            "path": ".github/workflows/ci.yml",
+            "contains": "install --with-deps chromium firefox webkit"
           }
         ]
       },
@@ -955,7 +990,7 @@
         "cypress": "Partial: Chromium-family and Firefox in the open-source runner; WebKit needs paid Cloud.",
         "chrome-devtools-mcp": "No by design: it drives Chrome."
       },
-      "roadmap": "Roadmap R13 from the Playwright gap review: engine selection, install strategy and engine recorded in results."
+      "roadmap": "Shipped: roadmap R13 from the Playwright gap review (engine selection, install strategy and engine recorded in results). Recording and live preview remain Chromium-only by design."
     },
     {
       "id": "desktop-native",
@@ -964,7 +999,7 @@
       "why": "ERP and legacy business systems still open a WinForms, WPF or MFC window.",
       "self": {
         "rating": "partial",
-        "note": "app/desktop_runner.py provides a bounded sequential UIA adapter with a deterministic simulator and an authenticated Windows agent bridge. Live control requires TF_WINDOWS_AGENT_URL/TOKEN, and the Support Matrix badges it SIMULATOR READY rather than verified.",
+        "note": "app/desktop_runner.py provides a bounded sequential UIA adapter with a deterministic simulator and an authenticated Windows agent bridge, exercised from the Windows Desktop tab. Live control requires TF_WINDOWS_AGENT_URL/TOKEN, and the Support Matrix badges it SIMULATOR READY rather than verified; a simulator is not a desktop, so this stays partial.",
         "evidence": [
           {
             "kind": "file",
@@ -1011,7 +1046,7 @@
       "why": "Warehouse, field and consumer flows are mobile-first; a browser-only QA tool cannot see them.",
       "self": {
         "rating": "partial",
-        "note": "app/mobile_runner.py covers Android (UiAutomator2), iOS (XCUITest) and Zebra DataWedge scanning through a simulator or an authenticated Appium hub bridge. No real device is claimed without a configured hub.",
+        "note": "app/mobile_runner.py covers Android (UiAutomator2), iOS (XCUITest) and Zebra DataWedge scanning through a simulator or an authenticated Appium hub bridge, and the Devices tab adds fourteen emulation profiles (viewport, DPR, UA, mobile/touch) plus a simulator leg on every zebra run. No real device is claimed without a configured hub, so this stays partial.",
         "evidence": [
           {
             "kind": "file",
@@ -1056,7 +1091,7 @@
       "why": "Enterprise QA teams spend most of their time in Oracle, SAP, Salesforce and Dynamics, where locators and frames are hostile.",
       "self": {
         "rating": "partial",
-        "note": "Seven packs (Oracle, SAP Fiori, JD Edwards, Dynamics 365 F&O and Business Central, Odoo, Salesforce) run against a deterministic local fixture with positive/negative datasets and teardown resets. This is not vendor certification and no real tenant is claimed.",
+        "note": "Seven packs (Oracle, SAP Fiori, JD Edwards, Dynamics 365 F&O and Business Central, Odoo, Salesforce) run against a deterministic local fixture with positive/negative datasets and teardown resets, now joined by standalone ERP purchase-order and CRM opportunity fixtures that the Devices tab runs at desktop and handset viewports. This is not vendor certification and no real tenant is claimed, so this stays partial.",
         "evidence": [
           {
             "kind": "file",
@@ -2077,8 +2112,8 @@
       "name": "Audit trail and provenance",
       "why": "An auditor asks who changed what, what ran against which build, and whether the report is the one that was produced.",
       "self": {
-        "rating": "partial",
-        "note": "Run step logs carry timestamps and outcomes; library publication writes receipts with commit SHAs; pilot and claim audits carry expiry and hashes. There is no append-only, tamper-evident audit log yet.",
+        "rating": "yes",
+        "note": "Every run (replay and plan) appends run_started, per-step/per-case and run_finished events to artifacts/runs/<run_id>/audit.jsonl, each row sealed with a SHA-256 over canonical JSON that chains to the previous row - the same pattern as the claim-audit receipt. GET /api/runs/audit/{run_id} re-verifies on every read and reports verified/rows/head/completeness, and the Artifacts tab shows the verdict. A mutated, reordered, removed or swapped row fails verification.",
         "evidence": [
           {
             "kind": "symbol",
@@ -2088,6 +2123,25 @@
           {
             "kind": "file",
             "path": "app/support_matrix.py"
+          },
+          {
+            "kind": "file",
+            "path": "app/audit_trail.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/audit_trail.py",
+            "contains": "def verify"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/audit/{run_id}"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "audit.jsonl"
           }
         ]
       },
@@ -2110,7 +2164,7 @@
       "notes": {
         "katalon": "Yes: TestOps keeps execution history and audit views."
       },
-      "roadmap": "Roadmap: append-only event log with hash chaining for run and configuration changes."
+      "roadmap": "Shipped: hash-chained per-run log with on-read verification. Remaining: anchoring the head outside the file so tail truncation is detectable without a prior read."
     },
     {
       "id": "html-pdf-reports",
@@ -2164,8 +2218,8 @@
       "name": "Video and trace artefacts",
       "why": "A failing step is explained in seconds by a video or a trace, and in hours by a log.",
       "self": {
-        "rating": "partial",
-        "note": "Runs record video where the capture policy allows and per-step screenshots are capped and masked; a Playwright trace archive is not produced.",
+        "rating": "yes",
+        "note": "Every replay run records video (bundled Chromium, small frame, TF_ENABLE_VIDEO=0 opts out) and a Playwright trace.zip with screenshots, DOM snapshots and sources under artifacts/runs/<run_id>/, downloadable from the Artifacts tab (GET /api/runs/trace/{run_id}); the run row stores both paths. Plan and batch runs keep per-step screenshots; per-case tracing is future work and is not claimed.",
         "evidence": [
           {
             "kind": "route",
@@ -2175,6 +2229,26 @@
           {
             "kind": "file",
             "path": "app/evidence.py"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/executor.py",
+            "contains": "tracing.start"
+          },
+          {
+            "kind": "symbol",
+            "path": "app/executor.py",
+            "contains": "record_video_dir"
+          },
+          {
+            "kind": "route",
+            "method": "GET",
+            "path": "/api/runs/trace/{run_id}"
+          },
+          {
+            "kind": "test",
+            "path": "tests/test_claim_evidence.py",
+            "contains": "trace.zip"
           }
         ]
       },
@@ -2197,7 +2271,7 @@
       "notes": {
         "playwright": "Yes: trace viewer with snapshots, network and console."
       },
-      "roadmap": "Roadmap: optional trace.zip per failed run with a bounded size and a viewer link."
+      "roadmap": "Shipped: trace.zip per replay run with a viewer download link. Remaining: per-case traces for plan runs."
     },
     {
       "id": "test-management-integration",

@@ -1,0 +1,54 @@
+{
+  "created_at": "2026-10-10T00:00:00Z",
+  "id": "qa-hello-literal",
+  "name": "Hello literal",
+  "parent_id": null,
+  "project_id": "qa-sample-app",
+  "start_url": "/demo.html",
+  "status": "active",
+  "steps": [
+    {
+      "action": "navigate",
+      "id": "qa-hello-literal-1",
+      "label": "Open /demo.html",
+      "order": 1,
+      "selector": null,
+      "value": "/demo.html"
+    },
+    {
+      "action": "click",
+      "id": "qa-hello-literal-2",
+      "label": "Click name",
+      "order": 2,
+      "selector": {
+        "primary": "#name",
+        "x": 80,
+        "y": 140
+      },
+      "value": null
+    },
+    {
+      "action": "type",
+      "id": "qa-hello-literal-3",
+      "label": "Type: Quinn",
+      "order": 3,
+      "selector": {
+        "primary": "#name"
+      },
+      "value": "Quinn"
+    },
+    {
+      "action": "click",
+      "id": "qa-hello-literal-4",
+      "label": "Click Continue",
+      "order": 4,
+      "selector": {
+        "primary": "#go",
+        "x": 80,
+        "y": 200
+      },
+      "value": null
+    }
+  ],
+  "tags": "QA"
+}

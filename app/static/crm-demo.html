@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TestForge CRM opportunity demo</title>
+<style>
+  body{font-family:system-ui,sans-serif;margin:2rem;background:#0f172a;color:#e2e8f0}
+  main{max-width:46rem;margin:auto;background:#1e293b;padding:1.5rem;border-radius:1rem}
+  label{display:block;margin:.6rem 0 .2rem} input{padding:.5rem;width:100%;box-sizing:border-box}
+  button{padding:.55rem 1rem;margin:.6rem .3rem .6rem 0;cursor:pointer}
+  .stage{display:flex;gap:.5rem;margin:.6rem 0} .stage span{border:1px solid #475569;padding:.3rem .6rem}
+  .stage span.done{background:#065f46} a{color:#7dd3fc}
+</style>
+</head>
+<body>
+<main id="root">
+  <h1 id="app-title">CRM opportunities</h1>
+  <p>Tenant: <span data-testid="tenant-name" id="tenant-name">demo</span></p>
+  <section data-testid="opp-panel" aria-label="New opportunity">
+    <label>Account <input id="opp-name" data-testid="opp-name" aria-label="Account"></label>
+    <label>Stage <input id="opp-stage" data-testid="opp-stage" aria-label="Stage" list="opp-stages" value="Qualification"></label>
+    <datalist id="opp-stages"><option>Qualification</option><option>Proposal</option><option>Closed Won</option></datalist>
+    <button id="opp-save" data-testid="opp-save">Save opportunity</button>
+    <p id="opp-toast" data-testid="opp-toast" role="alert">Ready</p>
+  </section>
+  <div class="stage" data-testid="opp-path" id="opp-path">
+    <span data-stage="Qualification" class="done">Qualification</span><span data-stage="Proposal">Proposal</span><span data-stage="Closed Won">Closed Won</span>
+  </div>
+  <p>Deterministic fixture (no real CRM): saving writes one numbered opportunity.</p>
+</main>
+<script>
+(function(){
+  var counter = 1;
+  var stages = ['Qualification', 'Proposal', 'Closed Won'];
+  document.getElementById('opp-save').addEventListener('click', function(){
+    var name = document.getElementById('opp-name').value.trim();
+    var stage = document.getElementById('opp-stage').value.trim();
+    var toast = document.getElementById('opp-toast');
+    if(!name || stages.indexOf(stage) < 0){
+      toast.textContent = 'Opportunity rejected: account and a valid stage are required';
+      return;
+    }
+    var number = 'OPP-' + String(counter).padStart(4, '0');
+    counter += 1;
+    toast.textContent = 'Opportunity ' + number + ' saved at stage ' + stage;
+    Array.prototype.forEach.call(document.querySelectorAll('#opp-path span'), function(node){
+      if(stages.indexOf(node.getAttribute('data-stage')) <= stages.indexOf(stage)){
+        node.classList.add('done');
+      }
+    });
+  });
+})();
+</script>
+</body>
+</html>
