@@ -91,6 +91,8 @@ function MarketTab() {
     hint && e("div", { className: "text-[9px] text-slate-500 mt-1" }, hint));
 
   return e("div", { className: "space-y-4" },
+    e(GuideSection, { id: "market-intro", label: "Market position · audited comparison",
+      action: "Run the claim audit to re-verify TestForge's Yes cells against repository evidence." },
     e("section", { className: "rounded-2xl border border-indigo-800 bg-slate-900 p-4 space-y-3" },
       e("div", { className: "flex flex-wrap items-center justify-between gap-2" },
         e("div", null,
@@ -135,15 +137,19 @@ function MarketTab() {
         e("div", { className: "mt-1 text-slate-300" },
           `${audit.summary ? audit.summary.verified : 0} verified · ${audit.summary ? audit.summary.failed : 0} failed · ` +
           `${audit.summary ? audit.summary.failed_probes : 0} failed probe(s) · receipt ${audit.receipt_sha256 || ""}`),
-        audit.receipt_path && e("div", { className: "mt-1 text-slate-400" }, "Receipt written to " + audit.receipt_path))),
+        audit.receipt_path && e("div", { className: "mt-1 text-slate-400" }, "Receipt written to " + audit.receipt_path)))),
 
+    e(GuideSection, { id: "market-coverage", label: "Coverage at a glance",
+      action: "These cards summarise verified coverage and where TestForge leads or trails." },
     e("div", { className: "grid grid-cols-2 gap-2 md:grid-cols-5" },
       card(`${summary.self_coverage_pct}%`, "TestForge coverage", "Yes + Partial ÷ evidenced capabilities"),
       card(summary.self_yes, "capabilities claimed Yes", "each one evidenced"),
       card(summary.self_partial, "claimed Partial", "subset or needs an agent"),
       card(summary.differentiators, "differentiators", "no compared tool claims them"),
-      card(summary.open_gaps, "open gaps", "where a competitor leads")),
+      card(summary.open_gaps, "open gaps", "where a competitor leads"))),
 
+    e(GuideSection, { id: "market-filters", label: "Filter the comparison",
+      action: "Filter by group, search text, or show gaps only — notes explain each cell." },
     e("section", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-3 space-y-2" },
       e("div", { className: "flex flex-wrap items-center gap-2" },
         e("select", { value: group, onChange: event => setGroup(event.target.value),
@@ -163,10 +169,14 @@ function MarketTab() {
         e("span", { className: "text-[10px] text-slate-500" },
           `${rows.length} of ${data.capabilities.length} shown`)),
       e("p", { className: "text-[10px] text-slate-500" },
-        "Yes · Partial · No · “Not stated” means the source did not evidence it either way · “Unverified” means a TestForge claim lost its evidence and must not be repeated.")),
+        "Yes · Partial · No · “Not stated” means the source did not evidence it either way · “Unverified” means a TestForge claim lost its evidence and must not be repeated."))),
 
-    e(MarketMatrixTable, { rows, tools, groups, gapIds, showNotes, openRow, setOpenRow, ratingOf, noteOf }),
+    e(GuideSection, { id: "market-matrix", label: "Capability matrix · tap for evidence",
+      action: "Tap a row to see TestForge's evidence probes and the disposition." },
+    e(MarketMatrixTable, { rows, tools, groups, gapIds, showNotes, openRow, setOpenRow, ratingOf, noteOf })),
 
+    e(GuideSection, { id: "market-gaps", label: "Where a competitor leads",
+      action: "Gaps are published on purpose — each lists leaders and the roadmap." },
     e("section", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-2" },
       e("h2", { className: "text-sm font-bold text-indigo-300" }, "Where a competitor leads"),
       e("p", { className: "text-[10px] text-slate-400" },
@@ -183,8 +193,10 @@ function MarketTab() {
             return tool ? tool.name : id;
           }).join(", ")),
           e("span", { className: "text-slate-400" }, "· " + gap.roadmap))))
-        : e("p", { className: "text-[11px] text-emerald-200" }, "No compared tool claims a capability TestForge does not.")),
+        : e("p", { className: "text-[11px] text-emerald-200" }, "No compared tool claims a capability TestForge does not."))),
 
+    e(GuideSection, { id: "market-leads", label: "Where TestForge leads",
+      action: "Differentiators no competitor claims and leads only one competitor claims." },
     e("section", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-2" },
       e("h2", { className: "text-sm font-bold text-indigo-300" }, "Where TestForge leads"),
       e("div", { className: "grid gap-2 md:grid-cols-2" },
@@ -197,6 +209,8 @@ function MarketTab() {
           e("ul", { className: "mt-1 space-y-1 text-[11px] text-slate-300" },
             data.leads.map(row => e("li", { key: row.id }, "✔ " + row.name + " — also " + row.leaders.join(", "))))))),
 
+    e(GuideSection, { id: "market-trust", label: "Trust and operations, per tool",
+      action: "Licence, price, deployment and model dependency for every compared tool." },
     e("section", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-2" },
       e("h2", { className: "text-sm font-bold text-indigo-300" }, "Trust and operations, per tool"),
       e("div", { className: "overflow-auto" },
@@ -210,9 +224,9 @@ function MarketTab() {
             e("td", { className: "p-1.5 border-b border-slate-800/60" }, tool.price),
             e("td", { className: "p-1.5 border-b border-slate-800/60" }, tool.deployment),
             e("td", { className: "p-1.5 border-b border-slate-800/60" }, tool.model_dependency || ""),
-            e("td", { className: "p-1.5 border-b border-slate-800/60 text-slate-400" }, tool.basis))))))),
+            e("td", { className: "p-1.5 border-b border-slate-800/60 text-slate-400" }, tool.basis)))))))),
 
-    e("p", { className: "text-[10px] text-slate-500" }, data.disclaimer));
+    e("p", { className: "text-[10px] text-slate-500" }, data.disclaimer)));
 }
 
 function MarketMatrixTable({ rows, tools, groups, gapIds, showNotes, openRow, setOpenRow, ratingOf, noteOf }) {
@@ -352,6 +366,8 @@ function IntelTab() {
   });
 
   return e("div", { className: "space-y-4" },
+    e(GuideSection, { id: "intel-intro", label: "QA Intelligence · deterministic helpers",
+      action: "No AI or execution needed — these answer from the stored library or a URL you paste." },
     e("section", { className: "rounded-2xl border border-indigo-800 bg-slate-900 p-4 space-y-2" },
       e("div", { className: "text-[10px] font-bold tracking-widest text-indigo-300" }, "🧠 QA INTELLIGENCE"),
       e("h1", { className: "text-xl font-bold text-slate-100" }, "Reuse, impact and discovery — without a model in the loop"),
@@ -359,8 +375,10 @@ function IntelTab() {
         "Three deterministic answers that decide the cost of a suite: does this step already exist, which tests does my change touch, and what is broken on this page that nobody scripted? ",
         steps && e("span", { className: "text-slate-400" },
           `Catalogue: ${steps.unique_steps} unique steps across ${steps.recordings} recording(s) in ${steps.projects} project(s).`)),
-      error && e("p", { role: "alert", className: "text-xs text-red-300 bg-red-950/40 border border-red-800/40 rounded-lg p-2" }, error)),
+      error && e("p", { role: "alert", className: "text-xs text-red-300 bg-red-950/40 border border-red-800/40 rounded-lg p-2" }, error))),
 
+    e(GuideSection, { id: "intel-resolve", label: "Resolve a step phrase",
+      action: "Type how a tester would say it — Bound means reuse, Ambiguous needs a choice." },
     e("section", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-2" },
       e("h2", { className: "text-sm font-bold text-indigo-300" }, "1 · Resolve a phrase before recording it again"),
       e("p", { className: "text-[10px] text-slate-400" },
@@ -375,8 +393,10 @@ function IntelTab() {
       resolve && e("div", { className: "space-y-1" },
         e("div", { className: "text-[11px] text-slate-200" },
           e("strong", null, resolve.status.toUpperCase()), " · " + resolve.advice),
-        e(IntelResultTable, { rows: resolve.candidates, empty: "No candidates." }))),
+        e(IntelResultTable, { rows: resolve.candidates, empty: "No candidates." })))),
 
+    e(GuideSection, { id: "intel-impact", label: "Impact analysis · which tests to run",
+      action: "Paste changed file paths — smoke tests always run; others name the matching term." },
     e("section", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-2" },
       e("h2", { className: "text-sm font-bold text-indigo-300" }, "2 · Which tests does this change reach?"),
       e("p", { className: "text-[10px] text-slate-400" },
@@ -391,8 +411,10 @@ function IntelTab() {
         e("div", { className: "text-[10px] text-slate-400" },
           `${impact.selected_count} of ${impact.catalogue_size} recordings selected · catalogue reduced by ${impact.reduction_pct}% ` +
           (impact.unmatched_hint ? "· " + impact.unmatched_hint : "")),
-        e(IntelResultTable, { rows: impact.selected, empty: "Nothing matched. That is a coverage answer." }))),
+        e(IntelResultTable, { rows: impact.selected, empty: "Nothing matched. That is a coverage answer." })))),
 
+    e(GuideSection, { id: "intel-explorer", label: "Explorer · find unscripted defects",
+      action: "Paste any URL you own — checks are deterministic and verified on a fresh fetch." },
     e("section", { className: "rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-2" },
       e("h2", { className: "text-sm font-bold text-indigo-300" }, "3 · Explore a black-box target for unscripted defects"),
       e("p", { className: "text-[10px] text-slate-400" },
@@ -412,7 +434,7 @@ function IntelTab() {
         e(IntelResultTable, { rows: scan.findings, empty: "No findings from these checks." }),
         scan.markdown && e("details", { className: "rounded-lg border border-slate-800 bg-slate-950 p-2" },
           e("summary", { className: "cursor-pointer text-[10px] font-bold text-indigo-200" }, "Defect report (Markdown)"),
-          e("pre", { className: "mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[9px] text-slate-300" }, scan.markdown)))));
+          e("pre", { className: "mt-1 max-h-64 overflow-auto whitespace-pre-wrap text-[9px] text-slate-300" }, scan.markdown))))));
 
 }
 

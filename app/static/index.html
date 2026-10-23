@@ -976,69 +976,79 @@ function DevicesTab({ project }) {
 
   const chip = (text, title) => e("span", { key: text, title: title || text, className: "text-[9px] font-bold px-2 py-1 rounded bg-slate-800 border border-slate-700 text-slate-300" }, text);
 
-  return e("div", { className: "p-4 flex flex-col gap-4" },
-    e("div", null,
+  return e("div", { className: "space-y-4" },
+    e(GuideSection, { id: "devices-intro", label: "Devices · emulation overview",
+      action: "Choose a device group and see what this tab emulates without touching real hardware." },
+    e("div", { className: "bg-slate-900 p-4 rounded-2xl border border-slate-800" },
       e("h2", { className: "text-sm font-bold text-indigo-300" }, "║ DEVICES — EMULATION PROFILES"),
       e("p", { className: "text-[11px] text-slate-400 mt-1" },
         "Pick a handset, tablet or desktop and run a deterministic flow at its true viewport. ",
         "Runs drive the bundled Chromium with the profile's viewport, DPR, user agent and mobile/touch flags; ",
-        "the zebra target adds a deterministic simulator leg. No real device is touched.")),
+        "the zebra target adds a deterministic simulator leg. No real device is touched."))),
     error && e("p", { className: "text-[11px] text-red-300" }, error),
     !catalog && !error && e("p", { className: "text-[11px] text-slate-400" }, "Loading the catalogue…"),
     catalog && e("div", { className: "flex flex-col lg:flex-row gap-4" },
       e("div", { className: "flex-1 min-w-0 flex flex-col gap-3" },
-        e("div", { className: "flex flex-wrap gap-2" },
-          catalog.groups.map(g => e("button", {
-            key: g.id, type: "button",
-            onClick: () => { setGroup(g.id); const first = all.find(d => d.group === g.id); if (first) setDeviceId(first.id); },
-            className: "text-[10px] font-bold px-3 py-2 rounded-lg border " + (group === g.id ? "bg-indigo-900 border-indigo-500" : "bg-slate-800 border-slate-700 hover:border-indigo-500")
-          }, g.name))),
-        e("label", { className: "text-[11px] text-slate-300 flex flex-col gap-1" }, "Device",
-          e("select", {
-            value: device ? device.id : "", onChange: ev => setDeviceId(ev.target.value),
-            className: "bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-[11px]"
-          }, inGroup.map(d => e("option", { key: d.id, value: d.id }, d.name + " — " + d.viewport.width + "×" + d.viewport.height)))),
-        e("label", { className: "text-[11px] text-slate-300 flex flex-col gap-1" }, "Flow",
-          e("select", {
-            value: target, onChange: ev => setTarget(ev.target.value),
-            className: "bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-[11px]"
-          }, catalog.targets.map(t => e("option", { key: t.id, value: t.id }, t.label)))),
-        device && e("div", { className: "flex flex-wrap gap-1" },
-          chip(device.viewport.width + "×" + device.viewport.height, "CSS viewport"),
-          chip("DPR " + device.device_scale_factor, "Device scale factor"),
-          chip(device.is_mobile ? "MOBILE" : "DESKTOP", "is_mobile flag"),
-          chip(device.has_touch ? "TOUCH" : "NO TOUCH", "has_touch flag"),
-          chip(device.user_agent.slice(0, 42) + "…", device.user_agent)),
-        device && e("p", { className: "text-[10px] text-slate-500" }, device.blurb),
-        e("div", null,
-          e("button", {
-            type: "button", onClick: run, disabled: running || !device,
-            className: "text-[11px] font-bold px-4 py-2 rounded-lg " + (running ? "bg-slate-700 text-slate-400" : "bg-indigo-700 hover:bg-indigo-600")
-          }, running ? "RUNNING…" : "RUN ON THIS DEVICE")),
-        result && e("div", { className: "rounded-xl border border-slate-700 bg-slate-900/60 p-3 flex flex-col gap-2" },
-          e("div", { className: "flex items-center gap-2" },
-            e("span", { className: "text-[11px] font-bold px-2 py-1 rounded " + (result.status === "passed" ? "bg-emerald-900 text-emerald-200" : "bg-red-900 text-red-200") },
-              result.status === "passed" ? "PASSED" : "FAILED"),
-            e("span", { className: "text-[10px] text-slate-400" },
-              (result.device ? result.device.name : "") + " · " + result.target + " · " + result.engine + " · " + result.elapsed_seconds + "s")),
-          result.legs.map((leg, i) => e("div", { key: i, className: "text-[10px] text-slate-300 border-t border-slate-800 pt-2" },
-            e("div", { className: "font-bold" },
-              (leg.leg === "web" ? "WEB" : "SIMULATOR") + " · " + leg.flow + " · " +
-              (leg.status === "passed" ? "✓ passed" : "✗ " + leg.status)),
-            leg.failure && e("div", { className: "text-red-300" },
-              "Failed at " + leg.failure.stage + " step " + leg.failure.step + " (" + leg.failure.action + "): " + leg.failure.error_type),
-            leg.error_type && e("div", { className: "text-red-300" }, "Error: " + leg.error_type),
-            leg.steps && e("div", { className: "text-slate-400" }, leg.steps.map(s => s.action + " " + (s.status === "passed" ? "✓" : "✗")).join(" → ")))),
-          e("p", { className: "text-[9px] text-slate-500" }, result.note))),
-      device && e("div", { className: "shrink-0 mx-auto lg:mx-0" },
-        e("div", { className: "rounded-[1.6rem] border-4 border-slate-600 bg-black p-2 shadow-xl" },
-          e("div", { className: "rounded-[1.1rem] overflow-hidden bg-white", style: { width: Math.round(vw * scale), height: Math.round(vh * scale) } },
-            e("iframe", {
-              title: "True-viewport preview of " + device.name, src: "/" + fixture,
-              style: { width: vw, height: vh, transform: "scale(" + scale + ")", transformOrigin: "top left", border: 0 }
-            }))),
-        e("p", { className: "text-center text-[10px] text-slate-400 mt-2" },
-          device.name + " · true viewport " + vw + "×" + vh + " @ " + pct + "% · DPR " + device.device_scale_factor)))
+        e(GuideSection, { id: "devices-groups", label: "Device groups & flow",
+          action: "Pick a group, then a device and a flow — the chips explain what the device emulates." },
+        e("div", { className: "bg-slate-900 p-3 rounded-2xl border border-slate-800 space-y-3" },
+          e("div", { className: "flex flex-wrap gap-2" },
+            catalog.groups.map(g => e("button", {
+              key: g.id, type: "button",
+              onClick: () => { setGroup(g.id); const first = all.find(d => d.group === g.id); if (first) setDeviceId(first.id); },
+              className: "text-[10px] font-bold px-3 py-2 rounded-lg border " + (group === g.id ? "bg-indigo-900 border-indigo-500" : "bg-slate-800 border-slate-700 hover:border-indigo-500")
+            }, g.name))),
+          e("label", { className: "text-[11px] text-slate-300 flex flex-col gap-1" }, "Device",
+            e("select", {
+              value: device ? device.id : "", onChange: ev => setDeviceId(ev.target.value),
+              className: "bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-[11px]"
+            }, inGroup.map(d => e("option", { key: d.id, value: d.id }, d.name + " — " + d.viewport.width + "×" + d.viewport.height)))),
+          e("label", { className: "text-[11px] text-slate-300 flex flex-col gap-1" }, "Flow",
+            e("select", {
+              value: target, onChange: ev => setTarget(ev.target.value),
+              className: "bg-slate-800 border border-slate-700 rounded-lg px-2 py-2 text-[11px]"
+            }, catalog.targets.map(t => e("option", { key: t.id, value: t.id }, t.label)))),
+          device && e("div", { className: "flex flex-wrap gap-1" },
+            chip(device.viewport.width + "×" + device.viewport.height, "CSS viewport"),
+            chip("DPR " + device.device_scale_factor, "Device scale factor"),
+            chip(device.is_mobile ? "MOBILE" : "DESKTOP", "is_mobile flag"),
+            chip(device.has_touch ? "TOUCH" : "NO TOUCH", "has_touch flag"),
+            chip(device.user_agent.slice(0, 42) + "…", device.user_agent)),
+          device && e("p", { className: "text-[10px] text-slate-500" }, device.blurb))),
+        e(GuideSection, { id: "devices-run", label: "Run on this device",
+          action: "Press RUN and watch the two legs: web and the optional simulator." },
+        e("div", { className: "space-y-3" },
+          e("div", null,
+            e("button", {
+              type: "button", onClick: run, disabled: running || !device,
+              className: "text-[11px] font-bold px-4 py-2 rounded-lg " + (running ? "bg-slate-700 text-slate-400" : "bg-indigo-700 hover:bg-indigo-600")
+            }, running ? "RUNNING…" : "RUN ON THIS DEVICE")),
+          result && e("div", { className: "rounded-xl border border-slate-700 bg-slate-900/60 p-3 flex flex-col gap-2" },
+            e("div", { className: "flex items-center gap-2" },
+              e("span", { className: "text-[11px] font-bold px-2 py-1 rounded " + (result.status === "passed" ? "bg-emerald-900 text-emerald-200" : "bg-red-900 text-red-200") },
+                result.status === "passed" ? "PASSED" : "FAILED"),
+              e("span", { className: "text-[10px] text-slate-400" },
+                (result.device ? result.device.name : "") + " · " + result.target + " · " + result.engine + " · " + result.elapsed_seconds + "s")),
+            result.legs.map((leg, i) => e("div", { key: i, className: "text-[10px] text-slate-300 border-t border-slate-800 pt-2" },
+              e("div", { className: "font-bold" },
+                (leg.leg === "web" ? "WEB" : "SIMULATOR") + " · " + leg.flow + " · " +
+                (leg.status === "passed" ? "✓ passed" : "✗ " + leg.status)),
+              leg.failure && e("div", { className: "text-red-300" },
+                "Failed at " + leg.failure.stage + " step " + leg.failure.step + " (" + leg.failure.action + "): " + leg.failure.error_type),
+              leg.error_type && e("div", { className: "text-red-300" }, "Error: " + leg.error_type),
+              leg.steps && e("div", { className: "text-slate-400" }, leg.steps.map(s => s.action + " " + (s.status === "passed" ? "✓" : "✗")).join(" → ")))),
+            e("p", { className: "text-[9px] text-slate-500" }, result.note))))),
+      device && e(GuideSection, { id: "devices-preview", label: "True-viewport preview",
+        action: "This is the device at its real CSS size, scaled to fit. Compare it with the chips." },
+        e("div", { className: "shrink-0 mx-auto lg:mx-0" },
+          e("div", { className: "rounded-[1.6rem] border-4 border-slate-600 bg-black p-2 shadow-xl" },
+            e("div", { className: "rounded-[1.1rem] overflow-hidden bg-white", style: { width: Math.round(vw * scale), height: Math.round(vh * scale) } },
+              e("iframe", {
+                title: "True-viewport preview of " + device.name, src: "/" + fixture,
+                style: { width: vw, height: vh, transform: "scale(" + scale + ")", transformOrigin: "top left", border: 0 }
+              }))),
+          e("p", { className: "text-center text-[10px] text-slate-400 mt-2" },
+            device.name + " · true viewport " + vw + "×" + vh + " @ " + pct + "% · DPR " + device.device_scale_factor))))
   );
 }
 
@@ -1309,6 +1319,8 @@ function DesktopRecorder({ project }) {
       review.review && e(VariableReviewPanel, { review: review.review, busy: review.busy, onEdit: review.edit,
         onApply: review.apply, onKeep: review.keep }),
       e("div", { className: "grid grid-cols-1 xl:grid-cols-[minmax(0,1.6fr)_minmax(280px,1fr)] gap-4" },
+        e(GuideSection, { id: "desktop-live-screen", label: "Live Windows screen · click to act",
+          action: "Pick an action, type a value if needed, then click the target in the picture. A simulator screenshot appears when no agent is configured." },
         e("section", { className: "rounded-2xl border border-slate-800 bg-slate-950 overflow-hidden" },
           e("div", { className: "flex flex-wrap justify-between items-center gap-2 p-3 bg-slate-900 border-b border-slate-800" },
             e("span", { className: "text-xs font-bold text-indigo-300" }, "LIVE WINDOWS SCREEN"),
@@ -1326,7 +1338,9 @@ function DesktopRecorder({ project }) {
                 e("input", { value: fieldName, disabled: busy, onChange: evt => setFieldName(evt.target.value), placeholder: "e.g. Customer number", className: "block w-full mt-1 bg-slate-800 rounded-lg px-3 py-2 text-xs" }))),
             ["ui_type", "ui_select", "ui_check"].includes(action) && e("label", { className: "block text-[10px] text-slate-400" }, action === "ui_type" ? "Text to type" : action === "ui_select" ? "Option to select" : "Checked state (true / false)",
               e("input", { value, disabled: busy, onChange: evt => setValue(evt.target.value), placeholder: action === "ui_check" ? "true or false" : "Enter a value before clicking the target…", className: "block w-full mt-1 bg-slate-800 rounded-lg px-3 py-2 text-xs" })),
-            e("p", { className: "text-[10px] text-slate-500" }, "Choose the action and optional value, then click the control in the screen. Every recorded action updates the view and step list together.")),
+            e("p", { className: "text-[10px] text-slate-500" }, "Choose the action and optional value, then click the control in the screen. Every recorded action updates the view and step list together."))),
+        e(GuideSection, { id: "desktop-step-evidence", label: "Synchronized step evidence",
+          action: "Every click becomes a numbered step with timestamps and a screenshot — review here before stopping." },
         e("section", { className: "rounded-2xl border border-slate-800 bg-slate-950 p-3 space-y-2 min-w-0" },
           e("div", { className: "flex justify-between items-center" },
             e("h3", { className: "text-xs font-bold text-indigo-300" }, "SYNCHRONIZED STEP EVIDENCE"),
@@ -1342,8 +1356,8 @@ function DesktopRecorder({ project }) {
             ["ui_type", "ui_select"].includes(step.action) && step.value && e("div", { className: "text-[10px] text-slate-400 break-all" },
               /\{\{[^}]+\}\}/.test(String(step.value)) ? "Value · " + step.value : "Value · typed text (not a variable yet)"),
             step.screenshot && e("img", { src: step.screenshot, alt: `Windows screen after step ${step.order}`, className: "w-full rounded-lg border border-slate-800" })))
-      ))
-    )))
+      ))))
+    ))
   );
 }
 

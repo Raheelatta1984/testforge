@@ -380,6 +380,8 @@ function SupportMatrixPanel() {
 
 function FuturePlanningTab() {
   return e('div', { className: 'space-y-4' },
+    e(GuideSection, { id: "future-intro", label: "Future release planning · overview",
+      action: "Read what is available today and what needs an agent or hub to go live." },
     e('section', { className: 'rounded-2xl border border-indigo-800 bg-slate-900 p-5 space-y-3' },
       e('div', { className: 'flex flex-wrap items-center justify-between gap-2' },
         e('span', { className: 'text-[10px] font-bold tracking-wide text-indigo-300' }, '🗺️ FUTURE RELEASE PLANNING'),
@@ -398,8 +400,12 @@ function FuturePlanningTab() {
         e('p', { className: 'text-[10px] text-slate-500' },
           'Windows desktop and native mobile plans execute against deterministic simulators by default, or a real target only when TF_WINDOWS_AGENT_URL/TF_WINDOWS_AGENT_TOKEN or TF_MOBILE_HUB_URL/TF_MOBILE_HUB_TOKEN are configured.'))),
 
-    e(SupportMatrixPanel, null),
+    e(GuideSection, { id: "future-matrix", label: "Support Matrix & Readiness Gate",
+      action: "REFRESH reads the live state; RUN PILOT mints a 24-hour receipt that decides the VERIFIED badge." },
+    e(SupportMatrixPanel, null)),
 
+    e(GuideSection, { id: "future-targets", label: "Implemented application and tool targets",
+      action: "Browse ERP/CRM, Windows desktop and Mobile/Zebra targets — initials are local placeholders." },
     e('section', { className: 'rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-3' },
       e('div', { className: 'space-y-1' },
         e('h2', { className: 'text-sm font-bold text-indigo-300' }, 'Implemented application and tool targets'),
@@ -409,8 +415,10 @@ function FuturePlanningTab() {
         e('h3', { className: 'text-xs font-bold uppercase tracking-wide text-slate-300' }, group),
         e('div', { className: 'grid grid-cols-1 gap-2 md:grid-cols-2' },
           TESTFORGE_ROADMAP_TARGETS.filter(target => target.group === group).map(target =>
-            e(RoadmapTargetCard, { key: target.name, target })))))),
+            e(RoadmapTargetCard, { key: target.name, target }))))))),
 
+    e(GuideSection, { id: "future-roadmap", label: "A practical extension roadmap",
+      action: "Each phase is already implemented simulator-first; live verification needs your authorized environment." },
     e('section', { className: 'rounded-2xl border border-slate-800 bg-slate-900 p-4 space-y-3' },
       e('h2', { className: 'text-sm font-bold text-indigo-300' }, 'A practical extension roadmap'),
       e('ol', { className: 'space-y-3' },
@@ -423,8 +431,10 @@ function FuturePlanningTab() {
           e('h3', { className: 'text-xs font-bold text-slate-100' }, title),
           e('p', { className: 'text-xs leading-relaxed text-slate-400' }, detail)))),
       e('p', { className: 'text-[10px] text-amber-200' },
-        'No vendor partnerships or certifications are claimed. Simulator verification proves the TestForge contract locally; live verification needs your authorized tenant, Windows agent or device lab.')),
+        'No vendor partnerships or certifications are claimed. Simulator verification proves the TestForge contract locally; live verification needs your authorized tenant, Windows agent or device lab.'))),
 
-    e(RoadmapAiPromptPanel, null)
+    e(GuideSection, { id: "future-prompt", label: "AI prompt for the full roadmap",
+      action: "COPY AI PROMPT gives you the spec to hand to a coding agent; switch scope for one phase only." },
+    e(RoadmapAiPromptPanel, null)))
   );
 }
