@@ -221,6 +221,8 @@ function DevDeployTab({ setTab }) {
           "Read the guides on GitHub instead")),
 
       view === "docs" && e("div", { className: "grid grid-cols-1 lg:grid-cols-[minmax(200px,280px)_minmax(0,1fr)] gap-3" },
+        e(GuideSection, { id: "devkit-docs-list", label: "Guides",
+          action: "Pick a guide — progress is ticked per section and kept on this device." },
         e("nav", { "aria-label": "Dev and deploy guides", className: "space-y-2 min-w-0" },
           docs.map(item => {
             const ticked = Object.keys(done[item.slug] || {}).length;
@@ -236,11 +238,14 @@ function DevDeployTab({ setTab }) {
               e("p", { className: "text-[9px] text-slate-500" },
                 item.audience + (ticked ? " · " + ticked + " read" : "")),
               !item.available && e("p", { className: "text-[9px] text-amber-300" }, "Not in this deployment"));
-          })),
+          }))),
+        e(GuideSection, { id: "devkit-doc-view", label: "Guide reader",
+          action: "Tick sections as you finish, copy markdown or download the file." },
         e("div", { className: "min-w-0" },
-          view === "docs" && e(DevKitDocView, { doc: active, done: docProgress, toggleDone }))),
-
-      view === "prompts" && e("div", { className: "space-y-3" },
+          view === "docs" && e(DevKitDocView, { doc: active, done: docProgress, toggleDone })))),
+      view === "prompts" && e(GuideSection, { id: "devkit-prompts", label: "AI prompt library",
+        action: "Filter by phase, copy a prompt and paste its required inputs into your AI." },
+      e("div", { className: "space-y-3" },
         e("div", { className: "bg-slate-950 border border-slate-800 rounded-2xl p-3 space-y-2" },
           e("p", { className: "text-[11px] text-slate-300" },
             "Copy a prompt, replace every <ANGLE BRACKET PLACEHOLDER>, and paste the inputs it lists into the " +
@@ -253,7 +258,7 @@ function DevDeployTab({ setTab }) {
                   (phase === key ? "bg-indigo-700 border-indigo-500 text-white" : "bg-slate-900 border-slate-700 text-slate-300") },
                 label)))),
         e("div", { className: "grid grid-cols-1 xl:grid-cols-2 gap-3" },
-          shown.map(prompt => e(DevKitPromptCard, { key: prompt.id, prompt, phaseName: phaseName(prompt.phase) })))),
+          shown.map(prompt => e(DevKitPromptCard, { key: prompt.id, prompt, phaseName: phaseName(prompt.phase) }))))),
 
       e("div", { className: "bg-slate-950 border border-sky-900 rounded-2xl p-4 space-y-2" },
         e("h3", { className: "text-sm font-bold text-sky-300" }, "Handing this to the in-house dev team"),

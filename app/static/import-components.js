@@ -602,6 +602,8 @@ function ImportScripts({ project, onSaved, onRun }) {
           setPreview(result);setName(result.name);setPlanOptions(JSON.stringify(result.execution_plan,null,2));setNotice(result.notice);
         } catch(err){if(version===generation.current)setError(err.message);} finally{setBusy(false);}
       }},e('option',{value:''},'Choose an example…'),packs.map(pack=>e('option',{key:pack.id,value:pack.id},pack.name)))),
+    e(GuideSection,{id:'imp-templates',label:'Start from a template',
+      action:'Pick any format template — it previews with zero errors so you can see how it parses.'},
     e('div',{className:'border border-slate-700 bg-slate-950 p-3 rounded-xl space-y-2'},
       e('p',{className:'text-xs font-bold text-indigo-300'},'START FROM A TEMPLATE (ANY FORMAT)'),
       e('p',{className:'text-[11px] text-slate-400'},templatesNotice || 'Every template in this pack previews with zero errors. Load one to see its steps, then replace them with your own scenario.'),
@@ -613,7 +615,7 @@ function ImportScripts({ project, onSaved, onRun }) {
         templateId && (()=>{const entry=templates.find(item=>item.id===templateId);if(!entry)return null;
           return e('a',{href:'/api/imports/templates/'+entry.id,className:'text-indigo-300 underline text-xs'},entry.bundle?'DOWNLOAD (.zip)':`DOWNLOAD ${entry.files[0]}`);})(),
         e('a',{href:'/api/imports/templates.zip',className:'text-indigo-300 underline text-xs'},'DOWNLOAD ALL (.zip)'),
-        e('a',{href:'/api/imports/template.csv',className:'text-indigo-300 underline text-xs'},'DOWNLOAD CSV TEMPLATE'))),
+        e('a',{href:'/api/imports/template.csv',className:'text-indigo-300 underline text-xs'},'DOWNLOAD CSV TEMPLATE')))),
     (preview || draft || saved) && e('div',{className:'flex flex-wrap gap-2 items-center'},
       // A restored session is a convenience, not a trap: this is how the panel is
       // emptied again, which also drops the persisted receipt for this project.
@@ -626,15 +628,21 @@ function ImportScripts({ project, onSaved, onRun }) {
       }},'CLEAR AND START A NEW IMPORT'),
       saved && e('span',{className:'text-[10px] text-emerald-300'},
         `Saved as "${saved.name}"${saved.unverified ? ' · UNVERIFIED (no passing test)' : ' · tested before publishing'}`)),
+    e(GuideSection,{id:'imp-input-mode',label:'Choose input method',
+      action:'Upload a file or paste/type — both hit the same validator and AI repair.'},
     e('div',{className:'flex flex-wrap gap-2',role:'group','aria-label':'Provide a script by upload or paste'},
       e('button',{type:'button','aria-pressed':inputMode==='upload',disabled:busy || testRunning,onClick:()=>setInputMode('upload'),
         className:'key-btn '+(inputMode==='upload'?'bg-indigo-700 text-white border-indigo-500':'')},'📁 UPLOAD FILE'),
       e('button',{type:'button','aria-pressed':inputMode==='paste',disabled:busy || testRunning,onClick:()=>setInputMode('paste'),
-        className:'key-btn '+(inputMode==='paste'?'bg-indigo-700 text-white border-indigo-500':'')},'⌨️ PASTE / TYPE SCRIPT')),
-    inputMode==='upload' && e('div',{className:'space-y-3'},
+        className:'key-btn '+(inputMode==='paste'?'bg-indigo-700 text-white border-indigo-500':'')},'⌨️ PASTE / TYPE SCRIPT'))),
+    inputMode==='upload' && e(GuideSection,{id:'imp-upload-file',label:'Upload file & preview',
+      action:'Pick 1–8 files (1 MiB total), then VALIDATE & PREVIEW to see supported steps.'},
+    e('div',{className:'space-y-3'},
       e('input',{key:project.id,type:'file',multiple:true,'aria-label':'Upload test scripts',disabled:busy || testRunning,onChange:ev=>{setFiles(Array.from(ev.target.files || []));setPreview(null);setSaved(null);setDraft(null);setPollNote('');clearImportSession(project.id);},className:'block w-full text-xs'}),
-      e('button',{disabled:busy || !files.length || testRunning,onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW')),
-    inputMode==='paste' && e('div',{className:'border border-indigo-800 bg-slate-950 p-3 rounded-xl space-y-2'},
+      e('button',{disabled:busy || !files.length || testRunning,onClick:inspect,className:'bg-indigo-600 px-4 py-2 rounded text-xs disabled:opacity-50'},busy?'WORKING…':'VALIDATE & PREVIEW'))),
+    inputMode==='paste' && e(GuideSection,{id:'imp-paste',label:'Paste or type script',
+      action:'Paste any script, pick its format (or Auto-detect), then PROCESS — AI repairs if needed.'},
+    e('div',{className:'border border-indigo-800 bg-slate-950 p-3 rounded-xl space-y-2'},
       e('p',{className:'text-xs font-bold text-indigo-300'},'PASTE OR TYPE A SCRIPT — NO FILE NEEDED'),
       e('p',{className:'text-[11px] text-slate-400'},'Paste a Playwright Python or JS/TS script (a bare page.* snippet works too), Cypress, canonical JSON steps, a CSV step table, Gherkin, Robot, YAML/XML or plain-English steps. PROCESS PASTED SCRIPT runs the same AI-powered validation as an upload: static validation first, AI conversion + per-step re-validation when needed, then review variables → TEST BEFORE PUBLISHING → SAVE TO LIBRARY & PUBLISH → RUN SAVED STEPS below. The pasted source is never executed.'),
       e('div',{className:'flex flex-wrap gap-2'},
@@ -669,7 +677,9 @@ function ImportScripts({ project, onSaved, onRun }) {
     error && e('p',{role:'alert',className:'text-red-300 text-xs'},error),
     pollNote && e('p',{role:'status',className:'text-amber-300 text-xs'},pollNote),
     notice && e('p',{role:'status',className:'text-emerald-300 text-xs'},notice),
-    preview && e('div',{className:'space-y-2'},
+    preview && e(GuideSection,{id:'imp-preview',label:'Preview · what will be saved',
+      action:'Check detected format, diagnostics and the parsed steps before testing.'},
+    e('div',{className:'space-y-2'},
       e('p',{className:'text-sm font-bold'},`${preview.steps.length} supported steps · ${preview.can_save?(preview.ai&&preview.ai.used?'AI-repaired · ready to save':'ready to save'):'corrections required'} · sequential execution` + (preview.restored ? ' · recovered receipt' : '') + (preview.input_method==='paste' ? ` · pasted script${preview.paste && preview.paste.filename ? ' ('+preview.paste.filename+')' : ''}` : '')),
       preview.detected && e('p',{className:'text-xs text-indigo-300'},`Detected as ${preview.detected.format} — ${preview.detected.why}`),
       e('button',{onClick:reviewVariables,disabled:busy || !preview.steps.length,className:'bg-amber-700 px-3 py-2 rounded text-xs disabled:opacity-50'},'REVIEW INPUT VALUES → VARIABLES'),
@@ -737,8 +747,8 @@ function ImportScripts({ project, onSaved, onRun }) {
           e('input',{type:'checkbox','aria-label':'Acknowledge this recording is unverified',checked:overrideAck,onChange:ev=>setOverrideAck(ev.target.checked)}),
           'I understand this recording has not passed a test and will be listed as unverified.'),
         e('button',{onClick:saveUnverified,disabled:busy || !overrideReason.trim() || !overrideAck,
-          className:'bg-amber-700 px-4 py-2 rounded text-xs disabled:opacity-50'},'SAVE AS UNVERIFIED'))
-    ))
+          className:'bg-amber-700 px-4 py-2 rounded text-xs disabled:opacity-50'},'SAVE AS UNVERIFIED')))
+    )))
   );
 }
 
