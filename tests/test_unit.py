@@ -610,6 +610,77 @@ class SecurityTests(unittest.TestCase):
         self.assertTrue(outcome["retry_scheduled"])
 
 
+class RateLimitTests(unittest.TestCase):
+    """The `@rate_limit` decorator, which guards the cheap HTTP surface.
+
+    The wrapper needs the incoming `Request`, but FastAPI decides what to pass
+    a route handler from the handler's own signature. When the wrapper's
+    signature stopped matching what FastAPI saw, every decorated route —
+    including `/api/health`, the deployment's `healthCheckPath` — answered
+    ``TypeError: health() missing 1 required positional argument: 'request'``
+    and Render rolled the deploy back.
+    """
+
+    def test_UT_RATE_01_decorated_routes_stay_callable(self):
+        """Deployment regression: the health probe must answer 200."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        with TestClient(app) as client:
+            health = client.get("/api/health")
+            self.assertEqual(health.status_code, 200, health.text)
+            self.assertEqual(health.json()["status"], "ok")
+            # A query parameter on a decorated route still reaches the
+            # handler: fast=false must take the slow listing path, which is
+            # not the default.
+            listed = client.get("/api/projects?fast=false")
+            self.assertEqual(listed.status_code, 200, listed.text)
+            self.assertEqual(listed.headers.get("X-Source"), "cached-scan")
+
+    def test_UT_RATE_02_the_wrapper_is_transparent_and_throttles(self):
+        """Sync and async handlers work unchanged and the bucket 429s."""
+        from fastapi import FastAPI, Request
+        from fastapi.testclient import TestClient
+        from app.rate_limiter import _buckets, get_config, rate_limit, set_config
+
+        calls = []
+        sub = FastAPI()
+
+        @rate_limit
+        def sync_handler(fast: bool = True):
+            calls.append(("sync", fast))
+            return {"fast": fast}
+
+        @rate_limit
+        async def async_handler(request: Request):
+            calls.append(("async", request.client.host if request.client else None))
+            return {"ok": True}
+
+        sub.add_api_route("/sync", sync_handler, methods=["GET"])
+        sub.add_api_route("/async", async_handler, methods=["GET"])
+
+        saved = get_config()
+        try:
+            set_config(enabled=1, requests=2, period=60)
+            _buckets.clear()
+            with TestClient(sub) as client:
+                # A handler that never asked for `request` must not be handed
+                # one, the query parameter must survive the wrapper, and the
+                # async handler must be awaited.
+                self.assertEqual(client.get("/sync?fast=false").json(), {"fast": False})
+                self.assertEqual(client.get("/async").json(), {"ok": True})
+                over = client.get("/sync")
+                self.assertEqual(over.status_code, 429, over.text)
+                self.assertEqual(over.json()["detail"], "Rate limit exceeded")
+        finally:
+            set_config(enabled=saved["enabled"],
+                       requests=saved["requests_per_period"],
+                       period=saved["period_seconds"])
+            _buckets.clear()
+        # Exactly the two allowed calls ran; the 429 never reached the handler.
+        self.assertEqual(calls, [("sync", False), ("async", "testclient")])
+
+
 class ReplayTests(unittest.TestCase):
     def test_UT_REP_01_navigate_interpolates(self):
         page = FakePage()
