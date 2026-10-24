@@ -20,6 +20,7 @@ from app.db import (
 from app.library_store import LibraryError, NotFound, PublishError
 from app import library_store
 from app.step_runtime import ACTIONS, BASIC, normalize_step
+from app.rate_limiter import rate_limit, set_config, get_config
 
 # Browser-dependent features are optional at boot so the dashboard and its API
 # remain usable if the browser runtime is unavailable.
@@ -345,6 +346,7 @@ async def boot_hygiene():
 
 
 @app.get("/api/health")
+@rate_limit
 def health():
     """Readiness check used to verify a deployment and its database connection."""
     try:
@@ -373,6 +375,7 @@ def health():
 
 
 @app.get("/api/projects")
+@rate_limit
 def get_projects(fast: bool = True):
     """Super fast project listing using catalog cache."""
     start = time.time()
@@ -496,6 +499,7 @@ def _probe_project_write():
 
 
 @app.get("/api/diagnostics")
+@rate_limit
 def diagnostics():
     """Read-only deployment report: schema state, live columns, and a write probe."""
     report = {
@@ -628,6 +632,7 @@ def _library_http(exc: Exception) -> HTTPException:
 # entities existed, which report the Unassigned bucket until they are moved.
 
 @app.get("/api/entities")
+@rate_limit
 def get_entities():
     try:
         return library_store.list_entities()
@@ -705,6 +710,7 @@ def update_project(project_id: str, body: dict):
 
 
 @app.get("/api/variables")
+@rate_limit
 def get_vars(project_id: str):
     try:
         # Fast path: don't materialize all, just list variables (has internal cache)
@@ -714,6 +720,7 @@ def get_vars(project_id: str):
 
 
 @app.get("/api/projects/{project_id}/variables")
+@rate_limit
 def get_project_vars(project_id: str):
     """Variables for a project - used in projects and recording tabs."""
     try:
@@ -865,6 +872,7 @@ async def create_rec(body: dict, request: Request):
 
 
 @app.get("/api/projects/{project_id}/recordings")
+@rate_limit
 def list_recordings(project_id: str, fast: bool = True):
     try:
         # Super fast path using catalog cache
@@ -1477,6 +1485,7 @@ def get_jenkins(rid: str):
 
 
 @app.post("/api/runs", status_code=201)
+@rate_limit
 async def queue_run(body: dict):
     if execute_run_task is None:
         raise HTTPException(status_code=503, detail=f"Run executor is unavailable: {EXECUTOR_ERROR}")
