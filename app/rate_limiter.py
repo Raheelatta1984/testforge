@@ -12,6 +12,7 @@ Environment:
 
 from __future__ import annotations
 
+import inspect
 import time
 import threading
 from collections import defaultdict
@@ -96,22 +97,65 @@ def get_config() -> dict:
 
 
 def rate_limit(func):
-    """Decorator to apply rate limiting to a route handler."""
+    """Decorator to apply rate limiting to a route handler.
+
+    FastAPI decides what to pass a route handler from the handler's signature,
+    so the wrapper must advertise the wrapped function's parameters *plus* a
+    `Request` of its own whenever the handler does not already take one.
+    `@wraps` alone is not enough: it points `inspect.signature` at the wrapped
+    function, FastAPI then sees no `request` to inject, and calling the wrapper
+    raises ``TypeError: ... missing 1 required positional argument: 'request'``
+    — the 500 that fails the deployment's /api/health probe. The wrapper also
+    must not push a `request` into handlers that never asked for one, and must
+    await only handlers that are coroutines.
+    """
+    sig = inspect.signature(func)
+    takes_request = "request" in sig.parameters
+    params = list(sig.parameters.values())
+    if not takes_request:
+        # Keyword-only, so the injected request fits any parameter ordering.
+        # FastAPI always calls endpoints with keyword arguments.
+        injected = inspect.Parameter(
+            "request", inspect.Parameter.KEYWORD_ONLY, annotation=Request
+        )
+        at = next(
+            (i for i, p in enumerate(params)
+             if p.kind is inspect.Parameter.VAR_KEYWORD),
+            len(params),
+        )
+        params.insert(at, injected)
+    wrapper_sig = sig.replace(parameters=params)
+
+    async def _call(*args, **kwargs):
+        """Invoke the handler, awaiting it only when it is a coroutine."""
+        result = func(*args, **kwargs)
+        if inspect.isawaitable(result):
+            result = await result
+        return result
+
     @wraps(func)
-    async def wrapper(request: Request, *args, **kwargs):
+    async def wrapper(*args, **kwargs):
+        request = kwargs.get("request", None)
+        if request is None and args and isinstance(args[0], Request):
+            request = args[0]
+        if not takes_request:
+            kwargs.pop("request", None)
+            args = tuple(a for a in args if not isinstance(a, Request))
+
         if not _rate_limit_enabled:
-            return await func(request, *args, **kwargs)
-        
+            return await _call(*args, **kwargs)
+
         # Determine the rate limit key
         # Use client IP by default
-        client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
-        if not client_ip:
-            client_ip = request.client.host if request.client else "unknown"
-        
-        key = f"ip:{client_ip}"
-        
+        key = "unknown"
+        if request is not None:
+            client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+            if not client_ip:
+                client_ip = request.client.host if request.client else "unknown"
+            key = f"ip:{client_ip}"
+
         allowed, remaining, reset_time = is_allowed(key)
-        
+
         if not allowed:
             # Add rate limit info to response headers
             response = JSONResponse(
@@ -123,14 +167,19 @@ def rate_limit(func):
             response.headers["X-RateLimit-Reset"] = str(int(reset_time))
             response.headers["Retry-After"] = str(int(reset_time - time.time()) + 1)
             return response
-        
+
         # Add rate limit info to successful responses
-        response = await func(request, *args, **kwargs)
+        response = await _call(*args, **kwargs)
         if hasattr(response, 'headers'):
             response.headers["X-RateLimit-Limit"] = str(_rate_limit_requests)
             response.headers["X-RateLimit-Remaining"] = str(remaining)
             response.headers["X-RateLimit-Reset"] = str(int(reset_time))
-        
+
         return response
-    
+
+    # `@wraps` copied `__wrapped__`, which makes `inspect.signature` report the
+    # handler's own parameters; override it with the merged signature so FastAPI
+    # injects the request this wrapper needs while still parsing the handler's
+    # query/path/body parameters.
+    wrapper.__signature__ = wrapper_sig
     return wrapper
