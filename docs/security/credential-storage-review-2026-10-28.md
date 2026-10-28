@@ -199,6 +199,8 @@ Proposal for a later change:
   harness), and this sandbox cannot download a Chromium build, so the CSP was verified against the
   shipped markup (hashes recomputed from disk) rather than by watching a real console. See
   "Deferred" for the follow-up.
+- **CI was already red at the base commit** — see appendix B.6. The PR is therefore left open, not
+  merged: this run never merges over a red pipeline, even when the failures predate it.
 
 ## Appendix A — Evidence
 
@@ -324,3 +326,21 @@ and fails on a planted `localStorage.setItem("auth_token", t)` line (verified, t
 - Logout invalidates the session for good (a copied cookie stops working).
 - No front-end storage key changed; no data migration; the dashboard's own iframe previews still
   work (`frame-ancestors 'self'`).
+
+**B.6 CI status at the base commit (red before this change).** GitHub Actions on `main` at the base
+commit `335bad6` (run 40640767384) failed two jobs — "Unit suite (no browser)" and "Full harness
+(with Chromium)" — while "Smoke plan on chromium, firefox and webkit" passed. Reproduced locally on
+a worktree of `335bad6` with a clean virtualenv built from the same requirement files:
+`Ran 490 tests … FAILED (failures=1, skipped=17)`, failing
+`tests.test_scale.CacheTests.test_SC_22_get_or_load_and_decorator` (`2 != 1`). On this branch the
+same clean virtualenv gives `Ran 503 tests … FAILED (failures=1, skipped=17)` with **only that test**
+failing, so the 13 new tests pass and the change introduces no new failure. The harness job failed
+on its first product-touching step in both runs and took 90 s at the base commit versus 83 s here:
+the same early, pre-existing failure rather than a later scenario regression (a CSP problem would
+surface mid-run, minutes in). The branch's own new `Dependency audit` job and the Dependabot config
+check pass. CI job logs are served from blob storage this environment cannot reach, so the
+per-test output above is quoted from the local reproduction in the identical dependency set rather
+than from the Actions log.
+
+Consequence for this run: the pull request is opened and left **open**, not merged — a red pipeline
+is not merged over, even when the failures demonstrably predate the change.
