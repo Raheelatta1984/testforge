@@ -1,1 +1,309 @@
-[]
+[
+  {
+    "id": "d9e868b6-8656-4709-9b2a-5e3158d4e1a8",
+    "order": 1,
+    "action": "navigate",
+    "value": "https://www.harrisfarm.com.au/",
+    "label": "Open https://www.harrisfarm.com.au/",
+    "selector": null,
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null
+  },
+  {
+    "id": "9c677d9c-539e-4c37-b122-ece4002c6633",
+    "order": 2,
+    "action": "click",
+    "value": null,
+    "label": "Click DELIVERY",
+    "selector": {
+      "primary": "#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)",
+      "x": 416,
+      "y": 509,
+      "text": "DELIVERY",
+      "tag": "button"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-002.png"
+  },
+  {
+    "id": "c8fbf87c-00cf-41d9-9807-ea5c7f4deb5e",
+    "order": 3,
+    "action": "click",
+    "value": null,
+    "label": "Click e.g. 2066",
+    "selector": {
+      "primary": "input[name=\"postcode\"]",
+      "x": 460,
+      "y": 472,
+      "text": "e.g. 2066",
+      "tag": "input"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-003.png"
+  },
+  {
+    "id": "2d76cafd-7266-4904-80cf-5a64726bb577",
+    "order": 4,
+    "action": "type",
+    "value": "2047",
+    "label": "Type: 2047",
+    "selector": {
+      "primary": "input[name=\"postcode\"]"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-004.png"
+  },
+  {
+    "id": "96ba40e8-35c0-471b-8d61-c2813fd38e7d",
+    "order": 5,
+    "action": "click",
+    "value": null,
+    "label": "Click CHECK DELIVERY",
+    "selector": {
+      "primary": "#store-picker-find",
+      "x": 675,
+      "y": 464,
+      "text": "CHECK DELIVERY",
+      "tag": "button"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-005.png"
+  },
+  {
+    "id": "768125ff-8656-48d3-bfdb-21405b1b6951",
+    "order": 6,
+    "action": "click",
+    "value": null,
+    "label": "Click CONTINUE",
+    "selector": {
+      "primary": "#store-picker-select-slot",
+      "x": 385,
+      "y": 535,
+      "text": "CONTINUE",
+      "tag": "button"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-006.png"
+  },
+  {
+    "id": "867606c8-078a-4baf-9f0f-c19ee53cd48f",
+    "order": 7,
+    "action": "click",
+    "value": null,
+    "label": "Click 29 Oct",
+    "selector": {
+      "primary": "#cart-slot-days > button:nth-of-type(2) > span:nth-of-type(2)",
+      "x": 460,
+      "y": 205,
+      "text": "29 Oct",
+      "tag": "span"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-007.png"
+  },
+  {
+    "id": "df971b67-3103-400c-b379-3de64574fce8",
+    "order": 8,
+    "action": "click",
+    "value": null,
+    "label": "Click Afternoon",
+    "selector": {
+      "primary": "#cart-slot-periods > button:nth-of-type(2)",
+      "x": 484,
+      "y": 255,
+      "text": "Afternoon",
+      "tag": "button"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-008.png"
+  },
+  {
+    "id": "42a6fff4-d92b-4d9d-80df-04015328215b",
+    "order": 9,
+    "action": "click",
+    "value": null,
+    "label": "Click 12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P",
+    "selector": {
+      "primary": "#cart-slot-slots",
+      "x": 437,
+      "y": 409,
+      "text": "12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P",
+      "tag": "div"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-009.png"
+  },
+  {
+    "id": "7e00ab6e-1d39-4aab-bd58-00c7af6b7801",
+    "order": 10,
+    "action": "click",
+    "value": null,
+    "label": "Click 12:30 PM-1:30 PM",
+    "selector": {
+      "primary": "#cart-slot-slots > button:nth-of-type(2) > span:nth-of-type(1)",
+      "x": 453,
+      "y": 381,
+      "text": "12:30 PM-1:30 PM",
+      "tag": "span"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-010.png"
+  },
+  {
+    "id": "57e7e938-9fdc-4284-ac33-2eb1e23269d1",
+    "order": 11,
+    "action": "click",
+    "value": null,
+    "label": "Click RESERVE TIME",
+    "selector": {
+      "primary": "#cart-slot-reserve",
+      "x": 623,
+      "y": 579,
+      "text": "RESERVE TIME",
+      "tag": "button"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null
+  },
+  {
+    "id": "3620585c-8e22-4e28-9211-8de60238d373",
+    "order": 12,
+    "action": "click",
+    "value": null,
+    "label": "Click Shop promotion item 3",
+    "selector": {
+      "primary": "a[aria-label=\"Shop promotion item 3\"]",
+      "x": 678,
+      "y": 425,
+      "text": "Shop promotion item 3",
+      "tag": "a"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null
+  },
+  {
+    "id": "4f0e7928-02fb-4bbf-b98a-a55ce79d52b9",
+    "order": 13,
+    "action": "click",
+    "value": null,
+    "label": "Click 654,349",
+    "selector": {
+      "primary": "section:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > product-info:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2)",
+      "x": 654,
+      "y": 349,
+      "text": "",
+      "tag": "div"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-013.png"
+  },
+  {
+    "id": "722f3520-ced5-44c0-902f-6cbaf76855e5",
+    "order": 14,
+    "action": "click",
+    "value": null,
+    "label": "Click 649,394",
+    "selector": {
+      "primary": null,
+      "x": 649,
+      "y": 394,
+      "text": null,
+      "tag": null
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null,
+    "screenshot": "step-014.png"
+  },
+  {
+    "id": "c8cf3b84-b858-4791-8cdc-2a85aa373248",
+    "order": 15,
+    "action": "click",
+    "value": null,
+    "label": "Click 107,80",
+    "selector": {
+      "primary": "header:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1) > img:nth-of-type(1)",
+      "x": 107,
+      "y": 80,
+      "text": "",
+      "tag": "img"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null
+  },
+  {
+    "id": "b5e591cc-38b3-439d-adf1-fd18bfbaed35",
+    "order": 16,
+    "action": "click",
+    "value": null,
+    "label": "Click 97,48",
+    "selector": {
+      "primary": "div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > h1:nth-of-type(1) > a:nth-of-type(1) > img:nth-of-type(1)",
+      "x": 97,
+      "y": 48,
+      "text": "",
+      "tag": "img"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null
+  },
+  {
+    "id": "792298af-ed8e-4436-b60b-3d0e5945af8b",
+    "order": 17,
+    "action": "click",
+    "value": null,
+    "label": "Click 934,74",
+    "selector": {
+      "primary": null,
+      "x": 934,
+      "y": 74,
+      "text": null,
+      "tag": null
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null
+  },
+  {
+    "id": "fce9aabd-caf6-4598-90f0-4b009498a522",
+    "order": 18,
+    "action": "click",
+    "value": null,
+    "label": "Click Shop promotion item 3",
+    "selector": {
+      "primary": "a[aria-label=\"Shop promotion item 3\"]",
+      "x": 698,
+      "y": 404,
+      "text": "Shop promotion item 3",
+      "tag": "a"
+    },
+    "started_at": null,
+    "finished_at": null,
+    "duration_ms": null
+  }
+]

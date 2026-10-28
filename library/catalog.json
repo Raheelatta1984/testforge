@@ -163,6 +163,17 @@
             "recording.feature",
             "recording.spec.ts",
             "requirements.txt",
+            "step-002.png",
+            "step-003.png",
+            "step-004.png",
+            "step-005.png",
+            "step-006.png",
+            "step-007.png",
+            "step-008.png",
+            "step-009.png",
+            "step-010.png",
+            "step-013.png",
+            "step-014.png",
             "steps.json",
             "test_recording.py",
             "testcomplete.csv",
@@ -176,7 +187,7 @@
             "testforge_speed.py"
           ],
           "start_url": "http://www.harrisfarm.com.au",
-          "step_count": 1,
+          "step_count": 18,
           "tags": ""
         }
       ],

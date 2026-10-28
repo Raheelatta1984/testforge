@@ -1,1 +1,23 @@
 ﻿Test Case,Step,Action,Input,Selector,Screenshot
+Session 28 Oct 2026 4:48:42 PM,1,Open https://www.harrisfarm.com.au/,https://www.harrisfarm.com.au/,{},
+Session 28 Oct 2026 4:48:42 PM,2,Click DELIVERY,,"{""primary"": ""#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)"", ""x"": 416, ""y"": 509, ""text"": ""DELIVERY"", ""tag"": ""button""}",step-002.png
+Session 28 Oct 2026 4:48:42 PM,3,Click e.g. 2066,,"{""primary"": ""input[name=\""postcode\""]"", ""x"": 460, ""y"": 472, ""text"": ""e.g. 2066"", ""tag"": ""input""}",step-003.png
+Session 28 Oct 2026 4:48:42 PM,4,Type: 2047,2047,"{""primary"": ""input[name=\""postcode\""]""}",step-004.png
+Session 28 Oct 2026 4:48:42 PM,5,Click CHECK DELIVERY,,"{""primary"": ""#store-picker-find"", ""x"": 675, ""y"": 464, ""text"": ""CHECK DELIVERY"", ""tag"": ""button""}",step-005.png
+Session 28 Oct 2026 4:48:42 PM,6,Click CONTINUE,,"{""primary"": ""#store-picker-select-slot"", ""x"": 385, ""y"": 535, ""text"": ""CONTINUE"", ""tag"": ""button""}",step-006.png
+Session 28 Oct 2026 4:48:42 PM,7,Click 29 Oct,,"{""primary"": ""#cart-slot-days > button:nth-of-type(2) > span:nth-of-type(2)"", ""x"": 460, ""y"": 205, ""text"": ""29 Oct"", ""tag"": ""span""}",step-007.png
+Session 28 Oct 2026 4:48:42 PM,8,Click Afternoon,,"{""primary"": ""#cart-slot-periods > button:nth-of-type(2)"", ""x"": 484, ""y"": 255, ""text"": ""Afternoon"", ""tag"": ""button""}",step-008.png
+Session 28 Oct 2026 4:48:42 PM,9,"Click 12:00 PM-1:00 PM
+12:30 PM-1:30 PM
+1:00 PM-2:00 PM
+1:30 PM-2:30 PM
+2:00 PM-3:00 P",,"{""primary"": ""#cart-slot-slots"", ""x"": 437, ""y"": 409, ""text"": ""12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P"", ""tag"": ""div""}",step-009.png
+Session 28 Oct 2026 4:48:42 PM,10,Click 12:30 PM-1:30 PM,,"{""primary"": ""#cart-slot-slots > button:nth-of-type(2) > span:nth-of-type(1)"", ""x"": 453, ""y"": 381, ""text"": ""12:30 PM-1:30 PM"", ""tag"": ""span""}",step-010.png
+Session 28 Oct 2026 4:48:42 PM,11,Click RESERVE TIME,,"{""primary"": ""#cart-slot-reserve"", ""x"": 623, ""y"": 579, ""text"": ""RESERVE TIME"", ""tag"": ""button""}",
+Session 28 Oct 2026 4:48:42 PM,12,Click Shop promotion item 3,,"{""primary"": ""a[aria-label=\""Shop promotion item 3\""]"", ""x"": 678, ""y"": 425, ""text"": ""Shop promotion item 3"", ""tag"": ""a""}",
+Session 28 Oct 2026 4:48:42 PM,13,"Click 654,349",,"{""primary"": ""section:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > product-info:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2)"", ""x"": 654, ""y"": 349, ""text"": """", ""tag"": ""div""}",step-013.png
+Session 28 Oct 2026 4:48:42 PM,14,"Click 649,394",,"{""primary"": null, ""x"": 649, ""y"": 394, ""text"": null, ""tag"": null}",step-014.png
+Session 28 Oct 2026 4:48:42 PM,15,"Click 107,80",,"{""primary"": ""header:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1) > img:nth-of-type(1)"", ""x"": 107, ""y"": 80, ""text"": """", ""tag"": ""img""}",
+Session 28 Oct 2026 4:48:42 PM,16,"Click 97,48",,"{""primary"": ""div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > h1:nth-of-type(1) > a:nth-of-type(1) > img:nth-of-type(1)"", ""x"": 97, ""y"": 48, ""text"": """", ""tag"": ""img""}",
+Session 28 Oct 2026 4:48:42 PM,17,"Click 934,74",,"{""primary"": null, ""x"": 934, ""y"": 74, ""text"": null, ""tag"": null}",
+Session 28 Oct 2026 4:48:42 PM,18,Click Shop promotion item 3,,"{""primary"": ""a[aria-label=\""Shop promotion item 3\""]"", ""x"": 698, ""y"": 404, ""text"": ""Shop promotion item 3"", ""tag"": ""a""}",
