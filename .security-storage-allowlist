@@ -1,0 +1,11 @@
+# Web-storage keys that hold UI state rather than credentials, subtracted before
+# the CI guard and tests/test_security.py fail the build. One fixed substring per
+# line, matched anywhere on the offending line.
+#
+# Adding a line here is a security decision: record it in
+# docs/security/credential-storage-review-*.md first.
+#
+# tf_import_session_* caches a draft import preview (project id, draft steps and
+# the server-held test receipt) so a reload does not discard a passing draft. It
+# carries no token, cookie or key; the access token itself is never persisted.
+tf_import_session_

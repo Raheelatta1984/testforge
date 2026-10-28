@@ -15,34 +15,68 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Actions are pinned to commit SHAs, not tags: a tag can be moved under a
+# workflow that runs with this repository's token. The trailing comment is the
+# release the SHA was taken from, and Dependabot (.github/dependabot.yml) is the
+# only thing that should move them.
 jobs:
   unit:
     name: Unit suite (no browser)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.11"
           cache: pip
       - run: pip install -r requirements.txt -r requirements-test.txt
+      # Credential-storage guard: a token, session or key written to web storage
+      # is readable by any injected script, so it must never appear. Keys that
+      # hold UI state are listed, with the reason, in .security-storage-allowlist.
+      - name: No credentials in web storage
+        run: |
+          ! grep -rniE "(localStorage|sessionStorage)\.(setItem|getItem|removeItem)[[:space:]]*\([[:space:]]*['\"\`][^'\"\`]*(token|jwt|auth|session|secret|api[_-]?key|credential|refresh|password)" \
+              --include='*.js' --include='*.html' \
+              app/static tools 2>/dev/null \
+            | grep -v 'app/static/vendor/' \
+            | grep -vFf .security-storage-allowlist
       - run: python -m unittest discover -s tests -p "test_*.py" -t .
       # Zero-LLM gate for the market comparison: fails when a TestForge claim
       # loses the evidence it is published with, so a stale capability matrix
       # cannot reach main.
       - run: python -m tools.market_audit
 
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install pip-audit
+      # Fails on any advisory that is not an accepted exception. The allowlist
+      # carries a reason and the review document that recorded it; an entry is
+      # removed by the upgrade that fixes it.
+      - name: pip-audit (requirements.txt)
+        run: |
+          IGNORES=$(grep -vE '^[[:space:]]*(#|$)' .github/security/pip-audit-allowlist.txt \
+            | sed 's/[[:space:]].*//' | sed 's/^/--ignore-vuln /' | tr '\n' ' ')
+          pip-audit -r requirements.txt $IGNORES
+
   harness:
     name: Full harness (with Chromium)
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         # The harness records the commit it tested with `git rev-parse`.
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.11"
           cache: pip
@@ -52,7 +86,7 @@ jobs:
       # be able to push to a repository. The harness also strips them from the
       # server environment it starts and sets TF_LIBRARY_PUBLISH=0.
       - run: python -m tests.harness --require-browser
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         if: always()
         with:
           name: harness-logs
@@ -64,8 +98,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
         with:
           python-version: "3.11"
           cache: pip

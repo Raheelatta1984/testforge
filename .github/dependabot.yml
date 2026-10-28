@@ -1,0 +1,37 @@
+# Dependency updates, one grouped pull request per ecosystem per week.
+#
+# The Python runtime pins in requirements.txt are exact on purpose (image
+# reproducibility); this is what moves them. GitHub Actions move here too, which
+# is why the workflow pins commit SHAs rather than tags.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    labels: ["dependencies", "security"]
+    commit-message:
+      prefix: "deps"
+    groups:
+      python-runtime:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    # Front-end asset build only (React + Tailwind compiled into app/static).
+    directory: "/tools/ui"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: ["dependencies"]
+    commit-message:
+      prefix: "deps"
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    labels: ["dependencies", "ci"]
+    commit-message:
+      prefix: "ci"
