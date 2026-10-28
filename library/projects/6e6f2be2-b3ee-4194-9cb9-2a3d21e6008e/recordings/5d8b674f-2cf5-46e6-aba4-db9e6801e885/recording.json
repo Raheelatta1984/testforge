@@ -1,7 +1,7 @@
 {
   "created_at": "2026-10-28T05:48:44Z",
   "execution_plan": null,
-  "exports_pending": false,
+  "exports_pending": true,
   "id": "5d8b674f-2cf5-46e6-aba4-db9e6801e885",
   "input_defaults": {},
   "name": "Session 28 Oct 2026 4:48:42 PM",
@@ -10,6 +10,18 @@
   "purpose": "",
   "start_url": "http://www.harrisfarm.com.au",
   "status": "active",
-  "steps": [],
+  "steps": [
+    {
+      "action": "navigate",
+      "duration_ms": null,
+      "finished_at": null,
+      "id": "d9e868b6-8656-4709-9b2a-5e3158d4e1a8",
+      "label": "Open https://www.harrisfarm.com.au/",
+      "order": 1,
+      "selector": null,
+      "started_at": null,
+      "value": "https://www.harrisfarm.com.au/"
+    }
+  ],
   "tags": ""
 }
