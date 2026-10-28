@@ -191,7 +191,9 @@
           "tags": ""
         }
       ],
-      "variables": []
+      "variables": [
+        "name_postcode"
+      ]
     },
     {
       "id": "1c7a86a9-9525-4bd4-b5f0-df360a7b49f1",

@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "category": "Parameter",
+    "id": "9fa0c26a-4754-475d-92cd-b4164b162904",
+    "is_secret": false,
+    "name": "name_postcode",
+    "value": "2047"
+  }
+]
