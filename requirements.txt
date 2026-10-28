@@ -2,16 +2,16 @@
 #
 # Kept deliberately short: this runs on a 512MB instance and every extra package
 # is image size, install time and import cost at boot.
-fastapi==0.115.6
-uvicorn==0.34.0
-sqlalchemy==2.0.36
+fastapi==0.162.0
+uvicorn==0.54.0
+sqlalchemy==2.1.6
 # Only imported by SQLAlchemy when DATABASE_URL is a postgres URL, but the hosted
 # deployment uses Neon, so it has to be present.
-psycopg2-binary==2.9.10
-playwright==1.49.1
+psycopg2-binary==2.9.13
+playwright==1.64.1
 python-multipart==0.0.32
 # uvicorn's websocket implementation; the recorder and run streams need it.
-websockets==14.1
+websockets==17.3
 openpyxl==3.1.5
 Pillow==13.0.0
 
@@ -24,12 +24,12 @@ Pillow==13.0.0
 defusedxml==0.7.1
 # Extra upload formats: legacy .xls sheets, Word .docx text, PDF text layers and
 # YAML step lists. Small, pure-python, and unused unless such a file is uploaded.
-xlrd==2.0.1
-PyYAML==6.0.2
+xlrd==2.0.2
+PyYAML==6.0.3
 pypdf==6.21.3
 # Authenticated encryption and local PDF generation; no hosted services.
 cryptography==50.0.2
-reportlab==4.4.4
+reportlab==5.1.0
 # Shared read-through cache (app/cache.py). Pure-python client; only used when
 # TF_MEMCACHED_SERVERS is set, otherwise the in-memory fallback serves.
 pymemcache==4.0.0
