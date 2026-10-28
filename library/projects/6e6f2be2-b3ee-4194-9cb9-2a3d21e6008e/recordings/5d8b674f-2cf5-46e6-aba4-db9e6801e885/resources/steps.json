@@ -50,7 +50,7 @@
     "id": "2d76cafd-7266-4904-80cf-5a64726bb577",
     "order": 4,
     "action": "type",
-    "value": "2047",
+    "value": "{{name_postcode}}",
     "label": "Type: 2047",
     "selector": {
       "primary": "input[name=\"postcode\"]"

@@ -2,7 +2,7 @@
 Session 28 Oct 2026 4:48:42 PM,1,Open https://www.harrisfarm.com.au/,https://www.harrisfarm.com.au/,{},
 Session 28 Oct 2026 4:48:42 PM,2,Click DELIVERY,,"{""primary"": ""#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)"", ""x"": 416, ""y"": 509, ""text"": ""DELIVERY"", ""tag"": ""button""}",step-002.png
 Session 28 Oct 2026 4:48:42 PM,3,Click e.g. 2066,,"{""primary"": ""input[name=\""postcode\""]"", ""x"": 460, ""y"": 472, ""text"": ""e.g. 2066"", ""tag"": ""input""}",step-003.png
-Session 28 Oct 2026 4:48:42 PM,4,Type: 2047,2047,"{""primary"": ""input[name=\""postcode\""]""}",step-004.png
+Session 28 Oct 2026 4:48:42 PM,4,Type: 2047,{{name_postcode}},"{""primary"": ""input[name=\""postcode\""]""}",step-004.png
 Session 28 Oct 2026 4:48:42 PM,5,Click CHECK DELIVERY,,"{""primary"": ""#store-picker-find"", ""x"": 675, ""y"": 464, ""text"": ""CHECK DELIVERY"", ""tag"": ""button""}",step-005.png
 Session 28 Oct 2026 4:48:42 PM,6,Click CONTINUE,,"{""primary"": ""#store-picker-select-slot"", ""x"": 385, ""y"": 535, ""text"": ""CONTINUE"", ""tag"": ""button""}",step-006.png
 Session 28 Oct 2026 4:48:42 PM,7,Click 29 Oct,,"{""primary"": ""#cart-slot-days > button:nth-of-type(2) > span:nth-of-type(2)"", ""x"": 460, ""y"": 205, ""text"": ""29 Oct"", ""tag"": ""span""}",step-007.png

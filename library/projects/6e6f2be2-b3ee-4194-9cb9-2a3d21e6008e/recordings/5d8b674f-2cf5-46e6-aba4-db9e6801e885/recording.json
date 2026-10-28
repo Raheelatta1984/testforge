@@ -70,7 +70,7 @@
         "primary": "input[name=\"postcode\"]"
       },
       "started_at": null,
-      "value": "2047"
+      "value": "{{name_postcode}}"
     },
     {
       "action": "click",
