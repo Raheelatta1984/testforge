@@ -331,6 +331,7 @@ These unit/API cases live in `tests/test_imports.py` and are included by the har
 | UT-IMP-21 | Action schema versions fail closed; JS option text is not rewritten accidentally. |
 | UT-IMP-22 | Idle websocket sender is cancelled when the client disconnects. |
 | UT-IMP-23 | Subscriber count/event queues are bounded and retain the final result. |
+| UT-IMP-50 | The harness sample-app fixture is replayable | `library/projects/qa-sample-app` is present with both recordings, four steps each, a Jenkinsfile, and values that resolve to the greeting `demo.html` prints. |
 | UT-IMP-24 | Plain-text step list imports as canonical steps; `{{placeholders}}` are preserved. |
 | UT-IMP-25 | Markdown/pipe table rows import in sheet order with their expected results. |
 | UT-IMP-26 | Market headers (Test Case/Step/Action) import; metadata columns become non-blocking notes. |

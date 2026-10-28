@@ -199,8 +199,9 @@ Proposal for a later change:
   harness), and this sandbox cannot download a Chromium build, so the CSP was verified against the
   shipped markup (hashes recomputed from disk) rather than by watching a real console. See
   "Deferred" for the follow-up.
-- **CI was already red at the base commit** — see appendix B.6. The PR is therefore left open, not
-  merged: this run never merges over a red pipeline, even when the failures predate it.
+- **CI was already red at the base commit** — appendix B.6. Both pre-existing failures were then
+  fixed so the pipeline can go green: one was a real cache bug, one was missing fixture data
+  (appendix B.7).
 
 ## Appendix A — Evidence
 
@@ -342,5 +343,25 @@ check pass. CI job logs are served from blob storage this environment cannot rea
 per-test output above is quoted from the local reproduction in the identical dependency set rather
 than from the Actions log.
 
-Consequence for this run: the pull request is opened and left **open**, not merged — a red pipeline
-is not merged over, even when the failures demonstrably predate the change.
+**B.7 The two pre-existing failures, fixed.** Neither was caused by the security work, both
+blocked the pipeline, and both were repaired rather than silenced:
+
+1. **`test_SC_22_get_or_load_and_decorator` (unit job).** A real defect in `app/cache.py`: a miss
+   was recorded in the negative cache under the raw key, but a write only cleared entries matching
+   `key.split(":")[0] + ":"`. For a key with no `:` in it (`heavy`) that prefix is `heavy:`, which
+   never matches `heavy`, so the recorded miss outlived the write and every later read answered
+   "not cached" for the whole 30 s negative TTL — the loader ran again and `get_or_load()` stopped
+   caching. `set()` and `delete()` now clear the key's own negative entry (plus its namespace), so a
+   write is visible immediately.
+2. **`LB-LIB-01` (harness job).** The harness project the catalog and `library/README.md` document
+   was missing from the tree: `library/catalog.json` listed `qa-sample-app` and its two recordings,
+   but `library/projects/qa-sample-app/` did not exist, so `GET /api/library` could not resolve it
+   and every `--require-browser` run failed with "project qa-sample-app not in repository library".
+   Restored `project.json`, `variables.json` (variable `user` = `Ada`), both recordings
+   (`qa-hello-literal` → `Hello, Quinn`, `qa-hello-variable` → `Hello, {{user}}`) with their
+   `resources/Jenkinsfile`, all matching what `tests/scenarios.json` replays and what
+   `app/static/demo.html` renders. `UT-IMP-50` now asserts that shape without a browser.
+
+With both fixed the local suite is `Ran 504 tests … OK (skipped=17)` and
+`python -m tests.harness` reports `PASS 332 passed, 0 failed, 7 skipped` (the seven browser
+scenarios skip because this environment has no Chromium; CI installs it).
