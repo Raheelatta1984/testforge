@@ -59,6 +59,12 @@ access-token setup, and the roadmap items still outstanding.
   Python/JavaScript/TypeScript project ZIPs; generated TypeScript uses one worker.
 - **Access:** configure a random 32+ character `TF_ACCESS_TOKEN` before public use.
   Empty means legacy unprotected access; this gate is not multi-user RBAC or secret storage.
+  The browser session is an HttpOnly `__Host-tf_session` cookie (SameSite=Strict, Secure over
+  HTTPS, revoked server-side on logout), never web storage, and unsafe requests from another
+  site are refused by an Origin/Referer check. Interactive API docs are off unless
+  `TF_ENABLE_API_DOCS=1`; `TF_ALLOWED_ORIGINS` lists extra origins that may post to the API and
+  `TF_CSP_REPORT_ONLY=1` downgrades the Content-Security-Policy header while troubleshooting.
+  See `docs/security/credential-storage-review-2026-10-28.md`.
 - **CI-ready:** `python tools/quality_gate.py` runs the full local gate explicitly
   and sequentially; prerequisites are documented in the implementation guide.
 - No paid service, extra worker process, automatic CI workflow or production deployment was added.

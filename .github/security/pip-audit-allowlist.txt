@@ -1,0 +1,22 @@
+# Advisories accepted in CI by the dependency audit step, one ID per line.
+#
+# A line here is a decision that a finding is not remediable yet, not a claim
+# that it is harmless. pip-audit must still pass, so anything NOT listed fails
+# the build. Remove a line in the PR that upgrades the package.
+#
+# Every entry: the advisory, the package, why it cannot be fixed today, and the
+# review that recorded it (docs/security/credential-storage-review-2026-10-28.md).
+#
+# starlette 0.41.3 is a transitive pin of fastapi 0.115.6 (<0.42). The fixes are
+# starlette 0.47.2+/0.49.1+/1.x, which only exist for fastapi >= 0.116; fastapi
+# 0.162 was trialled in this run and changed route introspection
+# (fastapi._IncludedRouter no longer flattens included routers into app.routes),
+# which the QA agent hub catalogue test depends on. Framework upgrade is the
+# follow-up that removes these lines.
+PYSEC-2026-161   # starlette <1.0.1; needs a fastapi upgrade (see above)
+PYSEC-2026-1941  # starlette <0.47.2; needs a fastapi upgrade
+PYSEC-2026-1942  # starlette <0.49.1; needs a fastapi upgrade
+PYSEC-2026-2280  # starlette <1.1.0; needs a fastapi upgrade
+PYSEC-2026-2281  # starlette <1.1.0; needs a fastapi upgrade
+PYSEC-2026-248   # starlette <1.3.0; needs a fastapi upgrade
+PYSEC-2026-249   # starlette <1.3.1; needs a fastapi upgrade

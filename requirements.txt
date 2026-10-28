@@ -9,11 +9,11 @@ sqlalchemy==2.0.36
 # deployment uses Neon, so it has to be present.
 psycopg2-binary==2.9.10
 playwright==1.49.1
-python-multipart==0.0.20
+python-multipart==0.0.32
 # uvicorn's websocket implementation; the recorder and run streams need it.
 websockets==14.1
 openpyxl==3.1.5
-Pillow==11.0.0
+Pillow==13.0.0
 
 # Removed: anthropic, mcp.
 # Their only consumer was app/agent.py, which is not imported anywhere and fails
@@ -26,9 +26,9 @@ defusedxml==0.7.1
 # YAML step lists. Small, pure-python, and unused unless such a file is uploaded.
 xlrd==2.0.1
 PyYAML==6.0.2
-pypdf==5.1.0
+pypdf==6.21.3
 # Authenticated encryption and local PDF generation; no hosted services.
-cryptography==46.0.3
+cryptography==50.0.2
 reportlab==4.4.4
 # Shared read-through cache (app/cache.py). Pure-python client; only used when
 # TF_MEMCACHED_SERVERS is set, otherwise the in-memory fallback serves.

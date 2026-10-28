@@ -212,6 +212,24 @@ def _clear_negative_cache_prefix(key_prefix: str) -> int:
             _negative_cache.pop(key, None)
         return len(doomed)
 
+def _clear_negative_cache_key(key: str) -> None:
+    """Forget the miss recorded for exactly ``key``.
+
+    Clearing by namespace is not enough: a key with no ``:`` in it (``heavy``,
+    or a test helper's literal key) produced the prefix ``heavy:``, which never
+    matched its own entry. The miss then outlived the write and every later
+    ``get()``/``get_or_load()`` for that key reported a miss for the whole
+    negative TTL, so the loader ran again and the cache stopped caching.
+    """
+    with _memory_lock:
+        _negative_cache.pop(key, None)
+
+def _negative_prefix(key: str) -> str:
+    """Namespace of a cache key: ``tf:project:a`` -> ``tf:``."""
+    if ":" not in key:
+        return key
+    return key.split(":", 1)[0] + ":"
+
 # --------------------------------------------------------------------------
 # Memcached client (lazy, shared)
 # --------------------------------------------------------------------------
@@ -341,8 +359,10 @@ def set(key: str, value, ttl: int | None = None) -> bool:
         except Exception as exc:
             logger.debug("memcached set failed: %s", exc)
     _memory_set(key, value, ttl)
-    # When storing a value, remove any negative cache entry for this key
-    _clear_negative_cache_prefix(key.split(":")[0] + ":")
+    # When storing a value, remove its own negative entry and older misses in
+    # the same namespace, so a write is immediately visible to readers.
+    _clear_negative_cache_key(key)
+    _clear_negative_cache_prefix(_negative_prefix(key))
     # Also add to Bloom filter to mark as potentially present
     _bloom_add(key.split(":")[0])  # Bloom filter tracks namespace/prefix
     return ok or True
@@ -356,9 +376,9 @@ def delete(key: str) -> None:
         except Exception:
             pass
     _memory_delete(key)
-    # Remove from negative cache
-    _memory_delete(key)  # This is actually for memory, not negative cache
-    # We'll just let the negative cache expire naturally
+    # A deleted key must be readable again straight away: drop the miss that the
+    # next read would otherwise answer from.
+    _clear_negative_cache_key(key)
 
 def delete_prefix(key_prefix: str) -> int:
     """Drop every key starting with ``key_prefix``.

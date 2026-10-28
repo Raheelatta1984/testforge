@@ -55,9 +55,20 @@ except Exception as exc:
     BATCH_ERROR = redact(exc)
     print(f"BATCH EXECUTOR UNAVAILABLE: {BATCH_ERROR}")
 
-app = FastAPI(title="TestForge Testing Tool")
-from app.access_control import AccessGate, router as access_router
+# Interactive API docs are development tooling: they enumerate every route and
+# load Swagger UI's CSS/JS from a third-party CDN. Off unless TF_ENABLE_API_DOCS
+# says otherwise, and behind the access gate when they are on.
+from app.access_control import AccessGate, api_docs_enabled, router as access_router
+_docs = api_docs_enabled()
+app = FastAPI(title="TestForge Testing Tool",
+              docs_url="/docs" if _docs else None,
+              redoc_url="/redoc" if _docs else None,
+              openapi_url="/openapi.json" if _docs else None)
 app.add_middleware(AccessGate)
+# Added last so it is the outermost layer: the 401/403 responses the gate writes
+# themselves carry the security headers, as do static pages, artefacts and errors.
+from app.security_headers import SecurityHeaders
+app.add_middleware(SecurityHeaders)
 app.include_router(access_router)
 init_db()
 try:

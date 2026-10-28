@@ -77,6 +77,19 @@ Workflow regressions: `UT-FLOW-01` asserts consecutive identical actions collaps
 | UT-SEC-09 | The harness strips publishing credentials | `tests/harness.py` removes `TF_GITHUB_TOKEN`, `GITHUB_TOKEN`, `GH_TOKEN`, `TF_GITHUB_REPO` and `TF_GIT_REMOTE` from the server environment before `subprocess.Popen`, so a developer shell cannot publish from a test run. |
 | UT-SEC-10 | The HTTP surface never echoes the token | `/api/health`, `/api/diagnostics`, `/api/library` and `/api/library/publish/plan` respond without the configured token or an unknown `github_pat_…` quoted by a hostile GitHub error body, while the redaction marker `***` proves the scrub ran. |
 | UT-SEC-11 | Failed-push errors are scrubbed before the banner | `publish_outcome(False, error)` keeps the useful push error but replaces credential-shaped text with `***` in `publish_message` and `publish_error`. |
+| UT-HDR-01 | Baseline security headers on the dashboard page and on an API route | CSP, `X-Content-Type-Options`, `Referrer-Policy`, `X-Frame-Options` and `Permissions-Policy` are present on `/` and `/api/health`; framing is same-origin only, which the dashboard's own fixture previews need. |
+| UT-HDR-02 | The CSP is strict and hashes every inline script | `script-src` has no `unsafe-inline`, no `unsafe-eval` and no wildcard; every inline `<script>` in every shipped page is allowlisted by its own SHA-256, so a strict policy cannot silently disable the dashboard. |
+| UT-HDR-03 | A stricter route policy is preserved | A response that sends its own `default-src 'none'` policy keeps it byte for byte, and the middleware still fills in the headers it left out. |
+| UT-HDR-04 | `no-store` and HTTPS-only headers | `/api/` responses carry `Cache-Control: no-store`; HSTS and `upgrade-insecure-requests` appear only when the request arrived over HTTPS. |
+| UT-HDR-05 | Report-only escape hatch | `TF_CSP_REPORT_ONLY=1` sends the same policy as `Content-Security-Policy-Report-Only`. |
+| UT-HDR-06 | Session cookie attributes over HTTPS | Login sets `__Host-tf_session` with HttpOnly, Secure, SameSite=Strict, Path=/ and no Domain, and the response is `no-store`. |
+| UT-HDR-07 | Session cookie attributes on plain HTTP | The plain name keeps HttpOnly, SameSite=Strict and Path=/; the `__Host-` prefix is not claimed, because it requires Secure. |
+| UT-HDR-08 | Logout revokes the value server-side | A copy of the cookie taken before logout no longer authenticates, so logout is not just a browser-side expiry. |
+| UT-HDR-09 | Cross-site unsafe requests are refused | A foreign `Origin`, a cross-site `Referer` or `Sec-Fetch-Site: cross-site` is 403 on POST/PUT/PATCH/DELETE; same-origin, safe methods and bearer-authenticated requests still work. |
+| UT-HDR-10 | Nothing to protect, nothing refused | With no access token configured the Origin check refuses nothing, because no request is authenticated by a cookie. |
+| UT-HDR-11 | Interactive API docs are off by default | `/docs`, `/redoc` and `/openapi.json` are 404 unless `TF_ENABLE_API_DOCS` enables them. |
+| UT-HDR-12 | Enabled docs pass through the access gate | With `TF_ENABLE_API_DOCS=1` the docs paths are gated exactly like `/api/`. |
+| UT-HDR-13 | No credentials in web storage | No `localStorage`/`sessionStorage` call writes a credential-shaped literal key; `.security-storage-allowlist` records the UI-state exceptions and their reason. |
 | UT-REP-01 | Navigate interpolation | `goto` receives the interpolated URL and waits for `domcontentloaded`. |
 | UT-REP-02 | Click by selector | A unique selector is clicked. Coordinates are not used. |
 | UT-REP-03 | Click fallback | A missing selector falls back to the recorded x,y. |
@@ -318,6 +331,7 @@ These unit/API cases live in `tests/test_imports.py` and are included by the har
 | UT-IMP-21 | Action schema versions fail closed; JS option text is not rewritten accidentally. |
 | UT-IMP-22 | Idle websocket sender is cancelled when the client disconnects. |
 | UT-IMP-23 | Subscriber count/event queues are bounded and retain the final result. |
+| UT-IMP-50 | The harness sample-app fixture is replayable | `library/projects/qa-sample-app` is present with both recordings, four steps each, a Jenkinsfile, and values that resolve to the greeting `demo.html` prints. |
 | UT-IMP-24 | Plain-text step list imports as canonical steps; `{{placeholders}}` are preserved. |
 | UT-IMP-25 | Markdown/pipe table rows import in sheet order with their expected results. |
 | UT-IMP-26 | Market headers (Test Case/Step/Action) import; metadata columns become non-blocking notes. |

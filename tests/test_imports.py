@@ -818,6 +818,53 @@ class PublicationGateTests(unittest.TestCase):
         self.assertEqual(library_store.mark_unverified('imported,unverified'), 'imported,unverified')
         self.assertEqual(library_store.mark_unverified(''), 'unverified')
 
+    def test_UT_IMP_50_harness_sample_app_fixture_is_replayable(self):
+        """The committed harness project must match what the sample app renders.
+
+        `library/README.md` names `qa-sample-app` as the harness project and the
+        library scenarios replay both of its recordings, so the files have to be
+        in the tree. They went missing once, which turned every run of
+        `python -m tests.harness --require-browser` red with "project
+        qa-sample-app not in repository library". This asserts the shape the
+        browser scenarios depend on without needing a browser: four steps each,
+        a page both recordings can reach, and values that interpolate to what
+        `app/static/demo.html` prints.
+        """
+        from app.library_store import playback_url
+        from app.step_runtime import interpolate
+        import os
+
+        project_dir = Path(__file__).resolve().parent.parent / 'library' / 'projects' / 'qa-sample-app'
+        project = json.loads((project_dir / 'project.json').read_text(encoding='utf-8'))
+        self.assertEqual(project['id'], 'qa-sample-app')
+        variables = {item['name']: item['value']
+                     for item in json.loads((project_dir / 'variables.json').read_text(encoding='utf-8'))}
+        self.assertIn('user', variables)
+        # The interpolation scenario asserts the rendered greeting, so the fixture
+        # value has to be the name the scenario expects to see in the evidence.
+        self.assertEqual(variables['user'], 'Ada')
+
+        expectations = {'qa-hello-literal': 'Hello, Quinn', 'qa-hello-variable': 'Hello, Ada'}
+        for recording_id, greeting in expectations.items():
+            folder = project_dir / 'recordings' / recording_id
+            recording = json.loads((folder / 'recording.json').read_text(encoding='utf-8'))
+            self.assertEqual(recording['id'], recording_id)
+            self.assertEqual(recording['project_id'], 'qa-sample-app')
+            self.assertEqual(recording['start_url'], '/demo.html')
+            steps = recording['steps']
+            self.assertEqual([step['action'] for step in steps],
+                             ['navigate', 'fill', 'click', 'assert_text'], recording_id)
+            self.assertTrue((folder / 'resources' / 'Jenkinsfile').is_file(), recording_id)
+            # A repository-relative page is resolved onto this server at replay.
+            with patch.dict(os.environ, {'PORT': '8765'}):
+                self.assertEqual(playback_url(steps[0]['value']), 'http://127.0.0.1:8765/demo.html')
+            typed = interpolate(steps[1]['value'], variables)
+            self.assertTrue(greeting.endswith(typed), (recording_id, typed))
+            self.assertEqual(interpolate(steps[3]['value'], variables), greeting)
+            # demo.html prints "Hello, " + whatever was typed into #name.
+            self.assertIn(f'Hello, " + name', (Path(__file__).resolve().parent.parent
+                                               / 'app' / 'static' / 'demo.html').read_text(encoding='utf-8'))
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

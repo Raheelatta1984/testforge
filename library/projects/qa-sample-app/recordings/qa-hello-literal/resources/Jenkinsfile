@@ -1,0 +1,10 @@
+pipeline {
+  agent any
+  stages {
+    stage('TestForge replay') {
+      steps {
+        sh 'cd library/projects/qa-sample-app/recordings/qa-hello-literal/resources && python -m pip install -r requirements.txt && python -m playwright install chromium && python playwright_test.py'
+      }
+    }
+  }
+}
