@@ -12,4 +12,4 @@
 #
 # See docs/dev-azure-sql-server.md section 5 for the connection string and the
 # pooling arithmetic this service assumes.
-pyodbc==5.2.0
+pyodbc==5.3.0
