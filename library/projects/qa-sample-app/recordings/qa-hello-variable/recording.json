@@ -1,0 +1,61 @@
+{
+  "created_at": "2026-10-10T00:00:01Z",
+  "id": "qa-hello-variable",
+  "name": "Hello variable",
+  "parent_id": null,
+  "project_id": "qa-sample-app",
+  "purpose": "",
+  "start_url": "/demo.html",
+  "status": "active",
+  "tags": "QA",
+  "steps": [
+    {
+      "id": "f8bfbdd1-ce28-4d56-a232-3b55fa33519d",
+      "order": 1,
+      "action": "navigate",
+      "label": "Open /demo.html",
+      "value": "/demo.html",
+      "selector": null
+    },
+    {
+      "id": "a411baf6-c5ec-4079-a26d-a8cdb93295b6",
+      "order": 2,
+      "action": "fill",
+      "label": "Type: {{user}}",
+      "value": "{{user}}",
+      "selector": {
+        "primary": "#name",
+        "tag": "input",
+        "schema_version": 1,
+        "strict": true
+      }
+    },
+    {
+      "id": "ce0105d8-e7ef-4bac-93c3-c3eafa00edfc",
+      "order": 3,
+      "action": "click",
+      "label": "Click Continue",
+      "value": null,
+      "selector": {
+        "primary": "#go",
+        "tag": "button",
+        "text": "Continue",
+        "schema_version": 1,
+        "strict": true
+      }
+    },
+    {
+      "id": "1b72506b-586c-4138-923b-626355d1b6a9",
+      "order": 4,
+      "action": "assert_text",
+      "label": "Assert #out is Hello, {{user}}",
+      "value": "Hello, {{user}}",
+      "selector": {
+        "primary": "#out",
+        "tag": "div",
+        "schema_version": 1,
+        "strict": true
+      }
+    }
+  ]
+}
