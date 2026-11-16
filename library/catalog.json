@@ -104,35 +104,14 @@
             "Jenkinsfile",
             "LICENSE",
             "README.md",
-            "azure-devops.csv",
-            "azure-devops.xlsx",
-            "jira.csv",
-            "jira.xlsx",
-            "package.json",
-            "playwright.config.ts",
-            "playwright_test.js",
-            "playwright_test.py",
-            "recorded_page.js",
-            "recorded_page.py",
-            "recording.feature",
-            "recording.spec.ts",
-            "requirements.txt",
-            "steps.json",
-            "testcomplete.csv",
-            "testcomplete.xlsx",
-            "testforge_runtime.js",
-            "testforge_runtime.py"
+            "azure-devops.csv"
           ],
           "start_url": "https://harrisfarm-uat.sandbox.operations.dynamics.com/?cmp=hfm&mi=FUS_StoreReplenTable",
           "step_count": 0,
           "tags": ""
         }
       ],
-      "variables": [
-        "D365_Login_ID",
-        "D365_login_Pass",
-        "filterfield_gridheader_num"
-      ]
+      "variables": []
     },
     {
       "id": "6e6f2be2-b3ee-4194-9cb9-2a3d21e6008e",
