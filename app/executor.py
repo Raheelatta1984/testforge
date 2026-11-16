@@ -833,7 +833,9 @@ async def execute_run(run_id, on_event, on_frame=None, display_window=True, view
                     except Exception:
                         pass
                     if video_path and os.path.isfile(video_path):
-                        _save(run_id, video_path=video_path)
+                        # playwright >= 1.64 returns a pathlib.Path; String columns
+                        # take str (SQLAlchemy 2.1 no longer coerces for the driver).
+                        _save(run_id, video_path=str(video_path))
                     if trace_path and os.path.isfile(trace_path):
                         _save(run_id, trace_path=trace_path)
         except Exception as exc:
