@@ -1,9 +1,0 @@
-{
-  "id": "qa-sample-app",
-  "name": "TestForge Sample App",
-  "base_url": "/demo.html",
-  "created_at": "2026-10-10T00:00:00Z",
-  "industry_type": "Generic",
-  "entity_id": "qa-sample",
-  "entity_name": "TestForge Sample"
-}
