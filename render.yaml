@@ -34,10 +34,10 @@ projects:
         sync: false
       # --- resource guardrails -------------------------------------------
       # Chromium is the memory ceiling on this plan, so only ever one of them,
-      # shared by recording and execution.
+      # shared by recording and execution. Single-process is NOT set: the
+      # Chrome for Testing build bundled by playwright >=1.64 crashes at
+      # launch with --single-process --no-zygote.
       - key: TF_MAX_BROWSERS
-        value: "1"
-      - key: TF_BROWSER_SINGLE_PROCESS
         value: "1"
       - key: TF_BROWSER_MODE
         value: bundled
