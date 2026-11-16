@@ -97,8 +97,11 @@ def launch_kwargs() -> dict:
         "--disable-blink-features=AutomationControlled",
         "--disable-http2",
     ]
-    # Single process reduces memory on free tier (configurable)
-    if os.environ.get("TF_BROWSER_SINGLE_PROCESS", "1") == "1":
+    # Single process used to reduce memory on free tier. Chrome for Testing
+    # >=155 (the browser bundled by playwright >=1.64) crashes at launch when
+    # passed --single-process --no-zygote, so the flags are now opt-in via
+    # TF_BROWSER_SINGLE_PROCESS=1 for older/stand-in Chromium builds only.
+    if os.environ.get("TF_BROWSER_SINGLE_PROCESS", "0") == "1":
         args.extend(["--single-process", "--no-zygote"])
     # A Chromium built for another distribution can need one extra flag that this
     # project does not set for the bundled browser (for example

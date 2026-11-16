@@ -23,6 +23,23 @@ def _env_int(name, default):
         return default
 
 
+def _ensure_psycopg2(url):
+    """Pin the psycopg2 driver on Postgres URLs.
+
+    SQLAlchemy 2.1 made psycopg (v3) the default driver for bare
+    ``postgresql://`` URLs, but this deployment ships psycopg2-binary, so an
+    unpinned URL fails at connect time with ``No module named 'psycopg'``.
+    An already driver-qualified scheme (``postgresql+psycopg2://`` or
+    anything else) is left untouched.
+    """
+    text_url = str(url)
+    if text_url.startswith("postgres://"):
+        text_url = "postgresql://" + text_url[len("postgres://"):]
+    if text_url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + text_url[len("postgresql://"):]
+    return text_url
+
+
 def is_pgbouncer_url(url):
     """True when ``url`` points at PgBouncer rather than Postgres directly.
 
@@ -62,6 +79,7 @@ def create_postgres_engine(url, replica=False):
     statements and server-side cursors stay off (psycopg2 uses neither by
     default) and every checkout is pre-pinged.
     """
+    url = _ensure_psycopg2(url)
     if is_pgbouncer_url(url):
         return create_engine(
             url,

@@ -568,7 +568,7 @@ grep -rhoE '"TF_[A-Z0-9_]+"' app/*.py | tr -d '"' | sort -u | wc -l    # 62
 | --- | --- | --- |
 | `TF_MAX_BROWSERS` | `1` | `_int`-clamped, `max(1,…)` — **you cannot set 0** (§7.5) |
 | `TF_BROWSER_MODE` | `auto` (`bundled` in image) | bundled vs system vs MCP |
-| `TF_BROWSER_SINGLE_PROCESS` | `1` | one process, no zygote — required on a 512 MB instance |
+| `TF_BROWSER_SINGLE_PROCESS` | `0` | one process, no zygote. Chrome for Testing ≥155 (bundled since playwright 1.64) crashes at launch with these flags; only set `1` with a stand-in Chromium ≤ v154 via `TF_CHROMIUM_PATH`. On 512 MB, stay with `0` and keep `TF_MAX_BROWSERS=1`, a small viewport and `TF_BATCH_MAX_RSS_MB` |
 | `TF_CHROMIUM_PATH` | unset | explicit binary (also used by the harness, before the bundled one) |
 | `TF_CHROMIUM_LIBS` | unset | extra `LD_LIBRARY_PATH` entries for a non-Distroless host |
 | `TF_CHROMIUM_ARGS` | unset | extra Chromium flags appended to the launch arguments, for a browser built for another distribution (for example `--ozone-platform=headless`) |
@@ -847,7 +847,7 @@ Two facts that matter in CI:
   `TF_GITHUB_REPO`, `TF_GITHUB_BRANCH` and `TF_GIT_REMOTE` from the server env it starts. Safe by
   design; don't "fix" it to test publishing end-to-end against the real repo.
 * Browser resolution order is `TF_CHROMIUM_PATH` → Playwright's bundled browser → `/tmp/cr/chromium`.
-* `TF_BROWSER_SINGLE_PROCESS=0` disables `--single-process --no-zygote` when a custom Chromium build cannot run single-process; `TF_CHROMIUM_ARGS` adds any further flag the binary needs.
+* `TF_BROWSER_SINGLE_PROCESS=1` enables `--single-process --no-zygote` for older/stand-in Chromium builds (`TF_CHROMIUM_PATH`); the Chrome for Testing build bundled since playwright 1.64 crashes at launch with these flags, so `0` is the default. `TF_CHROMIUM_ARGS` adds any further flag the binary needs.
   In a container that has the bundled one, do nothing. If you see skips, run `--require-browser` to
   turn them into a loud failure.
 * `python -m unittest tests.test_unit -v` is the fast loop with no browser at all (the batch executor
@@ -870,7 +870,7 @@ Two facts that matter in CI:
 
 | Role | Resources | Settings |
 | --- | --- | --- |
-| Demo (Render free) | 0.1 CPU / 512 MB | `TF_BROWSER_SINGLE_PROCESS=1`, viewport 1024×640, quality 30, `TF_BATCH_MAX_RSS_MB=420`. Do not raise any of these. |
+| Demo (Render free) | 0.1 CPU / 512 MB | `TF_BROWSER_SINGLE_PROCESS=0` (default; Chrome for Testing ≥155 crashes on the flags), viewport 1024×640, quality 30, `TF_BATCH_MAX_RSS_MB=420`. Do not raise any of these. |
 | Small team | 2 CPU / 2 GB | viewport 1280×720, quality 40, `TF_MAX_LIVE_FRAME_RUNS=6` |
 | Real automation | 4 CPU / 8 GB | `TF_BATCH_MAX_RSS_MB` up to ~3000, `TF_BATCH_MAX_RECORDINGS` up, Postgres (not SQLite) |
 
@@ -1148,7 +1148,7 @@ constraints instead of rediscovering them (this is the highest-value single arti
 > 3. Report the ranking of constraints (Chromium memory, the single browser slot, `TF_MAX_*` buffers,
 >    DB pool, disk, and the "one batch at a time" queue design) with the number that justifies it.
 > 4. For a 2 GB and an 8 GB instance, give the exact env deltas — and state which caps must NOT be
->    raised (keep `TF_MAX_BROWSERS=1` and `TF_BROWSER_SINGLE_PROCESS=1` on 512 MB) and what becomes
+>    raised (keep `TF_MAX_BROWSERS=1` and `TF_BROWSER_SINGLE_PROCESS=0` on 512 MB; the `--single-process` flags are unsafe with Chrome ≥155) and what becomes
 >    safe only with a second machine.
 > 5. Say plainly what cannot be solved by sizing (single-worker throughput) and what the smallest
 >    architectural change is if we need more.

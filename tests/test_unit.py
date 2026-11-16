@@ -1136,7 +1136,20 @@ class QAAgentHubTests(unittest.TestCase):
         from app.qa_agents import registry
 
         self.assertEqual([a["id"] for a in registry.catalogue()["agents"]], list(self.AGENT_IDS))
-        paths = {getattr(route, "path", "") for route in app.routes}
+        # fastapi >= 0.162 no longer flattens include_router() into app.routes;
+        # it appends a lazy _IncludedRouter wrapper that references the original
+        # router. Walk both shapes so this stays honest across versions.
+        def _paths(routes):
+            found = set()
+            for route in routes:
+                path = getattr(route, "path", None)
+                if path is not None:
+                    found.add(path)
+                original = getattr(route, "original_router", None)
+                if original is not None:
+                    found |= _paths(getattr(original, "routes", []))
+            return found
+        paths = _paths(app.routes)
         for path in ("/api/agents", "/api/agents/{agent_id}/sample",
                      "/api/agents/{agent_id}/run", "/api/agents/{agent_id}/from-source"):
             self.assertIn(path, paths)

@@ -317,6 +317,15 @@ def main(argv=None):
     update_index(logs_dir, run_name, summary)
     log(f"harness: {('PASS' if summary['ok'] else 'FAIL')} {summary['passed']} passed, {summary['failed']} failed, {summary['skipped']} skipped")
     log(f"harness: report {run_dir / 'results.md'}")
+    # Surface failures as workflow annotations so they are readable via the
+    # checks API without downloading the logs artifact.
+    for row in rows:
+        if row.get("status") != "failed":
+            continue
+        message = str(row.get("error") or "failed")[:400]
+        message = message.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        title = str(row.get("id") or "HARNESS")
+        print(f"::error title={title}::{message}", flush=True)
     log.close()
     return 0 if summary["ok"] else 1
 
