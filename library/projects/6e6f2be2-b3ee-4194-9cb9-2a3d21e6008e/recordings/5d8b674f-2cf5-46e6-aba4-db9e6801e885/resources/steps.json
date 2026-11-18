@@ -18,10 +18,10 @@
     "label": "Click DELIVERY",
     "selector": {
       "primary": "#store-picker-find-flow > div:nth-of-type(1) > button:nth-of-type(3)",
-      "tag": "button",
-      "text": "DELIVERY",
       "x": 416,
-      "y": 509
+      "y": 509,
+      "text": "DELIVERY",
+      "tag": "button"
     },
     "started_at": null,
     "finished_at": null,
@@ -36,10 +36,10 @@
     "label": "Click e.g. 2066",
     "selector": {
       "primary": "input[name=\"postcode\"]",
-      "tag": "input",
-      "text": "e.g. 2066",
       "x": 460,
-      "y": 472
+      "y": 472,
+      "text": "e.g. 2066",
+      "tag": "input"
     },
     "started_at": null,
     "finished_at": null,
@@ -68,10 +68,10 @@
     "label": "Click CHECK DELIVERY",
     "selector": {
       "primary": "#store-picker-find",
-      "tag": "button",
-      "text": "CHECK DELIVERY",
       "x": 675,
-      "y": 464
+      "y": 464,
+      "text": "CHECK DELIVERY",
+      "tag": "button"
     },
     "started_at": null,
     "finished_at": null,
@@ -86,10 +86,10 @@
     "label": "Click CONTINUE",
     "selector": {
       "primary": "#store-picker-select-slot",
-      "tag": "button",
-      "text": "CONTINUE",
       "x": 385,
-      "y": 535
+      "y": 535,
+      "text": "CONTINUE",
+      "tag": "button"
     },
     "started_at": null,
     "finished_at": null,
@@ -104,10 +104,10 @@
     "label": "Click 29 Oct",
     "selector": {
       "primary": "#cart-slot-days > button:nth-of-type(2) > span:nth-of-type(2)",
-      "tag": "span",
-      "text": "29 Oct",
       "x": 460,
-      "y": 205
+      "y": 205,
+      "text": "29 Oct",
+      "tag": "span"
     },
     "started_at": null,
     "finished_at": null,
@@ -122,10 +122,10 @@
     "label": "Click Afternoon",
     "selector": {
       "primary": "#cart-slot-periods > button:nth-of-type(2)",
-      "tag": "button",
-      "text": "Afternoon",
       "x": 484,
-      "y": 255
+      "y": 255,
+      "text": "Afternoon",
+      "tag": "button"
     },
     "started_at": null,
     "finished_at": null,
@@ -140,10 +140,10 @@
     "label": "Click 12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P",
     "selector": {
       "primary": "#cart-slot-slots",
-      "tag": "div",
-      "text": "12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P",
       "x": 437,
-      "y": 409
+      "y": 409,
+      "text": "12:00 PM-1:00 PM\n12:30 PM-1:30 PM\n1:00 PM-2:00 PM\n1:30 PM-2:30 PM\n2:00 PM-3:00 P",
+      "tag": "div"
     },
     "started_at": null,
     "finished_at": null,
@@ -158,10 +158,10 @@
     "label": "Click 12:30 PM-1:30 PM",
     "selector": {
       "primary": "#cart-slot-slots > button:nth-of-type(2) > span:nth-of-type(1)",
-      "tag": "span",
-      "text": "12:30 PM-1:30 PM",
       "x": 453,
-      "y": 381
+      "y": 381,
+      "text": "12:30 PM-1:30 PM",
+      "tag": "span"
     },
     "started_at": null,
     "finished_at": null,
@@ -176,10 +176,10 @@
     "label": "Click RESERVE TIME",
     "selector": {
       "primary": "#cart-slot-reserve",
-      "tag": "button",
-      "text": "RESERVE TIME",
       "x": 623,
-      "y": 579
+      "y": 579,
+      "text": "RESERVE TIME",
+      "tag": "button"
     },
     "started_at": null,
     "finished_at": null,
@@ -193,10 +193,10 @@
     "label": "Click Shop promotion item 3",
     "selector": {
       "primary": "a[aria-label=\"Shop promotion item 3\"]",
-      "tag": "a",
-      "text": "Shop promotion item 3",
       "x": 678,
-      "y": 425
+      "y": 425,
+      "text": "Shop promotion item 3",
+      "tag": "a"
     },
     "started_at": null,
     "finished_at": null,
@@ -210,10 +210,10 @@
     "label": "Click 654,349",
     "selector": {
       "primary": "section:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(2) > product-info:nth-of-type(1) > div:nth-of-type(2) > div:nth-of-type(2)",
-      "tag": "div",
-      "text": "",
       "x": 654,
-      "y": 349
+      "y": 349,
+      "text": "",
+      "tag": "div"
     },
     "started_at": null,
     "finished_at": null,
@@ -228,10 +228,10 @@
     "label": "Click 649,394",
     "selector": {
       "primary": null,
-      "tag": null,
-      "text": null,
       "x": 649,
-      "y": 394
+      "y": 394,
+      "text": null,
+      "tag": null
     },
     "started_at": null,
     "finished_at": null,
@@ -246,10 +246,10 @@
     "label": "Click 107,80",
     "selector": {
       "primary": "header:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > a:nth-of-type(1) > img:nth-of-type(1)",
-      "tag": "img",
-      "text": "",
       "x": 107,
-      "y": 80
+      "y": 80,
+      "text": "",
+      "tag": "img"
     },
     "started_at": null,
     "finished_at": null,
@@ -263,10 +263,10 @@
     "label": "Click 97,48",
     "selector": {
       "primary": "div:nth-of-type(1) > div:nth-of-type(1) > div:nth-of-type(1) > h1:nth-of-type(1) > a:nth-of-type(1) > img:nth-of-type(1)",
-      "tag": "img",
-      "text": "",
       "x": 97,
-      "y": 48
+      "y": 48,
+      "text": "",
+      "tag": "img"
     },
     "started_at": null,
     "finished_at": null,
@@ -280,10 +280,10 @@
     "label": "Click 934,74",
     "selector": {
       "primary": null,
-      "tag": null,
-      "text": null,
       "x": 934,
-      "y": 74
+      "y": 74,
+      "text": null,
+      "tag": null
     },
     "started_at": null,
     "finished_at": null,
@@ -297,10 +297,10 @@
     "label": "Click Shop promotion item 3",
     "selector": {
       "primary": "a[aria-label=\"Shop promotion item 3\"]",
-      "tag": "a",
-      "text": "Shop promotion item 3",
       "x": 698,
-      "y": 404
+      "y": 404,
+      "text": "Shop promotion item 3",
+      "tag": "a"
     },
     "started_at": null,
     "finished_at": null,
