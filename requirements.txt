@@ -2,14 +2,14 @@
 #
 # Kept deliberately short: this runs on a 512MB instance and every extra package
 # is image size, install time and import cost at boot.
-fastapi==0.162.0
+fastapi==0.165.0
 uvicorn==0.54.0
-sqlalchemy==2.1.6
+sqlalchemy==2.1.9
 # Only imported by SQLAlchemy when DATABASE_URL is a postgres URL, but the hosted
 # deployment uses Neon, so it has to be present.
 psycopg2-binary==2.9.13
-playwright==1.64.1
-python-multipart==0.0.33
+playwright==1.65.2
+python-multipart==0.0.34
 # uvicorn's websocket implementation; the recorder and run streams need it.
 websockets==17.4
 openpyxl==3.1.5
@@ -25,8 +25,8 @@ defusedxml==0.7.1
 # Extra upload formats: legacy .xls sheets, Word .docx text, PDF text layers and
 # YAML step lists. Small, pure-python, and unused unless such a file is uploaded.
 xlrd==2.0.2
-PyYAML==6.0.3
-pypdf==6.21.4
+PyYAML==6.0.4
+pypdf==7.1.1
 # Authenticated encryption and local PDF generation; no hosted services.
 cryptography==50.0.2
 reportlab==5.1.0
